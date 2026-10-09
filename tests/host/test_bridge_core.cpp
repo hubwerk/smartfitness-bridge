@@ -333,6 +333,8 @@ void testReattachmentAndCallbackCleanup() {
 
 }  // namespace
 
+void runFtmsTests();
+
 int main() {
     testCapabilitiesAndSamples();
     testFtmsRolesAreIndependent();
@@ -343,4 +345,5 @@ int main() {
     testConsoleAndConfig();
     testAuthoritativeAdapterState();
     testReattachmentAndCallbackCleanup();
+    runFtmsTests();
 }

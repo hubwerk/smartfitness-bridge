@@ -41,6 +41,7 @@ WebUi::WebUi(BridgeCore& bridge, ConfigStore& config, SimulatedDeviceAdapter& ad
 void WebUi::applyConfig() {
     adapter_.setTrainer(config_.config().simulatedTrainer);
     ant_.setEnabled(config_.config().antEnabled);
+    ftms_.setDeviceName(config_.config().ftmsName);
     ftms_.setEnabled(config_.config().ftms.output);
     bridge_.loop();
 }
@@ -57,10 +58,12 @@ std::string WebUi::status() const {
     const auto& telemetry = bridge_.telemetry();
     std::snprintf(buffer, sizeof(buffer),
                   "state=%s speed=%.1fkm/h cadence=%.1frpm power=%.1fW hr=%.1fbpm "
-                  "target=%s ANT=%d FTMS(input=%d,output=%d)",
+                  "target=%s ANT=%d FTMS(input=%d,output=%d) "
+                  "ftms-out(advertising=%d,client=%d,control=%d)",
                   stateName(bridge_.state()), telemetry.speed, telemetry.cadence,
                   telemetry.power, telemetry.heartRate, bridge_.hasControlTarget() ? "set" : "none",
-                  config_.config().antEnabled, config_.config().ftms.input, config_.config().ftms.output);
+                  config_.config().antEnabled, config_.config().ftms.input, config_.config().ftms.output,
+                  ftms_.advertising(), ftms_.clientConnected(), ftms_.controlGranted());
     return buffer;
 }
 
@@ -69,7 +72,8 @@ std::string WebUi::handleCommand(const std::string& command) {
     if (command == "help")
         return "status | scan (simulation) | disconnect | trainer on/off | "
                "power W | speed km/h | incline % | resistance % | "
-               "ant on/off | ftms-input on/off | ftms-output on/off | save | load | unpair";
+               "ant on/off | ftms-input on/off | ftms-output on/off | ftms-name <name> | "
+               "save | load | unpair";
     if (command == "status") return status();
     if (command == "scan") {
         if (!bridge_.scanAndConnect()) return "connection failed";
@@ -96,6 +100,15 @@ std::string WebUi::handleCommand(const std::string& command) {
     if (separator == std::string::npos) return "unknown command; type help";
     const auto key = command.substr(0, separator);
     const auto value = command.substr(separator + 1);
+    if (key == "ftms-name") {
+        if (value.empty() || value.size() > FtmsOutput::kMaxNameLength) return "expected 1-20 characters";
+        for (const char character : value) {
+            if (character < 0x20 || character > 0x7E) return "expected printable ASCII";
+        }
+        config_.config().ftmsName = value;
+        applyConfig();
+        return "ftms name: " + ftms_.deviceName();
+    }
     bool* setting = nullptr;
     if (key == "trainer") setting = &config_.config().simulatedTrainer;
     else if (key == "ant") setting = &config_.config().antEnabled;

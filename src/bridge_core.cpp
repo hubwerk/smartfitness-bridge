@@ -173,11 +173,14 @@ bool BridgeCore::canControl() const {
 
 bool BridgeCore::isValidValue(const ControlRequest& request) {
     if (!std::isfinite(request.value)) return false;
+    const auto within = [&request](const ControlBounds& bounds) {
+        return request.value >= bounds.minimum && request.value <= bounds.maximum;
+    };
     switch (request.control) {
-        case Control::Speed: return request.value >= 0 && request.value <= 100;
-        case Control::Incline: return request.value >= -20 && request.value <= 25;
-        case Control::Resistance: return request.value >= 0 && request.value <= 100;
-        case Control::Power: return request.value >= 0 && request.value <= 2000;
+        case Control::Speed: return within(kSpeedBounds);
+        case Control::Incline: return within(kInclineBounds);
+        case Control::Resistance: return within(kResistanceBounds);
+        case Control::Power: return within(kPowerBounds);
         default: return false;
     }
 }
@@ -204,6 +207,7 @@ void BridgeCore::publish() {
         if (!output) continue;
         if (!hasTarget_) output->clearControlTarget();
         if (!output->enabled()) continue;
+        output->publishTrainerState(trainer_);
         output->publishTelemetry(telemetry_);
         if (hasTarget_) output->publishControlTarget(target_);
     }
