@@ -33,7 +33,8 @@ void MemoryConfigBackend::setRecord(const std::vector<std::uint8_t>& data) {
 bool NvsConfigBackend::read(std::vector<std::uint8_t>& data) {
     data.clear();
     Preferences preferences;
-    if (!preferences.begin(kNamespace, false)) return false;
+    // Read-only so loading never writes flash; fails (no record) until the namespace exists.
+    if (!preferences.begin(kNamespace, true)) return false;
     if (!preferences.isKey(kKey)) {
         preferences.end();
         return false;

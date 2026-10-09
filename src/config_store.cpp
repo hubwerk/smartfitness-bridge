@@ -11,6 +11,8 @@ namespace {
 //   sourceValid sourceAddressType sourceAddress[6] crc32 (little endian)
 constexpr std::uint8_t kMagic0 = 'S';
 constexpr std::uint8_t kMagic1 = 'F';
+// Header (3) + booleans (4) + two empty name lengths (2) + paired source (8) + CRC (4).
+constexpr std::size_t kMinRecordSize = 21;
 
 std::uint32_t crc32(const std::uint8_t* data, std::size_t length) {
     std::uint32_t crc = 0xFFFFFFFFU;
@@ -182,7 +184,7 @@ std::vector<std::uint8_t> ConfigStore::serialize(const BridgeConfig& config) {
 }
 
 bool ConfigStore::deserialize(const std::vector<std::uint8_t>& data, BridgeConfig& config) {
-    if (data.size() < 7 || data.size() > ConfigBackend::kMaxRecordSize) return false;
+    if (data.size() < kMinRecordSize || data.size() > ConfigBackend::kMaxRecordSize) return false;
     const std::size_t end = data.size() - 4;
     std::uint32_t stored = 0;
     for (int index = 3; index >= 0; --index) stored = (stored << 8) | data[end + static_cast<std::size_t>(index)];
