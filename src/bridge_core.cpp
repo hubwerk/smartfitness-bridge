@@ -1,4 +1,4 @@
-#include "bridge_core.h"
+#include "bridge/bridge_core.hpp"
 #include "bt_device_adapter.h"
 #include "ant_output.h"
 #include "ftms_output.h"
