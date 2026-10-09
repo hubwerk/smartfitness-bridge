@@ -35,6 +35,10 @@ void testCapabilitiesAndSamples() {
     assert(!state.capabilities.supports(Control::Resistance));
     assert(state.sample(Metric::Power).valid);
     assert(state.sample(Metric::Power).value == 175.0F);
+    state.capabilities.setMetric(static_cast<Metric>(255), true);
+    state.setSample(static_cast<Metric>(255), 99.0F);
+    assert(!state.capabilities.supports(static_cast<Metric>(255)));
+    assert(!state.sample(static_cast<Metric>(255)).valid);
 }
 
 void testFtmsRolesAreIndependent() {

@@ -10,31 +10,58 @@ constexpr std::uint32_t bitFor(std::uint8_t value) {
     return std::uint32_t{1} << value;
 }
 
+constexpr bool validMetric(Metric metric) {
+    return static_cast<std::uint8_t>(metric) < static_cast<std::uint8_t>(Metric::Count);
+}
+
+constexpr bool validControl(Control control) {
+    return static_cast<std::uint8_t>(control) < static_cast<std::uint8_t>(Control::Count);
+}
+
 }  // namespace
 
 void TrainerCapabilities::setMetric(Metric metric, bool supported) {
+    if (!validMetric(metric)) {
+        return;
+    }
     const auto bit = bitFor(static_cast<std::uint8_t>(metric));
     metrics = supported ? metrics | bit : metrics & ~bit;
 }
 
 void TrainerCapabilities::setControl(Control control, bool supported) {
+    if (!validControl(control)) {
+        return;
+    }
     const auto bit = bitFor(static_cast<std::uint8_t>(control));
     controls = supported ? controls | bit : controls & ~bit;
 }
 
 bool TrainerCapabilities::supports(Metric metric) const {
+    if (!validMetric(metric)) {
+        return false;
+    }
     return (metrics & bitFor(static_cast<std::uint8_t>(metric))) != 0;
 }
 
 bool TrainerCapabilities::supports(Control control) const {
+    if (!validControl(control)) {
+        return false;
+    }
     return (controls & bitFor(static_cast<std::uint8_t>(control))) != 0;
 }
 
 const MetricSample& TrainerState::sample(Metric metric) const {
+    static const MetricSample invalidSample{};
+    if (!validMetric(metric)) {
+        return invalidSample;
+    }
     return telemetry[static_cast<std::size_t>(metric)];
 }
 
 void TrainerState::setSample(Metric metric, float value, bool valid) {
+    if (!validMetric(metric)) {
+        return;
+    }
     telemetry[static_cast<std::size_t>(metric)] = {value, valid};
 }
 
