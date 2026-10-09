@@ -83,6 +83,7 @@ void testDisconnectedAndMissingAdapter() {
     assert(bridge.routeControl({Control::Speed, 2.0F}) == ControlResult::Disconnected);
 
     state.connected = true;
+    state.capabilities.setControl(Control::Speed, false);
     bridge.setTrainerState(state);
     assert(bridge.routeControl({Control::Speed, 2.0F}) == ControlResult::Unsupported);
 
