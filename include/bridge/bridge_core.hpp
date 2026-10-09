@@ -2,6 +2,11 @@
 
 #include <array>
 #include <cstdint>
+#include "bridge_types.h"
+
+class BtDeviceAdapter;
+class AntOutput;
+class FtmsOutput;
 
 namespace smartfitness {
 
@@ -19,6 +24,7 @@ enum class Control : std::uint8_t {
     Speed,
     Incline,
     Resistance,
+    Power,
     Count
 };
 
@@ -39,6 +45,7 @@ struct TrainerCapabilities {
 
 struct TrainerState {
     bool connected = false;
+    bool trainerDetected = false;
     TrainerCapabilities capabilities;
     std::array<MetricSample, static_cast<std::size_t>(Metric::Count)> telemetry{};
 
@@ -54,10 +61,18 @@ struct ControlRequest {
 enum class ControlResult : std::uint8_t {
     Applied,
     Disconnected,
+    NotTrainer,
     Unsupported,
     InvalidValue,
     NoAdapter,
     AdapterRejected
+};
+
+enum class RuntimeState : std::uint8_t {
+    Disconnected,
+    Connected,
+    Trainer,
+    ControlReady
 };
 
 class TrainerControlAdapter {
@@ -69,17 +84,42 @@ public:
 class BridgeCore {
 public:
     explicit BridgeCore(TrainerControlAdapter* adapter = nullptr);
+    ~BridgeCore();
+    BridgeCore(const BridgeCore&) = delete;
+    BridgeCore& operator=(const BridgeCore&) = delete;
 
     void setAdapter(TrainerControlAdapter* adapter);
+    void attach(BtDeviceAdapter& adapter, AntOutput& ant, FtmsOutput& ftms);
+    void begin();
+    void loop();
+    bool scanAndConnect();
+    void disconnect();
     void setTrainerState(const TrainerState& state);
     const TrainerState& trainerState() const;
-    ControlResult routeControl(const ControlRequest& request) const;
+    ControlResult routeControl(const ControlRequest& request);
+    void setTelemetry(const FitnessTelemetry& telemetry);
+    const FitnessTelemetry& telemetry() const;
+    const ControlRequest& controlTarget() const;
+    bool hasControlTarget() const;
+    bool canControl() const;
+    RuntimeState state() const;
 
 private:
     static bool isValidValue(const ControlRequest& request);
+    void refreshDeviceState();
+    void publish();
 
     TrainerControlAdapter* adapter_;
     TrainerState trainer_;
+    BtDeviceAdapter* device_ = nullptr;
+    AntOutput* ant_ = nullptr;
+    FtmsOutput* ftms_ = nullptr;
+    FitnessTelemetry telemetry_;
+    ControlRequest target_{Control::Power, 0.0F};
+    bool hasTarget_ = false;
+    bool dirty_ = true;
+    bool antEnabled_ = false;
+    bool ftmsEnabled_ = false;
 };
 
 }  // namespace smartfitness

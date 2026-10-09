@@ -1,6 +1,13 @@
 #pragma once
-#include <Arduino.h>
-#include "bridge_types.h"
+#include <string>
+#include "bridge/ftms_roles.hpp"
+
+struct BridgeConfig {
+    std::string pairedDeviceName;
+    bool antEnabled = true;
+    smartfitness::FtmsRoles ftms{false, true};
+    bool simulatedTrainer = true;
+};
 
 class ConfigStore {
 public:
@@ -9,9 +16,13 @@ public:
     void save();
 
     bool hasPairedDevice() const;
-    String pairedDeviceName() const;
+    const std::string& pairedDeviceName() const;
+    BridgeConfig& config();
+    const BridgeConfig& config() const;
+    void pairDevice(const std::string& name);
+    void clearPairing();
 
 private:
-    String pairedDeviceName_;
-    bool hasPairedDevice_ = false;
+    BridgeConfig config_;
+    BridgeConfig saved_;
 };

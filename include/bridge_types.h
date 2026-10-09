@@ -1,5 +1,5 @@
 #pragma once
-#include <Arduino.h>
+#include <string>
 
 struct FitnessTelemetry {
     float speed = 0.0f;
@@ -11,13 +11,6 @@ struct FitnessTelemetry {
     float targetPower = 0.0f;
     bool trainerDetected = false;
     bool connected = false;
-    String deviceName;
-    String deviceType;
-};
-
-struct ControlCommand {
-    float targetPower = 0.0f;
-    float targetIncline = 0.0f;
-    float targetResistance = 0.0f;
-    bool requestTrainerMode = false;
+    std::string deviceName;
+    std::string deviceType;
 };

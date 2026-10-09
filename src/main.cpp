@@ -4,12 +4,14 @@
 #include "ftms_output.h"
 #include "web_ui.h"
 #include "config_store.h"
+#include "bt_device_adapter.h"
 
-BridgeCore bridge;
+SimulatedDeviceAdapter deviceAdapter;
 AntOutput antOutput;
 FtmsOutput ftmsOutput;
-WebUi webUi;
 ConfigStore configStore;
+BridgeCore bridge;
+WebUi webUi(bridge, configStore, deviceAdapter, antOutput, ftmsOutput);
 
 void setup() {
     Serial.begin(115200);
@@ -17,25 +19,15 @@ void setup() {
     Serial.println("SmartFitness Bridge starting...");
 
     configStore.begin();
-    configStore.load();
 
+    bridge.attach(deviceAdapter, antOutput, ftmsOutput);
     bridge.begin();
-    antOutput.begin();
-    ftmsOutput.begin();
     webUi.begin();
-
-    FitnessTelemetry telemetry;
-    telemetry.deviceName = "placeholder";
-    telemetry.deviceType = "ftms";
-    telemetry.connected = true;
-    telemetry.trainerDetected = false;
-    bridge.setTelemetry(telemetry);
+    Serial.println("[BridgeCore] disconnected; use scan to connect the simulation");
 }
 
 void loop() {
     bridge.loop();
-    antOutput.loop();
-    ftmsOutput.loop();
     webUi.loop();
     delay(10);
 }
