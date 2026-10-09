@@ -2,8 +2,11 @@
 #include "bt_device_adapter.h"
 #include "ant_output.h"
 #include "ftms_output.h"
+#include "ble_input_adapter.h"
+#include "protocols/registry.hpp"
+#include <ArduinoJson.h>
+#include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #ifdef ARDUINO
 #include <Arduino.h>
 #endif
@@ -20,19 +23,6 @@ const char* stateName(RuntimeState state) {
     return "unknown";
 }
 
-const char* resultName(ControlResult result) {
-    switch (result) {
-        case ControlResult::Applied: return "applied";
-        case ControlResult::Disconnected: return "disconnected";
-        case ControlResult::NotTrainer: return "not a trainer";
-        case ControlResult::Unsupported: return "unsupported control";
-        case ControlResult::InvalidValue: return "invalid value";
-        case ControlResult::NoAdapter: return "no adapter";
-        case ControlResult::AdapterRejected: return "adapter rejected";
-    }
-    return "unknown";
-}
-
 const char* loadResultName(ConfigLoadResult result) {
     switch (result) {
         case ConfigLoadResult::Loaded: return "configuration loaded";
@@ -41,24 +31,75 @@ const char* loadResultName(ConfigLoadResult result) {
     }
     return "unknown";
 }
+
+CommandResult ok(const std::string& message) { return {true, message}; }
+CommandResult fail(const std::string& message) { return {false, message}; }
+
+PairedSourceDevice toSource(const ble::BleAddress& address) {
+    PairedSourceDevice source;
+    source.valid = true;
+    source.addressType = address.type;
+    source.address = address.bytes;
+    return source;
 }
+
+std::string serialized(const JsonDocument& document) {
+    std::string out;
+    serializeJson(document, out);
+    return out;
+}
+
+void addMetric(JsonObject object, const char* key, const TrainerState& state, Metric metric) {
+    const auto& sample = state.sample(metric);
+    if (sample.valid) object[key] = std::round(static_cast<double>(sample.value) * 10.0) / 10.0;
+    else object[key] = nullptr;
+}
+}  // namespace
 
 WebUi::WebUi(BridgeCore& bridge, ConfigStore& config, SimulatedDeviceAdapter& adapter,
              AntOutput& ant, FtmsOutput& ftms)
     : bridge_(bridge), config_(config), adapter_(adapter), ant_(ant), ftms_(ftms) {}
 
+void WebUi::attachBleInput(InputSelector& selector, BleInputAdapter& ble) {
+    selector_ = &selector;
+    ble_ = &ble;
+}
+
+bool WebUi::bleSelected() const {
+    return selector_ && selector_->source() == InputSelector::Source::Ble;
+}
+
 void WebUi::applyConfig() {
-    adapter_.setTrainer(config_.config().simulatedTrainer);
-    ant_.setEnabled(config_.config().antEnabled);
-    ftms_.setDeviceName(config_.config().ftmsName);
-    ftms_.setEnabled(config_.config().ftms.output);
+    const auto& config = config_.config();
+    adapter_.setTrainer(config.simulatedTrainer);
+    ant_.setEnabled(config.antEnabled);
+    ftms_.setDeviceName(config.ftmsName);
+    ftms_.setEnabled(config.ftms.output);
+    if (ble_ && selector_) {
+        const bool paired = config.pairedSource.valid && !config.pairedAdapterId.empty();
+        if (paired) {
+            PairedDevice device;
+            device.valid = true;
+            device.address.bytes = config.pairedSource.address;
+            device.address.type = config.pairedSource.addressType;
+            device.adapterId = config.pairedAdapterId;
+            device.name = config.pairedDeviceName;
+            ble_->setPairedDevice(device);
+        } else if (ble_->pairedDevice().valid) {
+            ble_->clearPairedDevice();
+        }
+        selector_->select(config.ftms.input && paired ? InputSelector::Source::Ble
+                                                      : InputSelector::Source::Simulation);
+    }
     bridge_.loop();
 }
 
 void WebUi::begin() {
     applyConfig();
+    // Auto-connect the paired BLE device on boot.
+    if (bleSelected()) bridge_.scanAndConnect();
 #ifdef ARDUINO
-    Serial.println("[WebUi] Serial console; simulation only. Type help.");
+    Serial.println(ble_ ? "[WebUi] Serial console. Type help." : "[WebUi] Serial console; simulation only. Type help.");
 #endif
 }
 
@@ -73,85 +114,303 @@ std::string WebUi::status() const {
                   telemetry.power, telemetry.heartRate, bridge_.hasControlTarget() ? "set" : "none",
                   config_.config().antEnabled, config_.config().ftms.input, config_.config().ftms.output,
                   ftms_.advertising(), ftms_.clientConnected(), ftms_.controlGranted(), config_.hasUnsavedChanges());
-    return buffer;
+    std::string text = buffer;
+    if (ble_) {
+        text += std::string(" input=") + (bleSelected() ? "ble" : "sim") +
+                " link=" + BleInputAdapter::linkStateName(ble_->linkState());
+        if (ble_->pairedDevice().valid)
+            text += " paired=" + ble_->pairedDevice().address.toString() + "/" + ble_->pairedDevice().adapterId;
+        if (ble_->stale()) text += " stale=1";
+        if (!ble_->lastError().empty()) text += " error=\"" + ble_->lastError() + "\"";
+    }
+    return text;
 }
 
-std::string WebUi::handleCommand(const std::string& command) {
-    if (command.size() > 96) return "command too long";
-    if (command == "help")
-        return "status | scan (simulation) | disconnect | trainer on/off | "
-               "power W | speed km/h | incline % | resistance % | "
-               "ant on/off | ftms-input on/off | ftms-output on/off | ftms-name <name> | "
-               "save | load | unpair | factory-reset";
-    if (command == "status") return status();
-    if (command == "scan") {
-        if (!bridge_.scanAndConnect()) return "connection failed";
-        config_.pairDevice(bridge_.telemetry().deviceName);
-        bridge_.loop();
-        return "simulation connected; " + status();
+std::string WebUi::handleCommand(const std::string& line) {
+    Command command;
+    std::string error;
+    if (!parseConsoleCommand(line, command, error)) return error;
+    return execute(command).message;
+}
+
+CommandResult WebUi::pair(const Command& command) {
+    if (!ble_ || !selector_) return fail("BLE input not available");
+    if (ble_->isExcluded(command.address)) return fail("refusing to pair with the bridge itself or its FTMS client");
+    PairedDevice device;
+    device.valid = true;
+    device.address = command.address;
+    const ScanResult* result = ble_->findResult(command.address);
+    if (result) {
+        if (!command.addressTypeGiven) device.address.type = result->address.type;
+        device.name = result->name;
     }
-    if (command == "disconnect" || command == "unpair") {
-        bridge_.disconnect();
-        const bool persisted = command != "unpair" || config_.unpair();
-        bridge_.loop();
-        return persisted ? status() : "unpair not persisted (storage write failed); " + status();
-    }
-    if (command == "save") {
-        switch (config_.save()) {
-            case ConfigSaveResult::Written: return "configuration saved";
-            case ConfigSaveResult::Unchanged: return "configuration unchanged; nothing written";
-            case ConfigSaveResult::Invalid: return "configuration invalid; not saved";
-            case ConfigSaveResult::Failed: return "save failed (storage write failed)";
-        }
-        return "save failed";
-    }
-    if (command == "load") {
-        const auto result = config_.load();
-        applyConfig();
-        return std::string(loadResultName(result)) + "; " + status();
-    }
-    if (command == "factory-reset") {
-        bridge_.disconnect();
-        const bool erased = config_.factoryReset();
-        applyConfig();
-        return std::string(erased ? "factory defaults restored; " : "erase failed; defaults restored in RAM; ") +
-               status();
-    }
-    const auto separator = command.find(' ');
-    if (separator == std::string::npos) return "unknown command; type help";
-    const auto key = command.substr(0, separator);
-    const auto value = command.substr(separator + 1);
-    if (key == "ftms-name") {
-        if (value.empty() || value.size() > FtmsOutput::kMaxNameLength) return "expected 1-20 characters";
-        if (!ConfigStore::isValidFtmsName(value)) return "expected printable ASCII";
-        config_.config().ftmsName = value;
-        applyConfig();
-        return "ftms name: " + ftms_.deviceName();
-    }
-    bool* setting = nullptr;
-    if (key == "trainer") setting = &config_.config().simulatedTrainer;
-    else if (key == "ant") setting = &config_.config().antEnabled;
-    else if (key == "ftms-input") setting = &config_.config().ftms.input;
-    else if (key == "ftms-output") setting = &config_.config().ftms.output;
-    if (setting) {
-        if (value != "on" && value != "off") return "expected on or off";
-        *setting = value == "on";
-        applyConfig();
-        return status();
-    }
-    Control control;
-    if (key == "power") control = Control::Power;
-    else if (key == "speed") control = Control::Speed;
-    else if (key == "incline") control = Control::Incline;
-    else if (key == "resistance") control = Control::Resistance;
-    else return "unknown command; type help";
-    char* end = nullptr;
-    const float target = std::strtof(value.c_str(), &end);
-    if (value.empty() || end == value.c_str() || end != value.c_str() + value.size())
-        return "invalid value";
-    const auto result = bridge_.routeControl({control, target});
+    device.adapterId = command.adapterId.empty() ? (result ? result->detectedAdapter : std::string()) : command.adapterId;
+    if (device.adapterId.empty())
+        return fail(result ? "device type not detected; choose an adapter" : "device not in scan results; choose an adapter");
+    if (!protocols::findProtocol(device.adapterId)) return fail("unknown adapter: " + device.adapterId);
+    if (!config_.pairSource(toSource(device.address), device.name, device.adapterId))
+        return fail("pairing not persisted (storage write failed)");
+    applyConfig();
+    bridge_.scanAndConnect();
     bridge_.loop();
-    return std::string("control: ") + resultName(result);
+    const std::string label = device.name.empty() ? device.address.toString() : device.name + " (" + device.address.toString() + ")";
+    return ok("paired " + label + " as " + device.adapterId + "; connecting");
+}
+
+CommandResult WebUi::execute(const Command& command) {
+    switch (command.type) {
+        case CommandType::Help:
+            return ok("status | sim | scan [s] | scan-stop | scan-results | pair <addr> [adapter|auto] [public|random] | "
+                      "connect | disconnect | unpair | trainer on/off | "
+                      "power W | speed km/h | incline % | resistance % | "
+                      "ant on/off | ftms-input on/off | ftms-output on/off | ftms-name <name> | "
+                      "wifi <ssid> [password] | wifi-clear | ap-pass <password> | "
+                      "save | load | factory-reset | restart");
+        case CommandType::Status: return ok(status());
+        case CommandType::Scan:
+            if (ble_) {
+                const std::uint32_t duration = command.durationMs ? command.durationMs : BleInputAdapter::kDefaultScanMs;
+                if (!ble_->startScan(duration)) return fail("scan not started: " + ble_->lastError());
+                char buffer[48];
+                std::snprintf(buffer, sizeof(buffer), "scanning for %u s", static_cast<unsigned>(duration / 1000));
+                return ok(buffer);
+            }
+            // Without BLE input "scan" keeps its original meaning: connect the simulation.
+            [[fallthrough]];
+        case CommandType::Simulate: {
+            if (ble_ && config_.config().ftms.input) {
+                config_.config().ftms.input = false;
+                applyConfig();
+            }
+            if (!bridge_.scanAndConnect()) return fail("connection failed");
+            if (!ble_) config_.pairDevice(bridge_.telemetry().deviceName);
+            bridge_.loop();
+            return ok("simulation connected; " + status());
+        }
+        case CommandType::ScanStop:
+            if (!ble_) return fail("BLE input not available");
+            ble_->stopScan();
+            return ok("scan stopped");
+        case CommandType::ScanResults: {
+            if (!ble_) return fail("BLE input not available");
+            std::string text = ble_->scanning() ? "scanning; " : "";
+            char line[160];
+            std::snprintf(line, sizeof(line), "%u device(s)", static_cast<unsigned>(ble_->scanResults().size()));
+            text += line;
+            for (const auto& result : ble_->scanResults()) {
+                std::snprintf(line, sizeof(line), "\n  %s %s rssi=%d type=%s name=\"%s\"",
+                              result.address.toString().c_str(), result.address.type ? "random" : "public",
+                              result.rssi, result.detectedAdapter.empty() ? "?" : result.detectedAdapter.c_str(),
+                              result.name.c_str());
+                text += line;
+            }
+            return ok(text);
+        }
+        case CommandType::Pair: return pair(command);
+        case CommandType::Connect:
+            if (!ble_) return fail("BLE input not available");
+            if (!config_.config().pairedSource.valid) return fail("no paired device; scan and pair first");
+            config_.config().ftms.input = true;
+            applyConfig();
+            bridge_.scanAndConnect();
+            bridge_.loop();
+            return ok("connecting; " + status());
+        case CommandType::Disconnect:
+        case CommandType::Unpair: {
+            bridge_.disconnect();
+            const bool persisted = command.type != CommandType::Unpair || config_.unpair();
+            if (command.type == CommandType::Unpair) applyConfig();
+            bridge_.loop();
+            return persisted ? ok(status()) : fail("unpair not persisted (storage write failed); " + status());
+        }
+        case CommandType::Save:
+            switch (config_.save()) {
+                case ConfigSaveResult::Written: return ok("configuration saved");
+                case ConfigSaveResult::Unchanged: return ok("configuration unchanged; nothing written");
+                case ConfigSaveResult::Invalid: return fail("configuration invalid; not saved");
+                case ConfigSaveResult::Failed: return fail("save failed (storage write failed)");
+            }
+            return fail("save failed");
+        case CommandType::Load: {
+            const auto result = config_.load();
+            applyConfig();
+            return {result != ConfigLoadResult::Invalid, std::string(loadResultName(result)) + "; " + status()};
+        }
+        case CommandType::FactoryReset: {
+            bridge_.disconnect();
+            const bool erased = config_.factoryReset();
+            applyConfig();
+            return {erased, std::string(erased ? "factory defaults restored; " : "erase failed; defaults restored in RAM; ") +
+                                status()};
+        }
+        case CommandType::FtmsName: {
+            const auto& value = command.text;
+            if (value.empty() || value.size() > FtmsOutput::kMaxNameLength) return fail("expected 1-20 characters");
+            if (!ConfigStore::isValidFtmsName(value)) return fail("expected printable ASCII");
+            config_.config().ftmsName = value;
+            applyConfig();
+            return ok("ftms name: " + ftms_.deviceName());
+        }
+        case CommandType::Trainer:
+        case CommandType::Ant:
+        case CommandType::FtmsInput:
+        case CommandType::FtmsOutput: {
+            auto& config = config_.config();
+            bool* setting = command.type == CommandType::Trainer ? &config.simulatedTrainer
+                            : command.type == CommandType::Ant   ? &config.antEnabled
+                            : command.type == CommandType::FtmsInput ? &config.ftms.input
+                                                                     : &config.ftms.output;
+            *setting = command.flag;
+            applyConfig();
+            return ok(status());
+        }
+        case CommandType::Wifi:
+            if (command.text.empty() || !ConfigStore::isValidSsid(command.text)) return fail("expected SSID of 1-32 bytes");
+            if (!ConfigStore::isValidPassword(command.text2, true))
+                return fail("password must be empty or 8-63 printable characters");
+            config_.config().wifiSsid = command.text;
+            if (!command.flag) config_.config().wifiPassword = command.text2;  // flag: keep the stored password
+            return ok("wifi: " + command.text + "; save and restart to apply");
+        case CommandType::WifiClear:
+            config_.config().wifiSsid.clear();
+            config_.config().wifiPassword.clear();
+            return ok("wifi cleared (access point only); save and restart to apply");
+        case CommandType::ApPassword:
+            if (!ConfigStore::isValidPassword(command.text, false))
+                return fail("access point password must be 8-63 printable characters");
+            config_.config().apPassword = command.text;
+            return ok("access point password set; save and restart to apply");
+        case CommandType::Restart:
+            restartRequested_ = true;
+            return ok("restarting");
+        case CommandType::Control: {
+            const auto result = bridge_.routeControl({command.control, command.value});
+            bridge_.loop();
+            return {result == ControlResult::Applied, std::string("control: ") + controlResultName(result)};
+        }
+    }
+    return fail("unknown command; type help");
+}
+
+std::string WebUi::statusJson() const {
+    JsonDocument document;
+    document["type"] = "status";
+    document["version"] = SMARTFITNESS_VERSION;
+    document["state"] = stateName(bridge_.state());
+    const auto& state = bridge_.trainerState();
+    JsonObject telemetry = document["telemetry"].to<JsonObject>();
+    addMetric(telemetry, "power", state, Metric::Power);
+    addMetric(telemetry, "cadence", state, Metric::Cadence);
+    addMetric(telemetry, "speed", state, Metric::Speed);
+    addMetric(telemetry, "heartRate", state, Metric::HeartRate);
+    addMetric(telemetry, "incline", state, Metric::Incline);
+    addMetric(telemetry, "distance", state, Metric::Distance);
+    document["deviceName"] = bridge_.telemetry().deviceName;
+    document["trainer"] = state.trainerDetected;
+    document["canControl"] = bridge_.canControl();
+    JsonArray controls = document["controls"].to<JsonArray>();
+    for (std::uint8_t index = 0; index < static_cast<std::uint8_t>(Control::Count); ++index) {
+        const auto control = static_cast<Control>(index);
+        if (state.capabilities.supports(control)) controls.add(controlName(control));
+    }
+    if (bridge_.hasControlTarget()) {
+        JsonObject target = document["target"].to<JsonObject>();
+        target["control"] = controlName(bridge_.controlTarget().control);
+        target["value"] = bridge_.controlTarget().value;
+    } else {
+        document["target"] = nullptr;
+    }
+    JsonObject input = document["input"].to<JsonObject>();
+    input["source"] = bleSelected() ? "ble" : "simulation";
+    input["bleAvailable"] = ble_ != nullptr;
+    if (ble_) {
+        input["link"] = BleInputAdapter::linkStateName(ble_->linkState());
+        input["protocol"] = ble_->protocolId();
+        input["stale"] = ble_->stale();
+        input["scanning"] = ble_->scanning();
+        input["error"] = ble_->lastError();
+        input["reconnectAttempts"] = ble_->reconnectAttempts();
+        input["nextAttemptMs"] = ble_->nextAttemptInMs();
+        input["autoConnect"] = ble_->autoConnect();
+    }
+    const auto& config = config_.config();
+    if (config.pairedSource.valid) {
+        JsonObject paired = input["paired"].to<JsonObject>();
+        ble::BleAddress address;
+        address.bytes = config.pairedSource.address;
+        paired["address"] = address.toString();
+        paired["addressType"] = config.pairedSource.addressType ? "random" : "public";
+        paired["name"] = config.pairedDeviceName;
+        paired["adapter"] = config.pairedAdapterId;
+    } else {
+        input["paired"] = nullptr;
+    }
+    JsonObject ftms = document["ftmsOutput"].to<JsonObject>();
+    ftms["enabled"] = config.ftms.output;
+    ftms["name"] = ftms_.deviceName();
+    ftms["advertising"] = ftms_.advertising();
+    ftms["client"] = ftms_.clientConnected();
+    ftms["control"] = ftms_.controlGranted();
+    document["ant"] = config.antEnabled;
+    document["unsaved"] = config_.hasUnsavedChanges();
+    JsonObject network = document["network"].to<JsonObject>();
+    network["mode"] = network_.mode;
+    network["ssid"] = network_.ssid;
+    network["ip"] = network_.ip;
+    network["hostname"] = network_.hostname;
+    network["stations"] = network_.stations;
+    return serialized(document);
+}
+
+std::string WebUi::scanResultsJson() const {
+    JsonDocument document;
+    document["type"] = "scan";
+    document["scanning"] = ble_ && ble_->scanning();
+    document["bleAvailable"] = ble_ != nullptr;
+    document["dropped"] = ble_ ? ble_->droppedScanResults() : 0U;
+    JsonArray devices = document["devices"].to<JsonArray>();
+    if (ble_) {
+        for (const auto& result : ble_->scanResults()) {
+            JsonObject device = devices.add<JsonObject>();
+            device["address"] = result.address.toString();
+            device["addressType"] = result.address.type ? "random" : "public";
+            device["name"] = result.name;
+            device["rssi"] = result.rssi;
+            device["connectable"] = result.connectable;
+            device["adapter"] = result.detectedAdapter;
+            JsonArray services = device["services"].to<JsonArray>();
+            for (const auto& uuid : result.services) services.add(uuid.toString());
+        }
+    }
+    JsonArray adapters = document["adapters"].to<JsonArray>();
+    for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
+        const auto& info = protocols::protocolAt(index);
+        JsonObject adapter = adapters.add<JsonObject>();
+        adapter["id"] = info.id;
+        adapter["label"] = info.label;
+        adapter["controllable"] = info.controllable;
+        adapter["advertisementOnly"] = info.advertisementOnly;
+    }
+    return serialized(document);
+}
+
+std::string WebUi::configJson() const {
+    const auto& config = config_.config();
+    JsonDocument document;
+    document["type"] = "config";
+    document["version"] = SMARTFITNESS_VERSION;
+    document["ftmsName"] = config.ftmsName.empty() ? std::string(FtmsOutput::kDefaultName) : config.ftmsName;
+    document["ftmsOutput"] = config.ftms.output;
+    document["ftmsInput"] = config.ftms.input;
+    document["ant"] = config.antEnabled;
+    document["antRequiresHardware"] = true;
+    document["simulatedTrainer"] = config.simulatedTrainer;
+    // Passwords are never returned, only whether they are set.
+    document["wifiSsid"] = config.wifiSsid;
+    document["wifiPasswordSet"] = !config.wifiPassword.empty();
+    document["apPasswordDefault"] = config.apPassword == BridgeConfig{}.apPassword;
+    document["unsaved"] = config_.hasUnsavedChanges();
+    return serialized(document);
 }
 
 void WebUi::loop() {
@@ -166,7 +425,7 @@ void WebUi::loop() {
             input_.clear();
             overflow_ = false;
         } else if (!overflow_) {
-            if (input_.size() < 96) input_ += character;
+            if (input_.size() < kMaxCommandLength) input_ += character;
             else overflow_ = true;
         }
     }
