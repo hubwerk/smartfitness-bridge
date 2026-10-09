@@ -53,6 +53,17 @@ struct TrainerState {
     void setSample(Metric metric, float value, bool valid = true);
 };
 
+struct ControlBounds {
+    float minimum;
+    float maximum;
+};
+
+// Core safety bounds in normalized units; adapters may enforce tighter limits.
+constexpr ControlBounds kSpeedBounds{0.0F, 100.0F};
+constexpr ControlBounds kInclineBounds{-20.0F, 25.0F};
+constexpr ControlBounds kResistanceBounds{0.0F, 100.0F};
+constexpr ControlBounds kPowerBounds{0.0F, 2000.0F};
+
 struct ControlRequest {
     Control control;
     float value;

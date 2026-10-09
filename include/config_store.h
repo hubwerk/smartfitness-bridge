@@ -6,6 +6,7 @@ struct BridgeConfig {
     std::string pairedDeviceName;
     bool antEnabled = true;
     smartfitness::FtmsRoles ftms{false, true};
+    std::string ftmsName;  // advertised FTMS output name; empty uses the default
     bool simulatedTrainer = true;
 };
 
