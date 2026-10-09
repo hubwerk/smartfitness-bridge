@@ -300,9 +300,22 @@ void testFtmsNameAndConsole() {
     assert(ui.status().find("ftms-out(advertising=1,client=0,control=0)") != std::string::npos);
 }
 
+void testFtmsClientAddress() {
+    FtmsOutput ftms;
+    std::array<std::uint8_t, 6> address{};
+    std::uint8_t type = 0;
+    assert(!ftms.clientAddress(address, type));
+    ftms.setClientAddress({0xaa, 0xbb, 0xcc, 0x01, 0x02, 0x03}, 1);
+    assert(ftms.clientAddress(address, type));
+    assert(address[0] == 0xaa && address[5] == 0x03 && type == 1);
+    ftms.clearClientAddress();
+    assert(!ftms.clientAddress(address, type));
+}
+
 }  // namespace
 
 void runFtmsTests() {
+    testFtmsClientAddress();
     testIndoorBikeDataEncoding();
     testStaticCharacteristics();
     testControlPointDecoding();
