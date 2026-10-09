@@ -335,6 +335,7 @@ void testReattachmentAndCallbackCleanup() {
 
 void runFtmsTests();
 void runConfigStoreTests();
+void runBleInputTests();
 
 int main() {
     testCapabilitiesAndSamples();
@@ -348,4 +349,5 @@ int main() {
     testReattachmentAndCallbackCleanup();
     runFtmsTests();
     runConfigStoreTests();
+    runBleInputTests();
 }
