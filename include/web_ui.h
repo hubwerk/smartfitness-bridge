@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "bridge_core.h"
+#include "bridge/bridge_core.hpp"
 #include "config_store.h"
 
 class SimulatedDeviceAdapter;
@@ -9,7 +9,7 @@ class FtmsOutput;
 
 class WebUi {
 public:
-    WebUi(BridgeCore& bridge, ConfigStore& config, SimulatedDeviceAdapter& adapter,
+    WebUi(smartfitness::BridgeCore& bridge, ConfigStore& config, SimulatedDeviceAdapter& adapter,
           AntOutput& ant, FtmsOutput& ftms);
     void begin();
     void loop();
@@ -18,7 +18,7 @@ public:
 
 private:
     void applyConfig();
-    BridgeCore& bridge_;
+    smartfitness::BridgeCore& bridge_;
     ConfigStore& config_;
     SimulatedDeviceAdapter& adapter_;
     AntOutput& ant_;

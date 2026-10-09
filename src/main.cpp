@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "bridge_core.h"
+#include "bridge/bridge_core.hpp"
 #include "ant_output.h"
 #include "ftms_output.h"
 #include "web_ui.h"
@@ -10,7 +10,7 @@ SimulatedDeviceAdapter deviceAdapter;
 AntOutput antOutput;
 FtmsOutput ftmsOutput;
 ConfigStore configStore;
-BridgeCore bridge;
+smartfitness::BridgeCore bridge;
 WebUi webUi(bridge, configStore, deviceAdapter, antOutput, ftmsOutput);
 
 void setup() {
