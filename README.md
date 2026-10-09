@@ -34,7 +34,7 @@ power 250
 disconnect
 ```
 
-`scan` connects the simulated device with 150 W, 80 rpm, 25 km/h and 120 bpm. Valid controls update its telemetry. `trainer off` switches it to read-only, so the subsequent power command is rejected.
+`scan` starts a new connection session, clearing any old target, and connects the simulated device with 150 W, 80 rpm, 25 km/h and 120 bpm. Valid controls update its telemetry. `trainer off` switches it to read-only, so the subsequent power command is rejected.
 
 Other commands: `speed <km/h>`, `resistance <%>`, `trainer on`, `ant on/off`, `ftms-input on/off`, `ftms-output on/off`, `save`, `load`, and `unpair`. FTMS input and output settings remain independent; the input setting is reserved for a future FTMS device adapter, not a working BLE role today. Pairing records a name only and does not automatically reconnect.
 

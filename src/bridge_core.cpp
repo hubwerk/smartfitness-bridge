@@ -91,6 +91,7 @@ void BridgeCore::loop() {
 
 bool BridgeCore::scanAndConnect() {
     if (!device_) return false;
+    disconnect();
     const bool connected = device_->scanAndConnect();
     setTelemetry(device_->telemetry());
     refreshDeviceState();

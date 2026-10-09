@@ -160,6 +160,13 @@ void testRuntimeRouting() {
     assert(ant.requestControl({Control::Power, NAN}) == ControlResult::InvalidValue);
     assert(bridge.controlTarget().value == 220);
 
+    assert(bridge.scanAndConnect());
+    bridge.loop();
+    assert(!bridge.hasControlTarget() && !ant.hasControlTarget() && !ftms.hasControlTarget());
+    assert(ant.telemetry().power == 150 && ftms.telemetry().targetPower == 0);
+    assert(ftms.requestControl({Control::Power, 220}) == ControlResult::Applied);
+    bridge.loop();
+
     adapter.setTrainer(false);
     bridge.loop();
     assert(bridge.state() == RuntimeState::Connected);
