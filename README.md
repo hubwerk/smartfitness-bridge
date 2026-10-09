@@ -17,7 +17,7 @@ This project bridges fitness equipment Bluetooth protocols and standardized outp
 - `AntOutput` / `FtmsOutput`: independent outputs with trainer-state, telemetry and accepted-target snapshots. Their inbound control callbacks route through the same core gate. `AntOutput` is still a placeholder; `FtmsOutput` is a working BLE FTMS peripheral (see below).
 - FTMS codec (`include/ftms/ftms_codec.hpp`, `src/ftms_codec.cpp`): pure C++ encoding/decoding of FTMS characteristics and Control Point opcodes, with no Arduino/NimBLE dependency so it is covered by host tests.
 - `WebUi`: currently a bounded, nonblocking Serial console with testable command/status handlers, ready for a future Wi-Fi frontend.
-- `ConfigStore`: editable configuration, pairing name, and a saved in-memory snapshot. Save/load works within one instance, **not across reboot**; NVS remains future work.
+- `ConfigStore` (`include/config_store.h`): editable configuration persisted through a `ConfigBackend` (`include/config_backend.h`). The firmware uses `NvsConfigBackend` (Arduino `Preferences`, flash/NVS, compiled only under `ARDUINO`), so settings survive a reboot; host tests use `MemoryConfigBackend`. See [Persistent configuration](#persistent-configuration).
 - `smartfitness::FtmsRoles` (`include/bridge/ftms_roles.hpp`): the single input/output role representation used by `ConfigStore` and the `WebUi` toggles. Either role or both may be enabled independently.
 
 ## Working runtime
@@ -40,9 +40,35 @@ disconnect
 
 `scan` starts a new connection session, clearing any old target, and connects the simulated device with 150 W, 80 rpm, 25 km/h and 120 bpm. Valid controls update its telemetry. `trainer off` switches it to read-only, so the subsequent power command is rejected.
 
-Other commands: `speed <km/h>`, `resistance <%>`, `trainer on`, `ant on/off`, `ftms-input on/off`, `ftms-output on/off`, `ftms-name <name>`, `save`, `load`, and `unpair`. FTMS input and output settings remain independent; the input setting is reserved for a future FTMS device adapter, not a working BLE role today. Pairing records a name only and does not automatically reconnect.
+Other commands: `speed <km/h>`, `resistance <%>`, `trainer on`, `ant on/off`, `ftms-input on/off`, `ftms-output on/off`, `ftms-name <name>`, `save`, `load`, `unpair` and `factory-reset`. FTMS input and output settings remain independent; the input setting is reserved for a future FTMS device adapter, not a working BLE role today. Pairing records a name only and does not automatically reconnect.
 
-`status` ends with `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control.
+`status` includes `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control.
+
+## Persistent configuration
+Settings changed on the console are edited in RAM; `status` ends with `unsaved=1` while they differ from the stored configuration.
+
+| Command | Effect |
+|---|---|
+| `save` | Writes the configuration to NVS. Nothing is written when the stored record would not change. |
+| `load` | Reloads the configuration from NVS (discarding unsaved edits) and applies it. |
+| `unpair` | Disconnects, clears the paired device and persists only that change immediately. |
+| `factory-reset` | Disconnects, erases the `sfbridge` NVS namespace and restores the defaults. |
+
+On boot the stored configuration is loaded before the outputs are enabled, so `ftms-name`, the ANT/FTMS toggles, the simulated trainer flag and the pairing survive a reboot. A missing, corrupt or unknown-version record falls back to the defaults (the record is replaced on the next `save`).
+
+NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little endian:
+
+| Field | Size | Notes |
+|---|---|---|
+| magic | 2 | `'S' 'F'` |
+| schema version | 1 | currently `1`; other versions are rejected |
+| `antEnabled`, `ftms.input`, `ftms.output`, `simulatedTrainer` | 4 × 1 | each must be `0` or `1` |
+| `ftmsName` | 1 + n | length ≤ 20, printable ASCII; empty uses `SmartFitness Bridge` |
+| `pairedDeviceName` | 1 + n | length ≤ 32, printable ASCII |
+| paired source device | 1 + 1 + 6 | reserved for the BLE input adapter: valid flag, address type (0–3), BLE address; all zero when unused |
+| CRC-32 | 4 | over all preceding bytes |
+
+To limit flash wear, writes only happen on explicit console commands (`save`, `unpair`, `factory-reset`) from the main loop, never from the BLE task or periodically.
 
 ## FTMS output (Bluetooth LE)
 `FtmsOutput` is a NimBLE-Arduino GATT server (firmware only; the transport is compiled under `#ifdef ARDUINO`, so host tests need no BLE stack). It advertises the Fitness Machine Service UUID `0x1826`, FTMS service data (machine available, indoor bike), and the configured name (`ftms-name`, default `SmartFitness Bridge`, max 20 ASCII characters).
@@ -105,7 +131,7 @@ pio device monitor -b 115200
 Dependencies: the Arduino/ESP32 framework (`espressif32` platform, Arduino core 2.0.x) and `h2zero/NimBLE-Arduino@1.4.3` for the FTMS output. Networking libraries will be added when they are actually used.
 
 ## Host tests
-The standalone assertion-based host tests exercise the same core as firmware, including simulated adapter callbacks, both outputs, control rejection, disconnect clearing, configuration round-trips, and console commands. `tests/host/test_ftms.cpp` covers the FTMS codec (byte layouts, flags, little-endian encoding, every Control Point opcode including invalid lengths and out-of-range values, result-code mapping) and the `FtmsOutput` control flow without a BLE stack. From the repository root:
+The standalone assertion-based host tests exercise the same core as firmware, including simulated adapter callbacks, both outputs, control rejection, disconnect clearing, configuration round-trips, and console commands. `tests/host/test_ftms.cpp` covers the FTMS codec (byte layouts, flags, little-endian encoding, every Control Point opcode including invalid lengths and out-of-range values, result-code mapping) and the `FtmsOutput` control flow without a BLE stack. `tests/host/test_config_store.cpp` covers persistence through `MemoryConfigBackend`: round-trips across `ConfigStore` instances, corrupt and old-version fallback, value validation, `unpair` and `factory-reset`, and that unchanged configurations are not rewritten. From the repository root:
 
 ```sh
 make host-tests

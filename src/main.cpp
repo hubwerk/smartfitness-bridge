@@ -9,7 +9,8 @@
 SimulatedDeviceAdapter deviceAdapter;
 AntOutput antOutput;
 FtmsOutput ftmsOutput;
-ConfigStore configStore;
+NvsConfigBackend configBackend;
+ConfigStore configStore(configBackend);
 smartfitness::BridgeCore bridge;
 WebUi webUi(bridge, configStore, deviceAdapter, antOutput, ftmsOutput);
 
@@ -18,7 +19,12 @@ void setup() {
     delay(1000);
     Serial.println("SmartFitness Bridge starting...");
 
-    configStore.begin();
+    // Load the persisted configuration before outputs are enabled (webUi.begin applies it).
+    switch (configStore.begin()) {
+        case ConfigLoadResult::Loaded: Serial.println("[Config] loaded from NVS"); break;
+        case ConfigLoadResult::Missing: Serial.println("[Config] no saved configuration; using defaults"); break;
+        case ConfigLoadResult::Invalid: Serial.println("[Config] saved configuration invalid; using defaults"); break;
+    }
 
     bridge.attach(deviceAdapter, antOutput, ftmsOutput);
     bridge.begin();

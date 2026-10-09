@@ -250,7 +250,7 @@ void testConsoleAndConfig() {
     ui.handleCommand("ftms-input off");
     assert(!config.hasPairedDevice());
     ui.handleCommand("load");
-    assert(config.hasPairedDevice());
+    assert(!config.hasPairedDevice());  // unpair is persisted immediately
     assert(config.config().simulatedTrainer);
     assert(config.config().ftms.input && !config.config().ftms.output);
     assert(bridge.state() == RuntimeState::Disconnected);
@@ -334,6 +334,7 @@ void testReattachmentAndCallbackCleanup() {
 }  // namespace
 
 void runFtmsTests();
+void runConfigStoreTests();
 
 int main() {
     testCapabilitiesAndSamples();
@@ -346,4 +347,5 @@ int main() {
     testAuthoritativeAdapterState();
     testReattachmentAndCallbackCleanup();
     runFtmsTests();
+    runConfigStoreTests();
 }
