@@ -1,8 +1,8 @@
 #pragma once
-#include <Arduino.h>
-#include "bridge_types.h"
+#include <functional>
+#include "bridge/bridge_core.hpp"
 
-class BtDeviceAdapter {
+class BtDeviceAdapter : public smartfitness::TrainerControlAdapter {
 public:
     virtual ~BtDeviceAdapter() = default;
 
@@ -10,9 +10,39 @@ public:
     virtual void loop() = 0;
 
     virtual bool scanAndConnect() = 0;
+    virtual void disconnect() = 0;
     virtual bool isConnected() const = 0;
     virtual bool trainerDetected() const = 0;
 
     virtual FitnessTelemetry telemetry() const = 0;
-    virtual void applyControlCommand(const ControlCommand& cmd) = 0;
+    virtual smartfitness::TrainerCapabilities capabilities() const = 0;
+
+    using TelemetryCallback = std::function<void(const FitnessTelemetry&)>;
+    void onTelemetry(TelemetryCallback callback);
+
+protected:
+    void emitTelemetry(const FitnessTelemetry& telemetry);
+
+private:
+    TelemetryCallback callback_;
+};
+
+// Explicit simulation for exercising the runtime; this is not a BLE implementation.
+class SimulatedDeviceAdapter final : public BtDeviceAdapter {
+public:
+    explicit SimulatedDeviceAdapter(bool trainer = true);
+    void begin() override;
+    void loop() override;
+    bool scanAndConnect() override;
+    void disconnect() override;
+    bool isConnected() const override;
+    bool trainerDetected() const override;
+    FitnessTelemetry telemetry() const override;
+    smartfitness::TrainerCapabilities capabilities() const override;
+    bool apply(const smartfitness::ControlRequest& request) override;
+    void setTrainer(bool trainer);
+
+private:
+    bool trainer_;
+    FitnessTelemetry telemetry_;
 };

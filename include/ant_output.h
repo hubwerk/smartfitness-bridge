@@ -1,11 +1,5 @@
 #pragma once
-#include <Arduino.h>
-#include "bridge_types.h"
+#include "bridge_output.h"
 
-class AntOutput {
-public:
-    void begin();
-    void loop();
-    void publishTelemetry(const FitnessTelemetry& telemetry);
-    void publishControlTarget(const ControlCommand& command);
-};
+// Override publish/loop to encode snapshots as ANT+ FE-C pages.
+class AntOutput : public BridgeOutput {};

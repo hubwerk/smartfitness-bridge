@@ -1,21 +1,26 @@
 #include "config_store.h"
 
 void ConfigStore::begin() {
-    // Future: NVS preferences init
+    load();
 }
 
 void ConfigStore::load() {
-    // Future: load persisted config
+    config_ = saved_;
 }
 
 void ConfigStore::save() {
-    // Future: persist config
+    saved_ = config_;
 }
 
 bool ConfigStore::hasPairedDevice() const {
-    return hasPairedDevice_;
+    return !config_.pairedDeviceName.empty();
 }
 
-String ConfigStore::pairedDeviceName() const {
-    return pairedDeviceName_;
+const std::string& ConfigStore::pairedDeviceName() const {
+    return config_.pairedDeviceName;
 }
+
+BridgeConfig& ConfigStore::config() { return config_; }
+const BridgeConfig& ConfigStore::config() const { return config_; }
+void ConfigStore::pairDevice(const std::string& name) { config_.pairedDeviceName = name; }
+void ConfigStore::clearPairing() { config_.pairedDeviceName.clear(); }
