@@ -9,7 +9,7 @@ public:
     virtual void loop();
     virtual void publishTelemetry(const FitnessTelemetry& telemetry);
     virtual void publishControlTarget(const smartfitness::ControlRequest& command);
-    void clearControlTarget();
+    virtual void clearControlTarget();
     const FitnessTelemetry& telemetry() const;
     const smartfitness::ControlRequest& controlTarget() const;
     bool hasControlTarget() const;

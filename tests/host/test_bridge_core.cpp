@@ -26,6 +26,37 @@ public:
     }
 };
 
+class RuntimeAdapter final : public BtDeviceAdapter {
+public:
+    bool connected = false;
+    bool trainer = false;
+    bool disconnectOnApply = false;
+    bool accept = true;
+    unsigned int calls = 0;
+    TrainerCapabilities supported;
+
+    void begin() override {}
+    void loop() override {}
+    bool scanAndConnect() override { connected = true; return true; }
+    void disconnect() override { connected = false; }
+    bool isConnected() const override { return connected; }
+    bool trainerDetected() const override { return trainer; }
+    TrainerCapabilities capabilities() const override { return supported; }
+    FitnessTelemetry telemetry() const override {
+        FitnessTelemetry value;
+        value.connected = connected;
+        value.trainerDetected = trainer;
+        value.power = 180;
+        return value;
+    }
+    bool apply(const ControlRequest&) override {
+        ++calls;
+        if (disconnectOnApply) connected = false;
+        return accept;
+    }
+    void emit(const FitnessTelemetry& value) { emitTelemetry(value); }
+};
+
 void testCapabilitiesAndSamples() {
     TrainerState state;
     state.capabilities.setMetric(Metric::Power, true);
@@ -190,6 +221,7 @@ void testConsoleAndConfig() {
     assert(ui.handleCommand("power 175") == "control: applied");
     assert(ui.handleCommand("power nan") == "control: invalid value");
     assert(ui.handleCommand("power 1garbage") == "invalid value");
+    assert(ui.handleCommand(std::string("power 1\0garbage", 15)) == "invalid value");
     assert(ui.handleCommand("power ") == "invalid value");
     assert(ui.handleCommand("trainer maybe") == "expected on or off");
     assert(ui.handleCommand(std::string(97, 'a')) == "command too long");
@@ -226,6 +258,72 @@ void testConsoleAndConfig() {
     assert(!freshStore.config().ftms.input && freshStore.config().ftms.output);
 }
 
+void testAuthoritativeAdapterState() {
+    RuntimeAdapter adapter;
+    AntOutput ant;
+    FtmsOutput ftms;
+    BridgeCore bridge;
+    bridge.attach(adapter, ant, ftms);
+    bridge.begin();
+    FitnessTelemetry spoofed;
+    spoofed.connected = true;
+    spoofed.trainerDetected = true;
+    adapter.emit(spoofed);
+    assert(!bridge.telemetry().connected);
+    assert(bridge.routeControl({Control::Power, 100}) == ControlResult::Disconnected);
+    assert(adapter.calls == 0);
+
+    adapter.connected = true;
+    adapter.trainer = true;
+    adapter.supported.setControl(Control::Power, true);
+    adapter.supported.setMetric(Metric::Power, true);
+    adapter.emit(adapter.telemetry());
+    assert(bridge.routeControl({Control::Power, 200}) == ControlResult::Applied);
+    bridge.loop();
+    assert(ant.hasControlTarget());
+    adapter.supported.setControl(Control::Power, false);
+    adapter.supported.setMetric(Metric::Power, false);
+    bridge.loop();
+    assert(bridge.state() == RuntimeState::Trainer);
+    assert(!bridge.trainerState().sample(Metric::Power).valid);
+    assert(!bridge.hasControlTarget() && !ant.hasControlTarget() && !ftms.hasControlTarget());
+    assert(bridge.routeControl({Control::Power, 200}) == ControlResult::Unsupported);
+
+    adapter.supported.setControl(Control::Power, true);
+    adapter.disconnectOnApply = true;
+    assert(bridge.routeControl({Control::Power, 150}) == ControlResult::AdapterRejected);
+    bridge.loop();
+    assert(!bridge.hasControlTarget() && !ant.telemetry().connected);
+}
+
+void testReattachmentAndCallbackCleanup() {
+    SimulatedDeviceAdapter first;
+    SimulatedDeviceAdapter second(false);
+    AntOutput firstAnt;
+    AntOutput secondAnt;
+    FtmsOutput firstFtms;
+    FtmsOutput secondFtms;
+    {
+        BridgeCore bridge;
+        bridge.attach(first, firstAnt, firstFtms);
+        bridge.begin();
+        bridge.scanAndConnect();
+        assert(firstAnt.requestControl({Control::Power, 180}) == ControlResult::Applied);
+        bridge.attach(second, secondAnt, secondFtms);
+        assert(bridge.state() == RuntimeState::Disconnected);
+        assert(!bridge.hasControlTarget());
+        assert(firstAnt.requestControl({Control::Power, 180}) == ControlResult::NoAdapter);
+        first.scanAndConnect();
+        assert(bridge.state() == RuntimeState::Disconnected);
+        bridge.scanAndConnect();
+        bridge.loop();
+        assert(bridge.state() == RuntimeState::Connected);
+        assert(!secondFtms.hasControlTarget());
+    }
+    assert(secondAnt.requestControl({Control::Power, 180}) == ControlResult::NoAdapter);
+    second.scanAndConnect();
+}
+
 }  // namespace
 
 int main() {
@@ -236,4 +334,6 @@ int main() {
     testRuntimeRouting();
     testStatesAndBoundaries();
     testConsoleAndConfig();
+    testAuthoritativeAdapterState();
+    testReattachmentAndCallbackCleanup();
 }

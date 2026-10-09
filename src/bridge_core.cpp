@@ -123,6 +123,10 @@ void BridgeCore::setTrainerState(const TrainerState& state) {
         dirty_ = true;
     }
     trainer_ = state;
+    for (std::size_t index = 0; index < trainer_.telemetry.size(); ++index) {
+        if (!trainer_.capabilities.supports(static_cast<Metric>(index)))
+            trainer_.telemetry[index].valid = false;
+    }
     if (!trainer_.connected) {
         trainer_ = {};
         telemetry_ = {};
@@ -186,7 +190,8 @@ ControlResult BridgeCore::routeControl(const ControlRequest& request) {
     if (!adapter_) return ControlResult::NoAdapter;
     if (!adapter_->apply(request)) return ControlResult::AdapterRejected;
     refreshDeviceState();
-    if (!canControl()) return ControlResult::AdapterRejected;
+    if (!canControl() || !trainer_.capabilities.supports(request.control))
+        return ControlResult::AdapterRejected;
     target_ = request;
     hasTarget_ = true;
     dirty_ = true;

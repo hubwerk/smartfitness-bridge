@@ -115,7 +115,8 @@ std::string WebUi::handleCommand(const std::string& command) {
     else return "unknown command; type help";
     char* end = nullptr;
     const float target = std::strtof(value.c_str(), &end);
-    if (value.empty() || end == value.c_str() || *end != '\0') return "invalid value";
+    if (value.empty() || end == value.c_str() || end != value.c_str() + value.size())
+        return "invalid value";
     const auto result = bridge_.routeControl({control, target});
     bridge_.loop();
     return std::string("control: ") + resultName(result);
