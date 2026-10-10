@@ -4,45 +4,125 @@
 
 PlatformIO firmware foundation for an ESP32-S3 DevKitC-1 N16R8 smart fitness bridge.
 
-## Goal
-This project bridges fitness equipment Bluetooth protocols and standardized output protocols such as ANT+ FE-C and Bluetooth FTMS.
+> **License:** GPL-3.0-or-later (see [`LICENSE`](LICENSE)). The vendor protocols in
+> `src/protocols/` and `include/protocols/` are ported from
+> [`cagnulein/qdomyos-zwift`](https://github.com/cagnulein/qdomyos-zwift) (GPL-3.0),
+> which makes the firmware a derivative work.
 
-## Planned integrations
-- Device-side protocol adapters inspired by `cagnulein/qdomyos-zwift`
-- ANT+ output layer inspired by `RaemondBW/esp32-ant`
+## Goal
+This project bridges fitness equipment Bluetooth protocols and standardized output protocols such as Bluetooth FTMS (and, with extra hardware, ANT+ FE-C – see [`docs/hardware-decisions.md`](docs/hardware-decisions.md)).
 
 ## Architecture
-- `smartfitness::BridgeCore` (`include/bridge/bridge_core.hpp`): one canonical core header shared by firmware and host tests. Tracks disconnected, connected/read-only, trainer, and control-ready states.
-- `BtDeviceAdapter`: equipment protocol interface. Adapters emit normalized telemetry through a callback and expose connection status and capabilities.
-- `AntOutput` / `FtmsOutput`: independent outputs with trainer-state, telemetry and accepted-target snapshots. Their inbound control callbacks route through the same core gate. `AntOutput` is still a placeholder; `FtmsOutput` is a working BLE FTMS peripheral (see below).
-- FTMS codec (`include/ftms/ftms_codec.hpp`, `src/ftms_codec.cpp`): pure C++ encoding/decoding of FTMS characteristics and Control Point opcodes, with no Arduino/NimBLE dependency so it is covered by host tests.
-- `WebUi`: currently a bounded, nonblocking Serial console with testable command/status handlers, ready for a future Wi-Fi frontend.
-- `ConfigStore` (`include/config_store.h`): editable configuration persisted through a `ConfigBackend` (`include/config_backend.h`). The firmware uses `NvsConfigBackend` (Arduino `Preferences`, flash/NVS, compiled only under `ARDUINO`), so settings survive a reboot; host tests use `MemoryConfigBackend`. See [Persistent configuration](#persistent-configuration).
-- `smartfitness::FtmsRoles` (`include/bridge/ftms_roles.hpp`): the single input/output role representation used by `ConfigStore` and the `WebUi` toggles. Either role or both may be enabled independently.
-
-## Working runtime
-The firmware boots disconnected. It includes an **explicit simulation adapter**, not a BLE scanner. Telemetry is broadcast over **Bluetooth LE FTMS** (when `ftms-output` is on); nothing is broadcast over ANT+ yet.
-
-The loop runs the adapter, refreshes authoritative connection/capability state, fans out changed telemetry and accepted targets, then services enabled outputs. A disconnect or capability change clears the target; disconnect also clears telemetry. Disabled outputs reject incoming commands and discard their snapshots; re-enabling refreshes them on the next loop.
-
-Use the Serial monitor at 115200 baud with newline-terminated commands:
 
 ```text
-help
-status
-scan
-power 200
-incline 5
-trainer off
-power 250
-disconnect
+            Bluetooth LE (one NimBLE stack, central + peripheral)            Wi-Fi (AP / STA)
+ ┌───────────────────────────────┐                                    ┌──────────────────────────┐
+ │ FTMS / CPS / CSC / HRS /      │  scan reports, notifications       │ Browser SPA (/), /api/*, │
+ │ Echelon / Domyos / Yesoul /   │──────────┐                         │ WebSocket /ws            │
+ │ Schwinn IC4 / Keiser M3i      │          ▼                         └────────────┬─────────────┘
+ └───────────────────────────────┘  NimbleCentral (BLE task, worker)               │ AsyncTCP task
+                                    │ bounded queues only                          ▼
+                                    ▼                                   WebPortal → ApiExchange
+                         BleInputAdapter (loop)                          (bounded job queue,
+                         registry + SourceProtocol codecs                 result/snapshot cache)
+                         reconnect/backoff, stale timeout                          │
+                                    │                                              ▼
+ SimulatedDeviceAdapter ──► InputSelector ──► BridgeCore ◄── WebUi (shared command executor) ◄── Serial console
+                                              │  routeControl (trainer gate, bounds)
+                                              ▼
+                                FtmsOutput (GATT server, 0x1826)      AntOutput (placeholder)
 ```
 
-`scan` starts a new connection session, clearing any old target, and connects the simulated device with 150 W, 80 rpm, 25 km/h and 120 bpm. Valid controls update its telemetry. `trainer off` switches it to read-only, so the subsequent power command is rejected.
+Everything that runs on the Arduino `loop()` – the core, the adapters' protocol logic, the command executor – is single-threaded. BLE callbacks (NimBLE host task and the central worker task) and HTTP/WebSocket handlers (AsyncTCP task) only push into bounded, lock-protected queues; the loop drains them.
 
-Other commands: `speed <km/h>`, `resistance <%>`, `trainer on`, `ant on/off`, `ftms-input on/off`, `ftms-output on/off`, `ftms-name <name>`, `save`, `load`, `unpair` and `factory-reset`. FTMS input and output settings remain independent; the input setting is reserved for a future FTMS device adapter, not a working BLE role today. Pairing records a name only and does not automatically reconnect.
+- `smartfitness::BridgeCore` (`include/bridge/bridge_core.hpp`): one canonical core header shared by firmware and host tests. Tracks disconnected, connected/read-only, trainer, and control-ready states.
+- `BtDeviceAdapter`: equipment input interface. Implementations: `SimulatedDeviceAdapter`, `BleInputAdapter` (real BLE devices) and `InputSelector`, which forwards to the BLE input when a device is paired and BLE input is enabled, otherwise to the simulation.
+- `BleInputAdapter` (`include/ble_input_adapter.h`): scanning, pairing, connection lifecycle, stale telemetry. It talks to the radio through the `CentralTransport` interface (`include/central_transport.h`); `NimbleCentral` implements it on the firmware, `tests/host/fake_central.hpp` in host tests.
+- Protocols (`include/protocols/`): pure C++ `SourceProtocol` implementations (FTMS, sensors, vendor ports) and the adapter registry.
+- `AntOutput` / `FtmsOutput`: independent outputs. `AntOutput` is still a placeholder; `FtmsOutput` is a working BLE FTMS peripheral (see below).
+- FTMS codec (`include/ftms/ftms_codec.hpp`): pure C++ encoding/decoding of FTMS characteristics, used by both the output and the FTMS input.
+- `WebUi` (`include/web_ui.h`): the shared command executor. The Serial console and the web API both produce `Command` values (`include/bridge_commands.h`) and run them through `WebUi::execute`; it also renders the status/scan/config JSON views.
+- `ApiExchange` (`include/web_api.h`) validates API JSON and hands jobs to the loop; `WebPortal` (`include/web_portal.h`, firmware only) owns Wi-Fi, DNS/captive portal, mDNS and the HTTP/WebSocket server; `WifiPolicy` (`include/wifi_policy.h`) decides AP/STA/fallback.
+- `ConfigStore` (`include/config_store.h`): configuration persisted through a `ConfigBackend` (NVS on the firmware, memory in host tests). See [Persistent configuration](#persistent-configuration).
+- `smartfitness::FtmsRoles` (`include/bridge/ftms_roles.hpp`): independent input/output role flags. `ftms.input` now means "use the paired BLE device as input (auto-connect)".
+
+## Supported input devices
+
+| Adapter id | Device | Detected by | Telemetry | Control |
+|---|---|---|---|---|
+| `ftms` | Any FTMS machine: indoor bike (`0x2AD2`), treadmill (`0x2ACD`), cross trainer (`0x2ACE`), rower (`0x2AD1`) | service `0x1826` | per data characteristic; Feature `0x2ACC` and supported ranges define capabilities | Control Point `0x2AD9`: Request Control, target power, resistance, inclination, indoor bike simulation (when the Feature says so) |
+| `cps` | Cycling power meter | service `0x1818` | power, cadence (crank revolutions) | – |
+| `csc` | Speed/cadence sensor | service `0x1816` | speed (wheel, 2.105 m), cadence | – |
+| `hrs` | Heart rate monitor | service `0x180D` | heart rate | – |
+| `echelon` | Echelon Connect Sport / EX bikes (non-FTMS) | name `ECH…` (not rower/stride/stair) | cadence, resistance; power and speed derived like upstream | resistance |
+| `domyos` | Domyos / Decathlon bikes (non-FTMS) | name `Domyos-Bike…` | speed, cadence, heart rate, resistance; power derived like upstream | resistance |
+| `yesoul` | Yesoul bikes | name `YESOUL…`/`YS_G1M_…` or manufacturer data | cadence, power, resistance; speed derived from cadence | – |
+| `schwinn-ic4` | Schwinn IC4 / IC8, Bowflex C6/C7/C9 | name `IC Bike…`, `C7-…`, `C9/C10…` | FTMS indoor bike data (read-only, like upstream) | – |
+| `keiser-m3i` | Keiser M3i | name `M3…` + valid broadcast | cadence, power, heart rate, gear from the advertisement (no connection) | – |
+
+When several adapters match, the highest priority wins (Keiser 90, Echelon/Domyos 80, Schwinn/Yesoul 70, FTMS 50, CPS 40, CSC 30, HRS 20). The adapter can be overridden when pairing.
+
+The vendor test vectors in `tests/host/test_ble_input.cpp` are built from the upstream parser layouts and the literal command bytes in upstream sources (upstream ships no captured traces); they have not been compared against real equipment.
+
+### Adding a protocol
+1. Add a pure C++ `SourceProtocol` in `include/protocols/<name>.hpp` / `src/protocols/<name>.cpp` (no Arduino includes). Declare subscriptions/reads in `plan()`, decode in `onNotify()`/`onRead()`, emit writes from `apply()`/`poll()`. Add the GPL attribution header if the logic is ported.
+2. Register it in `kProtocols` in `src/protocols/registry.cpp` with an id (`[a-z0-9_-]`, ≤ 16 chars), a `matches()` function and a priority.
+3. Add host tests with byte samples to `tests/host/test_ble_input.cpp` and the new source file to the `Makefile`.
+
+### Connection lifecycle
+- The paired device is connected on boot when BLE input is enabled. Connect attempts time out after 15 s; failures and link loss reconnect with exponential backoff (1 s … 30 s).
+- If a connected device delivers no data for 5 s, its telemetry is marked stale and invalidated (outputs stop reporting the metrics). If no data arrives for 20 s, the link is dropped and reconnected.
+- The peer currently connected to the FTMS output is never offered in scan results and never connected to as an input.
+
+## Serial console
+The Serial monitor (115200 baud, newline-terminated) accepts the same commands as the web UI:
+
+| Command | Effect |
+|---|---|
+| `help`, `status` | Help and a one-line status (includes `input=ble/sim link=… paired=… stale=1`) |
+| `scan [seconds]` | BLE scan (1–60 s, default 10 s); without BLE input support it connects the simulation |
+| `scan-stop`, `scan-results` | Stop scanning / list results (address, name, RSSI, detected adapter) |
+| `pair <aa:bb:cc:dd:ee:ff> [adapter\|auto] [public\|random]` | Pair a scanned device (adapter override optional), persist it and connect |
+| `connect`, `disconnect`, `unpair` | Reconnect the paired device, disconnect, forget the pairing |
+| `sim` | Use the simulated device as input (150 W, 80 rpm, 25 km/h, 120 bpm) |
+| `power <W>`, `resistance <%>`, `incline <%>`, `speed <km/h>` | Control through the `BridgeCore` gate; prints the rejection reason |
+| `trainer on/off`, `ant on/off`, `ftms-input on/off`, `ftms-output on/off`, `ftms-name <name>` | Settings |
+| `wifi <ssid> [password]`, `wifi-clear`, `ap-pass <password>` | Wi-Fi settings (save + restart to apply) |
+| `save`, `load`, `factory-reset`, `restart` | Persistence and reboot |
 
 `status` includes `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control.
+
+## Web interface
+### Wi-Fi setup
+- **No Wi-Fi credentials stored:** the bridge opens a WPA2 access point `SmartFitness-XXXX` (`XXXX` = last two MAC bytes) with the password **`smartfitness`** (change it in Settings or with `ap-pass`). SSID and password are printed on the Serial console at boot. A DNS catch-all and captive-portal probe handlers (`/generate_204`, `/hotspot-detect.html`, `/connecttest.txt`, `/ncsi.txt`) open the UI automatically on most phones; otherwise browse to `http://192.168.4.1/`.
+- **Credentials stored:** the bridge joins the network as a station and is reachable at `http://smartfitness.local/` (mDNS) or the IP printed on the console. If it is not connected within 20 s (at boot or after losing the network), it additionally opens the access point (AP+STA) while the station keeps retrying; the fallback AP is closed again once the station has been connected for 2 minutes and no client is using the AP.
+- Wi-Fi changes are applied after **Save** and a restart.
+
+### Using the UI
+The single-page app (`web/index.html`, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
+- **Dashboard:** live power, cadence, speed, heart rate, incline/resistance target, input/link/stale state, trainer/control state and FTMS output client state (WebSocket, ≤ 4 Hz).
+- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
+- **Control:** set target power/resistance/incline; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
+- **Settings:** FTMS output name and on/off, ANT on/off (requires hardware, see `docs/hardware-decisions.md`), Wi-Fi credentials, AP password, save, factory reset, restart and firmware version.
+
+### REST / WebSocket API
+All POST bodies are JSON objects (max. 1 KB, unknown keys rejected). The HTTP handlers never touch the core: a valid request is queued for the main loop and answered with **`202 {"id":n}`**; the outcome is pushed over the WebSocket as a `result` message and can be polled with `GET /api/result?id=n` (`202` while pending, `200` when done, `404` unknown/expired). Errors: `400 {"error":"…"}` invalid JSON or values, `413` body too large, `503` queue full.
+
+| Method | Path | Body | Effect |
+|---|---|---|---|
+| GET | `/api/status` | – | Status snapshot (same as WebSocket `status`) |
+| POST | `/api/scan` | `{"seconds":10}` or `{"action":"stop"}` | Start (1–60 s) or stop a scan |
+| GET | `/api/scan/results` | – | `{"type":"scan","scanning":…,"devices":[{"address","addressType","name","rssi","services","adapter","connectable"}],"adapters":[…]}` |
+| POST | `/api/pair` | `{"address":"aa:bb:cc:dd:ee:ff","adapter":"auto","addressType":"random"}` | Pair a scanned device (adapter/addressType optional), save, connect |
+| POST | `/api/unpair` | `{}` | Disconnect and forget the paired device |
+| POST | `/api/connect`, `/api/disconnect`, `/api/simulate` | `{}` | Connect paired device / disconnect / use the simulation |
+| POST | `/api/control` | `{"control":"power","value":200}` | `power`, `resistance`, `incline` or `speed` through the core gate |
+| GET | `/api/config` | – | Settings (passwords are never returned; `wifiPasswordSet` instead) |
+| POST | `/api/config` | any of `ftmsName`, `ftmsOutput`, `ftmsInput`, `ant`, `simulatedTrainer`, `wifiSsid` (empty clears), `wifiPassword` (requires `wifiSsid`; omit to keep the stored one), `apPassword`, `save` | Apply settings in order; a rejected setting stops the rest |
+| POST | `/api/factory-reset`, `/api/restart` | `{}` | Factory reset / reboot |
+| WS | `/ws` | – | Server → client JSON messages with `type` `status` (≤ 4 Hz), `scan`, `config` (on change) and `result`; client messages are ignored |
+
+There is **no authentication** on the API: access is protected only by the WPA2 access point or your home network. Do not expose the bridge to untrusted networks.
 
 ## Persistent configuration
 Settings changed on the console are edited in RAM; `status` ends with `unsaved=1` while they differ from the stored configuration.

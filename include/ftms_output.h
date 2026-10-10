@@ -39,6 +39,11 @@ public:
     bool enqueueControlPoint(const std::uint8_t* data, std::size_t length);
     void notifyClientConnected();
     void notifyClientDisconnected();
+    // Address of the connected client in display order (most significant byte
+    // first), so the BLE input never connects back to it. Thread-safe.
+    void setClientAddress(const std::array<std::uint8_t, 6>& address, std::uint8_t type);
+    void clearClientAddress();
+    bool clientAddress(std::array<std::uint8_t, 6>& address, std::uint8_t& type) const;
 
     bool advertising() const;
     bool clientConnected() const;
@@ -102,8 +107,11 @@ private:
     smartfitness::ftms::Bytes status_;
     Clock clock_;
 
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::array<PendingWrite, kQueueCapacity> queue_{};
+    std::array<std::uint8_t, 6> clientAddress_{};
+    std::uint8_t clientAddressType_ = 0;
+    bool clientAddressValid_ = false;
     std::size_t queueHead_ = 0;
     std::size_t queueCount_ = 0;
     std::atomic<std::uint32_t> generation_{0};

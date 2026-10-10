@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmartFitness Bridge</title>
+<style>
+:root{--bg:#10141a;--card:#1a2029;--fg:#e6e9ee;--muted:#8b95a5;--acc:#3fa7ff;--ok:#3ecf8e;--bad:#ff6b6b;--warn:#f5b942}
+*{box-sizing:border-box}body{margin:0;font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#0b0e13;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;flex:1}nav button{background:none;border:0;color:var(--muted);padding:8px 10px;font-size:15px;cursor:pointer}
+nav button.active{color:var(--fg);border-bottom:2px solid var(--acc)}main{padding:16px;max-width:960px;margin:auto}
+section{display:none}section.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.card{background:var(--card);border-radius:10px;padding:14px;margin-bottom:12px}.metric .v{font-size:30px;font-weight:600}.metric .u{color:var(--muted);font-size:13px}
+.label{color:var(--muted);font-size:13px}.pill{display:inline-block;padding:2px 8px;border-radius:10px;background:#2a3240;font-size:12px;margin:2px}
+.pill.ok{background:#1d4d38;color:var(--ok)}.pill.bad{background:#4d1d1d;color:var(--bad)}.pill.warn{background:#4d3d1d;color:var(--warn)}
+button.b{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:7px 12px;cursor:pointer;margin:2px}button.b.sec{background:#2a3240}button.b.danger{background:#a33}
+button.b:disabled{opacity:.5;cursor:default}input,select{background:#0f1319;color:var(--fg);border:1px solid #2a3240;border-radius:6px;padding:6px 8px;font-size:15px}
+table{width:100%;border-collapse:collapse}td,th{padding:6px 4px;border-bottom:1px solid #2a3240;text-align:left;vertical-align:top}th{color:var(--muted);font-weight:500;font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}.row label{min-width:150px;color:var(--muted)}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#2a3240;padding:10px 16px;border-radius:8px;display:none;max-width:90%}
+#toast.bad{background:#6b2020}#toast.ok{background:#1d4d38}.small{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header><h1>SmartFitness Bridge</h1><span id="conn" class="pill bad">offline</span>
+<nav><button data-tab="dash" class="active">Dashboard</button><button data-tab="dev">Devices</button><button data-tab="ctl">Control</button><button data-tab="set">Settings</button></nav></header>
+<main>
+<section id="dash" class="active">
+ <div class="grid">
+  <div class="card metric"><div class="label">Power</div><span class="v" id="m-power">–</span> <span class="u">W</span></div>
+  <div class="card metric"><div class="label">Cadence</div><span class="v" id="m-cadence">–</span> <span class="u">rpm</span></div>
+  <div class="card metric"><div class="label">Speed</div><span class="v" id="m-speed">–</span> <span class="u">km/h</span></div>
+  <div class="card metric"><div class="label">Heart rate</div><span class="v" id="m-heartRate">–</span> <span class="u">bpm</span></div>
+  <div class="card metric"><div class="label">Incline</div><span class="v" id="m-incline">–</span> <span class="u">%</span></div>
+  <div class="card metric"><div class="label">Target</div><span class="v" id="m-target">–</span></div>
+ </div>
+ <div class="card"><div class="label">Bridge</div><div id="s-bridge"></div></div>
+ <div class="card"><div class="label">Input device</div><div id="s-input"></div></div>
+ <div class="card"><div class="label">FTMS output (Zwift, MyWhoosh, …)</div><div id="s-ftms"></div></div>
+ <div class="card"><div class="label">Network</div><div id="s-net"></div></div>
+</section>
+<section id="dev">
+ <div class="card"><div class="label">Paired device</div><div id="paired">none</div>
+  <div class="row"><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
+ <div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
+  <table><thead><tr><th>Name / address</th><th>RSSI</th><th>Services</th><th>Adapter</th><th></th></tr></thead><tbody id="scan-body"></tbody></table>
+  <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
+</section>
+<section id="ctl">
+ <div class="card"><div id="ctl-state" class="small"></div>
+  <div class="row"><label for="ctl-kind">Target</label><select id="ctl-kind"><option value="power">Power (W)</option><option value="resistance">Resistance (%)</option><option value="incline">Incline / grade (%)</option><option value="speed">Speed (km/h)</option></select></div>
+  <div class="row"><label for="ctl-value">Value</label><input id="ctl-value" type="number" step="any" value="150"><button class="b" id="btn-apply">Apply</button></div>
+  <div id="ctl-result" class="small"></div>
+  <p class="small">Requests pass the bridge safety gate: they are rejected when no trainer is connected, the control is not supported or the value is out of range.</p></div>
+</section>
+<section id="set">
+ <div class="card"><div class="label">Outputs</div>
+  <div class="row"><label for="c-ftmsName">FTMS output name</label><input id="c-ftmsName" maxlength="20"></div>
+  <div class="row"><label for="c-ftmsOutput">FTMS output</label><input id="c-ftmsOutput" type="checkbox"></div>
+  <div class="row"><label for="c-ant">ANT+ FE-C</label><input id="c-ant" type="checkbox"><span class="pill warn">requires hardware (not implemented)</span></div>
+  <div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div></div>
+ <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
+  <div class="row"><label for="c-wifiSsid">Network (SSID)</label><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only"></div>
+  <div class="row"><label for="c-wifiPassword">Password</label><input id="c-wifiPassword" type="password" maxlength="63" placeholder="unchanged"></div>
+  <div class="row"><label for="c-apPassword">Access point password</label><input id="c-apPassword" type="password" maxlength="63" placeholder="unchanged"></div></div>
+ <div class="row"><button class="b" id="btn-save">Save</button><button class="b sec" id="btn-restart">Restart</button><button class="b danger" id="btn-reset">Factory reset</button></div>
+ <p class="small">Firmware <span id="fw"></span> · <span id="unsaved"></span></p>
+</section>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+let status={},scan={devices:[],adapters:[]},pending={};
+function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined&&text!==null)e.textContent=String(text);if(cls)e.className=cls;return e}
+function pill(text,kind){return el("span",text,"pill"+(kind?" "+kind:""))}
+function fill(node,items){node.replaceChildren(...items)}
+function toast(msg,ok){const t=$("toast");t.textContent=msg;t.className=ok===undefined?"":ok?"ok":"bad";t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",4000)}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button,section").forEach(x=>x.classList.remove("active"));b.classList.add("active");$(b.dataset.tab).classList.add("active");if(b.dataset.tab==="set")loadConfig()});
+async function post(endpoint,body){
+ try{const r=await fetch("/api/"+endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  const j=await r.json();if(r.status!==202){toast(j.error||("HTTP "+r.status),false);return null}
+  return await new Promise(res=>{pending[j.id]=res;poll(j.id,0)});
+ }catch(e){toast("request failed: "+e,false);return null}}
+async function poll(id,n){ // fallback when the WebSocket result does not arrive
+ if(!pending[id])return;if(n>40){pending[id]({ok:false,message:"timeout"});delete pending[id];return}
+ setTimeout(async()=>{if(!pending[id])return;try{const r=await fetch("/api/result?id="+id);if(r.status===200){finish(await r.json());return}}catch(e){}poll(id,n+1)},n<5?200:500)}
+function finish(res){const cb=pending[res.id];if(!cb)return;delete pending[res.id];cb(res)}
+async function run(endpoint,body,quiet){const r=await post(endpoint,body);if(r&&!quiet)toast(r.message,r.ok);return r}
+function fmt(v){return v===null||v===undefined?"–":(Math.round(v*10)/10).toString()}
+function renderStatus(s){
+ status=s;$("conn").textContent="online";$("conn").className="pill ok";
+ for(const k of["power","cadence","speed","heartRate","incline"])$("m-"+k).textContent=fmt(s.telemetry&&s.telemetry[k]);
+ $("m-target").textContent=s.target?s.target.control+" "+fmt(s.target.value):"–";
+ fill($("s-bridge"),[pill(s.state,s.state==="disconnected"?"bad":"ok"),pill(s.trainer?"trainer":"no trainer",s.trainer?"ok":""),pill(s.canControl?"control ready":"no control",s.canControl?"ok":""),
+  ...(s.controls||[]).map(c=>pill(c)),pill(s.deviceName||"no device")]);
+ const i=s.input||{},items=[pill("source: "+i.source)];
+ if(i.link)items.push(pill("link: "+i.link,i.link==="ready"||i.link==="listening"?"ok":i.link==="backoff"?"warn":""));
+ if(i.protocol)items.push(pill("adapter: "+i.protocol));if(i.stale)items.push(pill("stale data","warn"));if(i.scanning)items.push(pill("scanning"));
+ if(i.error)items.push(pill(i.error,"bad"));if(i.link==="backoff")items.push(pill("retry in "+Math.ceil(i.nextAttemptMs/1000)+" s"));
+ fill($("s-input"),items);
+ const f=s.ftmsOutput||{};fill($("s-ftms"),[pill(f.enabled?"enabled":"disabled",f.enabled?"ok":""),pill(f.name||""),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);
+ const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
+ const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
+ $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
+ $("unsaved").textContent=s.unsaved?"unsaved changes":"saved";$("fw").textContent=s.version||"";
+ $("btn-scan").disabled=!i.bleAvailable;}
+function renderScan(sc){
+ scan=sc;$("scan-state").textContent=(sc.scanning?"scanning… ":"")+sc.devices.length+" device(s)"+(sc.dropped?" ("+sc.dropped+" not listed)":"");
+ fill($("scan-body"),sc.devices.slice().sort((a,b)=>b.rssi-a.rssi).map(d=>{
+  const tr=el("tr"),name=el("td");name.append(el("div",d.name||"(no name)"),el("div",d.address+" ("+d.addressType+")","small"));
+  const sel=el("select");sel.append(new Option("– choose –",""));
+  for(const a of sc.adapters){const o=new Option(a.label+(a.id===d.adapter?" (detected)":""),a.id);if(a.id===d.adapter)o.selected=true;sel.append(o)}
+  const btn=el("button","Pair","b");btn.onclick=async()=>{if(!sel.value){toast("choose an adapter first",false);return}
+   btn.disabled=true;await run("pair",{address:d.address,addressType:d.addressType,adapter:sel.value});btn.disabled=false};
+  const svc=el("td",(d.services||[]).join(" "),"small"),ad=el("td"),act=el("td");ad.append(sel);act.append(btn);
+  tr.append(name,el("td",d.rssi),svc,ad,act);return tr}));}
+async function loadConfig(){try{const c=await(await fetch("/api/config")).json();
+ $("c-ftmsName").value=c.ftmsName||"";for(const k of["ftmsOutput","ant","simulatedTrainer"])$("c-"+k).checked=!!c[k];
+ $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
+ $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
+ $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}catch(e){toast("could not load settings",false)}}
+$("btn-scan").onclick=()=>run("scan",{seconds:10},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
+$("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run("disconnect");$("btn-sim").onclick=()=>run("simulate");
+$("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
+$("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
+ const r=await run("control",{control:$("ctl-kind").value,value:v},true);if(r){$("ctl-result").textContent=r.message;$("ctl-result").style.color=r.ok?"var(--ok)":"var(--bad)"}};
+$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutput:$("c-ftmsOutput").checked,ant:$("c-ant").checked,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
+ if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
+ const r=await run("config",b);if(r&&r.ok)loadConfig()};
+$("btn-restart").onclick=()=>{if(confirm("Restart the bridge?"))run("restart")};
+$("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?"))run("factory-reset").then(loadConfig)};
+function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="result"&&m.done)finish(m)};
+ ws.onclose=()=>{$("conn").textContent="offline";$("conn").className="pill bad";setTimeout(connectWs,2000)}}
+fetch("/api/status").then(r=>r.json()).then(s=>{if(s.type)renderStatus(s)}).catch(()=>{});
+fetch("/api/scan/results").then(r=>r.json()).then(s=>{if(s.devices)renderScan(s)}).catch(()=>{});
+connectWs();
+</script>
+</body>
+</html>

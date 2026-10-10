@@ -5,13 +5,18 @@ static_assert(ConfigStore::kMaxFtmsNameLength == FtmsOutput::kMaxNameLength,
               "persisted FTMS name limit must match the output");
 
 namespace {
-// Record layout (schema version 1):
+// Record layout (schema version 2):
 //   'S' 'F' version antEnabled ftmsInput ftmsOutput simulatedTrainer
 //   ftmsNameLength ftmsName[...] pairedNameLength pairedName[...]
+//   adapterIdLength adapterId[...] ssidLength ssid[...]
+//   wifiPasswordLength wifiPassword[...] apPasswordLength apPassword[...]
 //   sourceValid sourceAddressType sourceAddress[6] crc32 (little endian)
+// Version 1 records lack the four v2 text fields and are migrated on load
+// (v2 fields take their defaults). Worst case size is 251 bytes.
 constexpr std::uint8_t kMagic0 = 'S';
 constexpr std::uint8_t kMagic1 = 'F';
 // Header (3) + booleans (4) + two empty name lengths (2) + paired source (8) + CRC (4).
+// (v1 minimum; v2 adds four length bytes and a non-empty AP password.)
 constexpr std::size_t kMinRecordSize = 21;
 
 std::uint32_t crc32(const std::uint8_t* data, std::size_t length) {
@@ -101,12 +106,36 @@ ConfigSaveResult ConfigStore::save() {
     return ConfigSaveResult::Written;
 }
 
+bool ConfigStore::pairSource(const PairedSourceDevice& source, const std::string& name,
+                             const std::string& adapterId) {
+    if (!source.valid || source.addressType > kMaxAddressType || !isValidAdapterId(adapterId) || adapterId.empty())
+        return false;
+    const std::string sanitized = sanitizeName(name);
+    BridgeConfig next = saved_;
+    next.pairedSource = source;
+    next.pairedDeviceName = sanitized;
+    next.pairedAdapterId = adapterId;
+    next.ftms.input = true;
+    if (!persistPartial(next)) return false;
+    config_.pairedSource = source;
+    config_.pairedDeviceName = sanitized;
+    config_.pairedAdapterId = adapterId;
+    config_.ftms.input = true;
+    return true;
+}
+
 bool ConfigStore::unpair() {
     config_.pairedDeviceName.clear();
     config_.pairedSource = {};
+    config_.pairedAdapterId.clear();
     BridgeConfig next = saved_;
     next.pairedDeviceName.clear();
     next.pairedSource = {};
+    next.pairedAdapterId.clear();
+    return persistPartial(next);
+}
+
+bool ConfigStore::persistPartial(const BridgeConfig& next) {
     auto data = serialize(next);
     if (data == persisted_) {
         saved_ = next;
@@ -131,7 +160,7 @@ bool ConfigStore::hasUnsavedChanges() const {
 }
 
 bool ConfigStore::hasPairedDevice() const {
-    return !config_.pairedDeviceName.empty();
+    return !config_.pairedDeviceName.empty() || config_.pairedSource.valid;
 }
 
 const std::string& ConfigStore::pairedDeviceName() const {
@@ -141,20 +170,52 @@ const std::string& ConfigStore::pairedDeviceName() const {
 BridgeConfig& ConfigStore::config() { return config_; }
 const BridgeConfig& ConfigStore::config() const { return config_; }
 
-void ConfigStore::pairDevice(const std::string& name) {
+std::string ConfigStore::sanitizeName(const std::string& name) {
     std::string sanitized = name.substr(0, kMaxPairedNameLength);
     for (char& character : sanitized) {
         if (character < 0x20 || character > 0x7E) character = '?';
     }
-    config_.pairedDeviceName = sanitized;
+    return sanitized;
+}
+
+void ConfigStore::pairDevice(const std::string& name) {
+    config_.pairedDeviceName = sanitizeName(name);
 }
 
 bool ConfigStore::isValidFtmsName(const std::string& name) {
     return name.size() <= kMaxFtmsNameLength && isPrintableAscii(name);
 }
 
+bool ConfigStore::isValidAdapterId(const std::string& id) {
+    if (id.size() > kMaxAdapterIdLength) return false;
+    for (const char character : id) {
+        const bool ok = (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') ||
+                        character == '-' || character == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+bool ConfigStore::isValidSsid(const std::string& ssid) {
+    if (ssid.size() > kMaxSsidLength) return false;
+    for (const char character : ssid) {
+        const auto byte = static_cast<unsigned char>(character);
+        if (byte < 0x20 || byte == 0x7F) return false;  // UTF-8 bytes are allowed, control characters are not
+    }
+    return true;
+}
+
+bool ConfigStore::isValidPassword(const std::string& password, bool allowEmpty) {
+    if (password.empty()) return allowEmpty;
+    return password.size() >= kMinPasswordLength && password.size() <= kMaxPasswordLength &&
+           isPrintableAscii(password);
+}
+
 bool ConfigStore::isValid(const BridgeConfig& config) {
     if (!isValidFtmsName(config.ftmsName)) return false;
+    if (!isValidAdapterId(config.pairedAdapterId) || !isValidSsid(config.wifiSsid) ||
+        !isValidPassword(config.wifiPassword, true) || !isValidPassword(config.apPassword, false))
+        return false;
     if (config.pairedDeviceName.size() > kMaxPairedNameLength || !isPrintableAscii(config.pairedDeviceName))
         return false;
     const auto& source = config.pairedSource;
@@ -175,6 +236,10 @@ std::vector<std::uint8_t> ConfigStore::serialize(const BridgeConfig& config) {
     };
     appendText(config.ftmsName);
     appendText(config.pairedDeviceName);
+    appendText(config.pairedAdapterId);
+    appendText(config.wifiSsid);
+    appendText(config.wifiPassword);
+    appendText(config.apPassword);
     data.push_back(static_cast<std::uint8_t>(config.pairedSource.valid));
     data.push_back(config.pairedSource.addressType);
     data.insert(data.end(), config.pairedSource.address.begin(), config.pairedSource.address.end());
@@ -193,16 +258,23 @@ bool ConfigStore::deserialize(const std::vector<std::uint8_t>& data, BridgeConfi
     Reader reader(data, end);
     std::uint8_t magic0 = 0, magic1 = 0, version = 0;
     if (!reader.readByte(magic0) || !reader.readByte(magic1) || magic0 != kMagic0 || magic1 != kMagic1) return false;
-    // Only schema version 1 exists; older or unknown versions fall back to defaults.
-    // Future schema changes add their migration here.
-    if (!reader.readByte(version) || version != kSchemaVersion) return false;
+    // Version 1 is migrated (v2 fields keep their defaults); unknown versions fall back to defaults.
+    if (!reader.readByte(version) || version < 1 || version > kSchemaVersion) return false;
 
     BridgeConfig next;
     std::uint8_t sourceValid = 0;
     if (!reader.readBool(next.antEnabled) || !reader.readBool(next.ftms.input) ||
         !reader.readBool(next.ftms.output) || !reader.readBool(next.simulatedTrainer) ||
         !reader.readText(next.ftmsName, kMaxFtmsNameLength) ||
-        !reader.readText(next.pairedDeviceName, kMaxPairedNameLength) || !reader.readByte(sourceValid) ||
+        !reader.readText(next.pairedDeviceName, kMaxPairedNameLength))
+        return false;
+    if (version >= 2 &&
+        (!reader.readText(next.pairedAdapterId, kMaxAdapterIdLength) ||
+         !reader.readText(next.wifiSsid, kMaxSsidLength) ||
+         !reader.readText(next.wifiPassword, kMaxPasswordLength) ||
+         !reader.readText(next.apPassword, kMaxPasswordLength)))
+        return false;
+    if (!reader.readByte(sourceValid) ||
         sourceValid > 1 || !reader.readByte(next.pairedSource.addressType))
         return false;
     next.pairedSource.valid = sourceValid == 1;

@@ -112,5 +112,73 @@ Bytes encodeControlPointResponse(std::uint8_t opcode, ResultCode result);
 Bytes encodeMachineStatus(const ControlPointCommand& command);
 ResultCode resultCodeFor(ControlResult result);
 
+// ---------------------------------------------------------------------------
+// Client (input) side: decoding data from an FTMS machine and encoding the
+// Control Point commands sent to it.
+// ---------------------------------------------------------------------------
+
+constexpr std::uint16_t kTreadmillDataUuid = 0x2ACD;
+constexpr std::uint16_t kCrossTrainerDataUuid = 0x2ACE;
+constexpr std::uint16_t kRowerDataUuid = 0x2AD1;
+
+// Additional Fitness Machine Features / Target Setting Features bits.
+constexpr std::uint32_t kFeatureResistanceLevel = 1U << 7;
+constexpr std::uint32_t kFeaturePowerAndForce = 1U << 15;
+constexpr std::uint32_t kTargetSpeed = 1U << 0;
+
+enum class MachineType : std::uint8_t { IndoorBike, Treadmill, CrossTrainer, Rower };
+
+// Normalized sample decoded from one data notification. Only fields whose
+// flag was present are marked valid.
+struct MachineData {
+    MetricSample speed;       // km/h
+    MetricSample cadence;     // rpm (steps/min for cross trainers, strokes/min for rowers)
+    MetricSample power;       // W
+    MetricSample heartRate;   // bpm
+    MetricSample incline;     // %
+    MetricSample resistance;  // device resistance level (unitless, as sent)
+    MetricSample distance;    // m
+};
+
+// Return false when the payload is truncated for the flags it announces.
+bool decodeIndoorBikeData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeTreadmillData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeCrossTrainerData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeRowerData(const std::uint8_t* data, std::size_t length, MachineData& out);
+
+struct Features {
+    std::uint32_t machine = 0;
+    std::uint32_t targets = 0;
+};
+bool decodeFeature(const std::uint8_t* data, std::size_t length, Features& out);
+
+struct SupportedRange {
+    float minimum = 0.0F;
+    float maximum = 0.0F;
+    float increment = 0.0F;
+    bool valid = false;
+};
+// Supported Inclination/Resistance ranges use 0.1 resolution, power uses 1 W.
+bool decodeSupportedRange(const std::uint8_t* data, std::size_t length, float resolution, SupportedRange& out);
+
+struct ControlPointResponse {
+    std::uint8_t requestOpcode = 0;
+    ResultCode result = ResultCode::OperationFailed;
+};
+// Decodes an indication "0x80, request opcode, result".
+bool decodeControlPointResponse(const std::uint8_t* data, std::size_t length, ControlPointResponse& out);
+
+Bytes encodeRequestControl();
+Bytes encodeStartOrResume();
+Bytes encodeSetTargetPower(float watts);
+// Resistance level in device units with 0.1 resolution, sent as SINT16 like
+// most trainers (and qdomyos-zwift) expect.
+Bytes encodeSetTargetResistance(float level);
+Bytes encodeSetTargetInclination(float percent);
+Bytes encodeSetTargetSpeed(float kmh);
+// Grade in %, wind speed in m/s, rolling resistance coefficient and wind
+// resistance coefficient (kg/m) are quantized per the FTMS resolutions.
+Bytes encodeIndoorBikeSimulation(float gradePercent, float windSpeed = 0.0F, float crr = 0.004F, float cw = 0.51F);
+
 }  // namespace ftms
 }  // namespace smartfitness

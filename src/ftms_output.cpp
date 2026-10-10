@@ -23,7 +23,16 @@ struct FtmsOutput::Transport : public NimBLEServerCallbacks, public NimBLECharac
     using NimBLECharacteristicCallbacks::onWrite;
 
     void onConnect(NimBLEServer*) override { owner.notifyClientConnected(); }
-    void onDisconnect(NimBLEServer*) override { owner.notifyClientDisconnected(); }
+    void onConnect(NimBLEServer*, ble_gap_conn_desc* desc) override {
+        // NimBLE stores addresses little endian; the bridge uses display order.
+        std::array<std::uint8_t, 6> address{};
+        for (std::size_t index = 0; index < address.size(); ++index) address[index] = desc->peer_id_addr.val[5 - index];
+        owner.setClientAddress(address, desc->peer_id_addr.type);
+    }
+    void onDisconnect(NimBLEServer*) override {
+        owner.clearClientAddress();
+        owner.notifyClientDisconnected();
+    }
     void onWrite(NimBLECharacteristic* characteristic) override {
         const NimBLEAttValue value = characteristic->getValue();
         owner.enqueueControlPoint(value.data(), value.length());
@@ -113,6 +122,26 @@ void FtmsOutput::notifyClientDisconnected() {
     int current = connections_.load();
     while (current > 0 && !connections_.compare_exchange_weak(current, current - 1)) {}
     generation_.fetch_add(1);
+}
+
+void FtmsOutput::setClientAddress(const std::array<std::uint8_t, 6>& address, std::uint8_t type) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    clientAddress_ = address;
+    clientAddressType_ = type;
+    clientAddressValid_ = true;
+}
+
+void FtmsOutput::clearClientAddress() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    clientAddressValid_ = false;
+}
+
+bool FtmsOutput::clientAddress(std::array<std::uint8_t, 6>& address, std::uint8_t& type) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!clientAddressValid_) return false;
+    address = clientAddress_;
+    type = clientAddressType_;
+    return true;
 }
 
 bool FtmsOutput::advertising() const { return advertising_; }
@@ -235,7 +264,10 @@ void FtmsOutput::resetSession() {
 bool FtmsOutput::transportBegin() {
     if (transport_) return true;
     auto transport = std::unique_ptr<Transport>(new Transport(*this));
-    NimBLEDevice::init(name_);
+    // The BLE input (central) may have initialised the shared stack already,
+    // in which case init() ignores the name: set it explicitly.
+    if (!NimBLEDevice::getInitialized()) NimBLEDevice::init(name_);
+    NimBLEDevice::setDeviceName(name_);
     transport->server = NimBLEDevice::createServer();
     transport->server->setCallbacks(transport.get(), false);
     // Advertising is restarted from loop() so the enable toggle stays authoritative.
