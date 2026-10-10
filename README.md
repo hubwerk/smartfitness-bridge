@@ -188,6 +188,10 @@ the saved BLE source again. `save` persists that input toggle.
 ### Connection lifecycle and stale data
 - The paired device is connected on boot when BLE input is enabled. Connect attempts time out after 15 s; failures and link loss reconnect with exponential backoff (1 s … 30 s).
 - If a connected device delivers no data for 5 s, its telemetry is marked stale and invalidated (outputs stop reporting the metrics). If no data arrives for 20 s, the link is dropped and reconnected.
+- Stale treadmill telemetry also disables treadmill controls until fresh data
+  restores readiness. The FTMS input handshake never automatically sends
+  Start/Resume to a treadmill, cross-trainer or rower. Bike initialization sends
+  it only with confirmed bike identity, not an ambiguous bike fallback.
 - The peer currently connected to the FTMS output is never offered in scan results and never connected to as an input.
 
 ## Supported devices and new protocols
@@ -222,6 +226,14 @@ Use only one app/client at a time. ERG requires source power control; simulation
 grade requires incline control. Read-only sources do not become controllable trainers.
 App compatibility remains **not verified on hardware**.
 
+### Treadmill apps
+
+Connect the treadmill source before pairing the bridge with **Zwift Run** for
+speed/incline/heart-rate telemetry. Telemetry compatibility does **not** guarantee
+that Zwift can control belt speed. **Kinomap** and **QZ** control behavior depends
+on the client, source capabilities, and firmware; hardware interoperability is
+unverified. Read-only treadmills remain read-only.
+
 ### nRF Connect smoke test
 
 1. Run `sim` (not `scan`) on Serial, and ensure `ftms-output on` and `trainer on`.
@@ -233,6 +245,17 @@ App compatibility remains **not verified on hardware**.
    Simulation telemetry should change to 200 W.
 4. Run `trainer off`; a power write `05 FA 00` should return `80 05 05`
    (Control Not Permitted). Restore `trainer on`; disconnect when done.
+
+For a controllable treadmill source, select automatic/treadmill output, reconnect
+the client after a profile change, and subscribe to Treadmill Data `0x2ACD` instead.
+Enable Control Point indications and write Request Control `00` → `80 00 01`,
+then target **8 km/h** `02 20 03` → `80 02 01` if the source accepts it.
+**This speed command can cause real belt movement.** Test only with a clear belt
+and a person at the physical controls; the safety key and physical stop remain
+primary. Start/Resume never starts the belt. Disconnects and stale telemetry do
+not send stop or speed commands: do not rely on the bridge as an emergency stop.
+Treadmill Start/Resume returns Operation Failed (`80 07 04`) because there is no
+safe source start primitive.
 
 ### Garmin
 
@@ -258,10 +281,13 @@ The Serial monitor (115200 baud, newline-terminated) accepts the same commands a
 | `ftms-input on/off` | Select paired BLE input / simulation; independent of output |
 | `ftms-output on/off` | Enable advertising / disconnect client and stop advertising |
 | `ftms-name <name>` | Set 1–20 printable ASCII characters; spaces are allowed |
+| `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower>` | Select output profile; `auto` follows input, unsupported output types fall back to bike; `save` persists |
 | `wifi <ssid> [password]`, `wifi-clear`, `ap-pass <password>` | Wi-Fi settings (save + restart to apply) |
 | `save`, `load`, `factory-reset`, `restart` | Persistence and reboot |
 
 `status` includes `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control.
+`input-profile`, `output-profile` and `ftms-profile` show the active input type,
+effective output type and configured override respectively.
 It also includes `dropped(scans=…,events=…,notifications=…,commands=…)` for BLE
 transport queue overflow. These cumulative counters are available as
 `input.dropped` in `/api/status`; scan-result-list overflow remains the separate
@@ -273,10 +299,10 @@ except pairing/unpairing, which persist their own changes immediately.
 ## Web interface
 ### Using the UI
 The single-page app (`web/index.html`, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
-- **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, trainer/control state and FTMS output client state (WebSocket, ≤ 4 Hz).
+- **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and FTMS output client state (WebSocket, ≤ 4 Hz).
 - **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
-- **Control:** set target power/resistance/incline; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
-- **Settings:** FTMS output name and on/off, ANT on/off (requires hardware, see `docs/hardware-decisions.md`), Wi-Fi credentials, AP password, save, factory reset, restart and firmware version.
+- **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
+- **Settings:** FTMS output name, on/off and machine-profile override, ANT on/off (requires hardware, see `docs/hardware-decisions.md`), Wi-Fi credentials, AP password, save, factory reset, restart and firmware version.
 
 ## REST / WebSocket API
 
@@ -300,17 +326,21 @@ fixed order and stop at the first failure, **without rollback**.
 | POST | `/api/connect`, `/api/disconnect`, `/api/simulate` | `{}` | Connect paired device / disconnect / use the simulation |
 | POST | `/api/control` | `{"control":"power","value":200}` | `power`, `resistance`, `incline` or `speed` through the core gate |
 | GET | `/api/config` | – | Settings (passwords are never returned; `wifiPasswordSet` instead) |
-| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutput":true,"ftmsInput":true,"ant":false,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","save":true}` | Any subset; order: name, output, input, ANT, simulated trainer, Wi-Fi, AP password, save |
+| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","ftmsOutput":true,"ftmsInput":true,"ant":false,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","save":true}` | Any subset; order: profile, name, output, input, ANT, simulated trainer, Wi-Fi, AP password, save |
 | POST | `/api/factory-reset`, `/api/restart` | `{}` | Factory reset / reboot |
 | GET | `/api/result?id=1` | – | Poll queued command result; see below |
 | GET | `/` | – | Gzipped HTML/JS/CSS app (`200`, not JSON) |
 | GET | `/generate_204`, `/hotspot-detect.html`, `/connecttest.txt`, `/ncsi.txt` | – | Captive-portal `302` redirect to AP IP |
 | WS | `/ws` | – | Server sends `status`, `scan`, `config`, `result`; client messages ignored |
 
-Config types: `ftmsName`, SSID, and passwords are strings; toggles and `save`
+Config types: `ftmsName`, `ftmsOutputProfile`, SSID, and passwords are strings;
+`ftmsOutputProfile` accepts `auto`, `bike`, `treadmill`, `cross-trainer` or `rower`.
+Toggles and `save`
 are booleans. `wifiSsid:""` clears SSID/password. `wifiPassword` requires
 `wifiSsid`; omit it to retain the old password, or use `""` for an open network.
-Omitted/null optional fields are ignored. `{}` or only `{"save":false}` is rejected
+Omitted optional fields are ignored; null fields are ignored except
+`ftmsOutputProfile`, which must be a valid profile string when supplied.
+`{}` or only `{"save":false}` is rejected
 as “no settings given”. See the schema table for string limits; the command layer
 requires a nonempty FTMS name (1–20), although the persisted schema permits empty.
 `/api/save` and `/api/load` are **not HTTP routes**, even though the shared parser
@@ -368,18 +398,20 @@ or `null` when invalid. Example disconnected snapshot:
 ```json
 {
   "type":"status","version":"0.3.0","state":"disconnected",
-  "telemetry":{"power":null,"cadence":null,"speed":null,"heartRate":null,"incline":null,"distance":null},
+  "telemetry":{"power":null,"cadence":null,"speed":null,"heartRate":null,"incline":null,"distance":null,"elapsed":null},
   "deviceName":"","trainer":false,"canControl":false,"controls":[],"target":null,
-  "input":{"source":"simulation","bleAvailable":true,"link":"idle","protocol":"","stale":false,
+  "input":{"source":"simulation","profile":"bike","bleAvailable":true,"link":"idle","protocol":"","stale":false,
     "scanning":false,"error":"","reconnectAttempts":0,"nextAttemptMs":0,"autoConnect":false,"paired":null,
     "dropped":{"scans":0,"events":0,"notifications":0,"commands":0}},
-  "ftmsOutput":{"enabled":true,"name":"SmartFitness Bridge","advertising":true,"client":false,"control":false},
+  "ftmsOutput":{"enabled":true,"profile":"bike","override":"auto","name":"SmartFitness Bridge","advertising":true,"client":false,"control":false},
   "ant":true,"unsaved":false,
   "network":{"mode":"ap","ssid":"SmartFitness-XXXX","ip":"192.168.4.1","hostname":"smartfitness.local","stations":1}
 }
 ```
 
 `version` is the build version (`0.3.0` by default); actual network/link values vary.
+`input.profile` is the active input machine type; `ftmsOutput.profile` is the
+effective output and `ftmsOutput.override` is the configured selection.
 States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 `target` when set is `{"control":"power","value":200}`.
 `input.paired` when set is
@@ -401,7 +433,7 @@ States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 ```json
 {
   "type":"config","version":"0.3.0","ftmsName":"SmartFitness Bridge",
-  "ftmsOutput":true,"ftmsInput":false,"ant":true,"antRequiresHardware":true,
+  "ftmsOutput":true,"ftmsOutputProfile":"auto","ftmsInput":false,"ant":true,"antRequiresHardware":true,
   "simulatedTrainer":true,"wifiSsid":"","wifiPasswordSet":false,
   "apPasswordDefault":true,"unsaved":false
 }
@@ -434,14 +466,14 @@ Settings changed on the console are edited in RAM; `status` ends with `unsaved=1
 | `unpair` | Disconnects, clears the paired device and persists only that change immediately. |
 | `factory-reset` | Disconnects, erases the `sfbridge` NVS namespace and restores the defaults. |
 
-On boot the stored configuration is loaded before the outputs are enabled, so `ftms-name`, the ANT/FTMS toggles, the simulated trainer flag and the pairing survive a reboot. A missing, corrupt or unknown-version record falls back to the defaults (the record is replaced on the next `save`).
+On boot the stored configuration is loaded before the outputs are enabled, so `ftms-name`, the output-profile override, the ANT/FTMS toggles, the simulated trainer flag and the pairing survive a reboot. A missing, corrupt or unknown-version record falls back to the defaults (the record is replaced on the next `save`).
 
 NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little endian:
 
 | Field | Size | Notes |
 |---|---|---|
 | magic | 2 | `'S' 'F'` |
-| schema version | 1 | `2`; decoder accepts `1` and `2` only |
+| schema version | 1 | `3`; decoder accepts `1`, `2` and `3` |
 | `antEnabled`, `ftms.input`, `ftms.output`, `simulatedTrainer` | 4 × 1 | Each `0` or `1`; defaults: `1`, `0`, `1`, `1` |
 | `ftmsName` | 1 + n | ≤ 20 printable ASCII bytes; default empty means `SmartFitness Bridge` |
 | `pairedDeviceName` | 1 + n | ≤ 32 printable ASCII bytes, default empty; pairing sanitizes/truncates names |
@@ -452,17 +484,19 @@ NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little
 | paired source valid | 1 | `0` or `1`, default `0` |
 | paired source address type | 1 | `0`–`3`; console/API accepts public (`0`) or random (`1`) |
 | paired source address | 6 | Address bytes in display order; invalid source requires type/address all zero |
+| `ftmsOutputProfile` (v3) | 1 | After source address, before CRC: `0` auto (default), `1` bike, `2` treadmill, `3` cross-trainer, `4` rower |
 | CRC-32 | 4 | Little endian; over all preceding bytes, reflected polynomial `0xEDB88320`, initial/final XOR `0xffffffff` |
 
 Each text field is a one-byte length followed by exactly that many bytes (no NUL).
-The v2 record is **25 + all six text lengths** bytes: maximum **251 bytes**,
+The v3 record is **26 + all six text lengths** bytes: maximum **252 bytes**,
 below the backend's **256 B** limit. Decoder rejects bad CRC/magic/versions,
 truncation, invalid booleans/text/source, oversize records, and trailing bytes.
 
-**v1 → v2 migration:** v1 contains the same first two text fields and paired-source
-tail, but omits adapter id, SSID, Wi-Fi password and AP password. Loading preserves
-v1 fields and fills the four new fields with defaults. It does not write during
-boot; the next `save` serializes v2 and replaces the v1 blob. A legacy source with
+**v1/v2 → v3 migration:** v1 contains the same first two text fields and
+paired-source tail, but omits adapter id, SSID, Wi-Fi password and AP password.
+Loading preserves legacy fields and fills missing fields with defaults. Both v1
+and v2 migrate to output profile `auto`. Migration does not write during boot;
+the next `save` serializes v3 and replaces the legacy blob. A legacy source with
 an empty adapter id is not auto-connected: scan and pair it again.
 
 Write avoidance compares serialized bytes with the stored record. Unchanged
@@ -479,33 +513,77 @@ does **not** reboot. Restart to apply default Wi-Fi/AP settings. CRC detects
 corruption, not tampering or encryption.
 
 ## FTMS output (Bluetooth LE)
-`FtmsOutput` is a NimBLE-Arduino GATT server (firmware only; the transport is compiled under `#ifdef ARDUINO`, so host tests need no BLE stack). It advertises the Fitness Machine Service UUID `0x1826`, FTMS service data (machine available, indoor bike), and the configured name (`ftms-name`, default `SmartFitness Bridge`, max 20 ASCII characters).
+`FtmsOutput` is a NimBLE-Arduino GATT server (firmware only; the transport is compiled under `#ifdef ARDUINO`, so host tests need no BLE stack). It advertises the Fitness Machine Service UUID `0x1826`, FTMS service data (machine available, effective output type), and the configured name (`ftms-name`, default `SmartFitness Bridge`, max 20 ASCII characters).
+
+The shared machine-profile names are `auto|bike|treadmill|cross-trainer|rower`.
+`auto` uses the active input profile: vendor adapters declare their machine type,
+and FTMS input derives it from discovered data characteristics and FTMS service
+data rather than treating every `0x1826` source as a bike. Simulation and sensor
+sources default to bike. An explicit output-profile override is saved in schema
+v3; it changes presentation, not the source's controls or safety limits.
+For ambiguous FTMS subscriptions, the first valid data notification fixes the
+input profile; other machine-data UUIDs are ignored. An explicit supported FTMS
+advertised type can change that selection and clears old metrics/freshness.
+
+Bike and treadmill output are implemented. **Full Cross Trainer Data and Rower
+Data output are deferred to follow-up work**, including their profile-specific
+features, control semantics, codecs and hardware/app validation. These input
+profiles remain visible as `cross-trainer`/`rower`, while their effective output
+is explicitly shown as `bike` fallback; selecting those overrides also falls
+back to bike. This is not a transparent reproduction of the source GATT server.
+
+The GATT database is stable and includes both Indoor Bike Data and Treadmill
+Data characteristics. Only the effective profile's data is notified. A profile
+change disconnects the client, invalidates its Request Control grant and queued
+session commands, and re-advertises with the new machine-type service data.
+The database itself does not change, so no Service Changed indication is
+required; disconnect/re-advertise refreshes presentation instead. Reconnect,
+read features again, and request control again.
 
 | Characteristic | UUID | Properties | Content |
 |---|---|---|---|
-| Fitness Machine Feature | `0x2ACC` | read | Derived from the device capabilities: cadence, inclination, heart rate, power; targets: inclination (+ indoor bike simulation), resistance, power |
+| Fitness Machine Feature | `0x2ACC` | read | Profile/capability-derived. Bike: cadence, inclination, HR, power; targets: inclination (+ bike simulation), resistance, power. Treadmill: mandatory instantaneous speed plus optional inclination, HR, distance and elapsed time; targets: speed/inclination only when supported. Bit 0 means average speed, not instantaneous-speed support, and is not set |
 | Indoor Bike Data | `0x2AD2` | notify | Speed (0.01 km/h), cadence (0.5 rpm), power (W, sint16), heart rate (bpm). A field and its flag are present only when the core marks the metric valid. Sent on change (at most every 250 ms) and at least once per second while a client is connected |
-| Training Status | `0x2AD3` | read, notify | Idle without a device, Manual Mode when a device is connected |
+| Treadmill Data | `0x2ACD` | notify | Valid speed (0.01 km/h), inclination and ramp angle, HR, optional distance and elapsed time; treadmill profile only. Same notification cadence as bike data |
+| Training Status | `0x2AD3` | read, notify | Bike: Idle without a device, Manual Mode when connected. Treadmill: Idle until valid nonzero speed, Manual Mode while moving |
+| Supported Speed Range | `0x2AD4` | read | Core bounds 0.00 … 100.00 km/h, step 0.01 km/h; tighter input limits are enforced by the adapter, not yet exposed here |
 | Supported Inclination Range | `0x2AD5` | read | −20.0 … 25.0 %, step 0.1 % |
 | Supported Resistance Level Range | `0x2AD6` | read | 0.0 … 100.0, step 1.0 (one unit = one normalized percent) |
 | Supported Power Range | `0x2AD8` | read | 0 … 2000 W, step 1 W |
 | Fitness Machine Control Point | `0x2AD9` | write, indicate | Opcodes below; every write is answered with `0x80, opcode, result` |
-| Fitness Machine Status | `0x2ADA` | notify | Sent for acknowledged changes (reset, start, stop/pause, target incline/resistance/power, simulation parameters) |
+| Fitness Machine Status | `0x2ADA` | notify | Sent for acknowledged changes (reset, start, stop/pause, target speed/incline/resistance/power, simulation parameters), as applicable to the profile |
 
-Supported Control Point opcodes: Request Control `0x00`, Reset `0x01`, Set Target Inclination `0x03` (sint16, 0.1 %), Set Target Resistance `0x04` (uint8 0.1, sint16 0.1 also accepted), Set Target Power `0x05` (sint16 W), Start/Resume `0x07`, Stop/Pause `0x08` (`0x01` stop, `0x02` pause), and Set Indoor Bike Simulation Parameters `0x11` (grade is mapped to the incline control). Other opcodes return Not Supported (`0x02`); wrong lengths return Invalid Parameter (`0x03`).
+Common Control Point opcodes: Request Control `0x00`, Reset `0x01`, Set Target
+Inclination `0x03` (sint16, 0.1 %), Start/Resume `0x07`, and Stop/Pause `0x08`
+(`0x01` stop, `0x02` pause). Treadmill adds Set Target Speed `0x02` (uint16,
+0.01 km/h). Bike supports Set Target Resistance `0x04` (uint8 0.1, sint16 0.1
+also accepted), Set Target Power `0x05` (sint16 W), and Set Indoor Bike Simulation
+Parameters `0x11` (grade mapped to incline). Treadmill output rejects power,
+resistance and bike simulation; an override does not grant unsupported controls.
+Other opcodes return Not Supported (`0x02`); wrong lengths return Invalid
+Parameter (`0x03`).
 
 Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnect events into a small lock-protected queue. `FtmsOutput::loop()` drains it, requires Request Control before any other command (otherwise Control Not Permitted `0x05`), and routes set commands through `requestControl()` → `BridgeCore::routeControl`. Core results map to FTMS result codes: Applied → Success `0x01`, Unsupported → Not Supported `0x02`, InvalidValue → Invalid Parameter `0x03`, AdapterRejected → Operation Failed `0x04`, Disconnected/NotTrainer/NoAdapter → Control Not Permitted `0x05`. A BLE disconnect revokes control, drops queued writes from that session and restarts advertising. `ftms-output off` disconnects the client and stops advertising; `ftms-output on` resumes advertising.
 
 ### Limitations
-- Input may be a real BLE device or simulation, but output always advertises an
-  **indoor bike** and emits Indoor Bike Data, even for treadmill/rower/cross-trainer
-  input. It is not a transparent reproduction of the source GATT server.
-- Start/Resume and Stop/Pause are acknowledged (with status notifications) but
-  do not start/stop the source; Reset releases the output control grant and does
-  not clear the core target or reset the source.
-- No FTMS target-speed opcode. Simulation parameters map only grade to incline;
-  wind speed, rolling resistance and drag are not forwarded.
-- Only one client is served at a time (advertising stops while connected). No bonding/security, no Cycling Power or Heart Rate services, and no total distance, elapsed time or energy fields.
+- Treadmill Start/Resume **never starts the belt** and returns Operation Failed
+  (`0x04`): there is no safe source start primitive. Bike Start/Resume remains an
+  acknowledgement without starting the source. Treadmill
+  Stop/Pause sends a gated speed-zero command when supported; failure or lack of
+  speed control returns Operation Failed (`0x04`), not a fictitious successful
+  stop. Bike Stop/Pause remains an acknowledgement without stopping the source.
+  Reset releases the output control grant; it does not reset the source or clear
+  the core target.
+- Disconnect and stale-data handling never send stop/speed commands. Use the
+  equipment's physical stop and safety key; bridge control is not a safety system.
+- Treadmill packets fit within **20 bytes**, even with speed, inclination/ramp
+  angle, HR, distance and elapsed time, so no More Data fragmentation is needed.
+  FTMS-supplied distance and elapsed time are decoded and forwarded when actually
+  present and valid. Vendor-source totals are not synthesized; elapsed time is
+  never invented from connection uptime. No energy fields are emitted.
+- Bike simulation parameters map only grade to incline; wind speed, rolling
+  resistance and drag are not forwarded.
+- Only one client is served at a time (advertising stops while connected). No bonding/security, no Cycling Power or Heart Rate services.
 - The Feature characteristic follows the connected device's capabilities; clients usually read it once on connection, so connect the source device before pairing the app.
 - Changing the name while a client is connected applies on the next advertising cycle.
 
@@ -527,7 +605,7 @@ Normalized units: speed in km/h, cadence in rpm, power in watts, heart rate in b
 | FTMS Control Point queue | 8 writes, 20 bytes per write; full queue drops a write |
 | API | 8 jobs; up to 2 processed/loop; 16 cached results; body ≤ 1024 bytes |
 | Serial | 96-character command; at most 64 input characters consumed/loop |
-| Configuration | One NVS blob ≤ 256 B; maximum valid v2 record 251 B |
+| Configuration | One NVS blob ≤ 256 B; maximum valid v3 record 252 B |
 
 NimBLE host callbacks/central worker and AsyncTCP handlers hand off through
 bounded queues/locked caches; the bridge and codecs run cooperatively in the

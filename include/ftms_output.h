@@ -34,6 +34,8 @@ public:
     // Advertised (pairing) name; longer names are truncated to kMaxNameLength.
     void setDeviceName(const std::string& name);
     const std::string& deviceName() const;
+    void setProfileOverride(smartfitness::FtmsOutputProfile profile);
+    smartfitness::MachineProfile profile() const;
 
     // Safe to call from the BLE host task: events are queued and drained in loop().
     bool enqueueControlPoint(const std::uint8_t* data, std::size_t length);
@@ -51,9 +53,11 @@ public:
 
     // Last payloads handed to the transport (diagnostics and host tests).
     const smartfitness::ftms::Bytes& lastIndoorBikeData() const;
+    const smartfitness::ftms::Bytes& lastTreadmillData() const;
     const smartfitness::ftms::Bytes& lastControlResponse() const;
     const smartfitness::ftms::Bytes& lastMachineStatus() const;
     const smartfitness::ftms::Bytes& feature() const;
+    smartfitness::ftms::Bytes speedRange() const;
 
     using Clock = std::function<std::uint32_t()>;
     void setClock(Clock clock);
@@ -75,6 +79,7 @@ private:
     void startAdvertising();
     void stopAdvertising();
     void resetSession();
+    void refreshProfile();
     std::uint32_t now() const;
 
     // Transport hooks; no-ops besides bookkeeping on the host.
@@ -84,7 +89,9 @@ private:
     void transportDisconnectClients();
     void transportApplyName();
     void transportSetFeature();
+    void transportApplyProfile();
     void transportNotifyBikeData();
+    void transportNotifyTreadmillData();
     void transportNotifyTrainingStatus();
     void transportIndicateResponse();
     void transportNotifyStatus();
@@ -97,12 +104,17 @@ private:
     std::uint32_t advertiseFailedMs_ = 0;
     bool granted_ = false;
     bool connected_ = false;
+    bool profileDisconnectPending_ = false;
+    smartfitness::FtmsOutputProfile profileOverride_ = smartfitness::FtmsOutputProfile::Auto;
+    smartfitness::MachineProfile profile_ = smartfitness::MachineProfile::IndoorBike;
     std::uint32_t seenGeneration_ = 0;
     std::uint32_t lastBikeDataMs_ = 0;
     bool bikeDataSent_ = false;
+    bool trainingStatusSent_ = false;
     smartfitness::ftms::TrainingStatus trainingStatus_ = smartfitness::ftms::TrainingStatus::Idle;
     smartfitness::ftms::Bytes feature_;
     smartfitness::ftms::Bytes bikeData_;
+    smartfitness::ftms::Bytes treadmillData_;
     smartfitness::ftms::Bytes response_;
     smartfitness::ftms::Bytes status_;
     Clock clock_;

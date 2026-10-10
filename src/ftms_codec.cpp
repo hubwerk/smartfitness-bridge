@@ -19,7 +19,10 @@ void putUint32(Bytes& out, std::uint32_t value) {
 }
 
 long scaled(float value, float scale, long minimum, long maximum) {
-    const long rounded = std::lround(static_cast<double>(value) * static_cast<double>(scale));
+    const double raw = static_cast<double>(value) * static_cast<double>(scale);
+    if (raw <= minimum) return minimum;
+    if (raw >= maximum) return maximum;
+    const long rounded = std::lround(raw);
     return rounded < minimum ? minimum : (rounded > maximum ? maximum : rounded);
 }
 
@@ -58,7 +61,56 @@ Bytes encodeIndoorBikeData(const IndoorBikeData& data) {
     return out;
 }
 
-Bytes encodeFeature(const TrainerCapabilities& capabilities) {
+TreadmillData treadmillDataFrom(const TrainerState& state) {
+    TreadmillData data;
+    if (!state.connected) return data;
+    data.speed = state.sample(Metric::Speed);
+    data.incline = state.sample(Metric::Incline);
+    data.heartRate = state.sample(Metric::HeartRate);
+    data.distance = state.sample(Metric::Distance);
+    data.elapsed = state.sample(Metric::ElapsedTime);
+    return data;
+}
+
+Bytes encodeTreadmillData(const TreadmillData& data) {
+    std::uint16_t flags = usable(data.speed) ? 0 : 1;
+    if (usable(data.distance)) flags |= 1U << 2;
+    if (usable(data.incline)) flags |= 1U << 3;
+    if (usable(data.heartRate)) flags |= 1U << 8;
+    if (usable(data.elapsed)) flags |= 1U << 10;
+    Bytes out;
+    putUint16(out, flags);
+    if (usable(data.speed)) putUint16(out, static_cast<std::uint16_t>(scaled(data.speed.value, 100, 0, 65535)));
+    if (usable(data.distance)) {
+        const auto distance = static_cast<std::uint32_t>(scaled(data.distance.value, 1, 0, 0xFFFFFF));
+        putUint16(out, static_cast<std::uint16_t>(distance));
+        out.push_back(static_cast<std::uint8_t>(distance >> 16));
+    }
+    if (usable(data.incline)) {
+        putSint16(out, static_cast<std::int16_t>(scaled(data.incline.value, 10, -32768, 32767)));
+        const float angle = std::atan(data.incline.value / 100.0F) * 180.0F / 3.14159265358979323846F;
+        putSint16(out, static_cast<std::int16_t>(scaled(angle, 10, -32768, 32767)));
+    }
+    if (usable(data.heartRate)) out.push_back(static_cast<std::uint8_t>(scaled(data.heartRate.value, 1, 0, 255)));
+    if (usable(data.elapsed)) putUint16(out, static_cast<std::uint16_t>(scaled(data.elapsed.value, 1, 0, 65535)));
+    return out;
+}
+
+Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile profile) {
+    if (profile == MachineProfile::Treadmill) {
+        std::uint32_t features = 0;
+        if (capabilities.supports(Metric::Distance)) features |= 1U << 2;
+        if (capabilities.supports(Metric::Incline)) features |= kFeatureInclination;
+        if (capabilities.supports(Metric::HeartRate)) features |= kFeatureHeartRate;
+        if (capabilities.supports(Metric::ElapsedTime)) features |= 1U << 12;
+        std::uint32_t targets = 0;
+        if (capabilities.supports(Control::Speed)) targets |= kTargetSpeed;
+        if (capabilities.supports(Control::Incline)) targets |= kTargetInclination;
+        Bytes out;
+        putUint32(out, features);
+        putUint32(out, targets);
+        return out;
+    }
     std::uint32_t features = 0;
     if (capabilities.supports(Metric::Cadence)) features |= kFeatureCadence;
     if (capabilities.supports(Metric::Incline)) features |= kFeatureInclination;
@@ -73,6 +125,14 @@ Bytes encodeFeature(const TrainerCapabilities& capabilities) {
     Bytes out;
     putUint32(out, features);
     putUint32(out, targets);
+    return out;
+}
+
+Bytes encodeSupportedSpeedRange() {
+    Bytes out;
+    putUint16(out, static_cast<std::uint16_t>(scaled(kSpeedBounds.minimum, 100, 0, 65535)));
+    putUint16(out, static_cast<std::uint16_t>(scaled(kSpeedBounds.maximum, 100, 0, 65535)));
+    putUint16(out, 1);
     return out;
 }
 
@@ -104,12 +164,12 @@ Bytes encodeTrainingStatus(TrainingStatus status) {
     return {0x00, static_cast<std::uint8_t>(status)};
 }
 
-Bytes encodeAdvertisingServiceData() {
-    // Flags: bit 0 Fitness Machine Available. Type: bit 5 Indoor Bike Supported.
-    return {0x01, 0x20, 0x00};
+Bytes encodeAdvertisingServiceData(MachineProfile profile) {
+    // Flags: machine available; type bit 0 treadmill or bit 5 indoor bike.
+    return {0x01, static_cast<std::uint8_t>(profile == MachineProfile::Treadmill ? 0x01 : 0x20), 0x00};
 }
 
-bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPointCommand& command) {
+bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPointCommand& command, MachineProfile profile) {
     command = {};
     if (!data || length == 0) return false;
     command.opcode = data[0];
@@ -120,6 +180,18 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
         return parameterLength == expected;
     };
     switch (static_cast<OpCode>(command.opcode)) {
+        case OpCode::SetTargetSpeed:
+            if (profile != MachineProfile::Treadmill) break;
+            if (!expect(2)) break;
+            command.request = {Control::Speed, static_cast<float>(
+                static_cast<std::uint16_t>(parameters[0] | (parameters[1] << 8))) / 100.0F};
+            if (command.request.value < kSpeedBounds.minimum || command.request.value > kSpeedBounds.maximum) {
+                command.status = ResultCode::InvalidParameter;
+                break;
+            }
+            command.hasRequest = true;
+            command.statusParameters.assign(parameters, parameters + 2);
+            break;
         case OpCode::RequestControl:
         case OpCode::Reset:
         case OpCode::StartOrResume:
@@ -129,9 +201,16 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
             if (!expect(2)) break;
             command.hasRequest = true;
             command.request = {Control::Incline, static_cast<float>(readSint16(parameters)) / 10.0F};
+            if (profile == MachineProfile::Treadmill &&
+                (command.request.value < kInclineBounds.minimum || command.request.value > kInclineBounds.maximum)) {
+                command.status = ResultCode::InvalidParameter;
+                command.hasRequest = false;
+                break;
+            }
             command.statusParameters.assign(parameters, parameters + 2);
             break;
         case OpCode::SetTargetResistance:
+            if (profile == MachineProfile::Treadmill) break;
             // FTMS 1.0 defines UINT8 (0.1); later clients may send SINT16 (0.1).
             if (parameterLength == 1) {
                 command.status = ResultCode::Success;
@@ -147,6 +226,7 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
             command.statusParameters.assign(parameters, parameters + parameterLength);
             break;
         case OpCode::SetTargetPower:
+            if (profile == MachineProfile::Treadmill) break;
             if (!expect(2)) break;
             command.hasRequest = true;
             command.request = {Control::Power, static_cast<float>(readSint16(parameters))};
@@ -161,6 +241,7 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
             command.statusParameters.assign(parameters, parameters + 1);
             break;
         case OpCode::SetIndoorBikeSimulation:
+            if (profile == MachineProfile::Treadmill) break;
             // Wind speed (SINT16, 0.001 m/s), grade (SINT16, 0.01 %), Crr (UINT8), Cw (UINT8).
             if (!expect(6)) break;
             command.hasRequest = true;
@@ -184,6 +265,7 @@ Bytes encodeMachineStatus(const ControlPointCommand& command) {
         case OpCode::Reset: code = StatusCode::Reset; break;
         case OpCode::StopOrPause: code = StatusCode::StoppedOrPaused; break;
         case OpCode::StartOrResume: code = StatusCode::StartedOrResumed; break;
+        case OpCode::SetTargetSpeed: code = StatusCode::TargetSpeedChanged; break;
         case OpCode::SetTargetInclination: code = StatusCode::TargetInclineChanged; break;
         case OpCode::SetTargetResistance: code = StatusCode::TargetResistanceChanged; break;
         case OpCode::SetTargetPower: code = StatusCode::TargetPowerChanged; break;
@@ -280,7 +362,7 @@ bool decodeTreadmillData(const std::uint8_t* data, std::size_t length, MachineDa
     if (flags & (1U << 7)) reader.skip(5);  // expended energy
     if (flags & (1U << 8)) out.heartRate = sample(static_cast<float>(reader.uint(1)));
     if (flags & (1U << 9)) reader.skip(1);   // metabolic equivalent
-    if (flags & (1U << 10)) reader.skip(2);  // elapsed time
+    if (flags & (1U << 10)) out.elapsed = sample(static_cast<float>(reader.uint(2)));
     if (flags & (1U << 11)) reader.skip(2);  // remaining time
     if (flags & (1U << 12)) {
         reader.skip(2);  // force on belt

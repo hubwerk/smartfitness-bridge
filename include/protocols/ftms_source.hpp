@@ -22,6 +22,8 @@ public:
     explicit FtmsSource(const Options& options);
 
     const char* id() const override { return options_.id; }
+    MachineProfile profile() const override { return profile_; }
+    void onAdvertisement(const ble::Advertisement& advertisement, std::uint32_t nowMs) override;
     ble::ConnectPlan plan() const override;
     bool onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) override;
     void onRead(std::size_t index, const std::uint8_t* data, std::size_t length) override;
@@ -51,6 +53,11 @@ private:
     float clampTo(const ftms::SupportedRange& range, float value) const;
 
     Options options_;
+    MachineProfile profile_ = MachineProfile::IndoorBike;
+    MachineProfile advertisedProfile_ = MachineProfile::IndoorBike;
+    bool advertisedProfileValid_ = false;
+    std::uint32_t dataSubscribedMask_ = 0;
+    bool dataProfileSelected_ = false;
     ftms::Features features_;
     bool featuresRead_ = false;
     ftms::SupportedRange resistanceRange_;

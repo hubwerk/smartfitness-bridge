@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <map>
 #include <thread>
 
 #include "ant_output.h"
@@ -22,9 +23,11 @@
 #include "protocols/domyos.hpp"
 #include "protocols/echelon.hpp"
 #include "protocols/ftms_source.hpp"
+#include "protocols/ifit_bowflex.hpp"
 #include "protocols/registry.hpp"
 #include "protocols/sensor_codec.hpp"
 #include "protocols/sensor_sources.hpp"
+#include "protocols/treadmills.hpp"
 #include "protocols/yesoul_keiser.hpp"
 
 using namespace smartfitness;
@@ -60,6 +63,11 @@ void testBleTypes() {
     assert(report.nameString()[4] == '?');
     for (std::uint16_t value = 0; value < 10; ++value) report.addService(ble::Uuid::from16(value));
     assert(report.serviceCount == ble::kMaxAdvertisedServices);
+    const Bytes serviceData{1, 1, 0};
+    report.setFtmsServiceData(serviceData.data(), serviceData.size());
+    assert(report.ftmsServiceDataLength == 3);
+    report.setFtmsServiceData(nullptr, 3);
+    assert(report.ftmsServiceDataLength == 0 && ble::Advertisement::from(report).ftmsServiceData.empty());
 
     ble::ConnectPlan plan;
     for (std::size_t index = 0; index < ble::kMaxSubscriptions; ++index)
@@ -444,6 +452,153 @@ void testRegistry() {
     assert(!protocols::createProtocol("unknown"));
 }
 
+void testProtocolProfiles() {
+    std::map<std::string, MachineProfile> expected{
+        {"keiser-m3i", MachineProfile::IndoorBike}, {"echelon", MachineProfile::IndoorBike},
+        {"domyos", MachineProfile::IndoorBike}, {"schwinn-ic4", MachineProfile::IndoorBike},
+        {"yesoul", MachineProfile::IndoorBike}, {"tacx-fec", MachineProfile::IndoorBike},
+        {"elite-legacy", MachineProfile::IndoorBike}, {"elite-dr", MachineProfile::IndoorBike},
+        {"elite-misuro", MachineProfile::IndoorBike}, {"wahoo-legacy", MachineProfile::IndoorBike},
+        {"concept2-pm5", MachineProfile::Rower}, {"ftms", MachineProfile::IndoorBike},
+        {"cps", MachineProfile::IndoorBike}, {"csc", MachineProfile::IndoorBike},
+        {"hrs", MachineProfile::IndoorBike}, {"ifit-bike", MachineProfile::IndoorBike},
+        {"ifit-treadmill", MachineProfile::Treadmill}, {"ifit-freestride", MachineProfile::CrossTrainer},
+        {"ifit-elliptical", MachineProfile::CrossTrainer}, {"ifit-el-trainer", MachineProfile::CrossTrainer},
+        {"bowflex-t216", MachineProfile::Treadmill}, {"schwinn-170", MachineProfile::IndoorBike}
+    };
+    assert(protocols::ifit_bowflex::modelCount() == 97);
+    for (unsigned ordinal = 1; ordinal <= 97; ++ordinal) {
+        const auto profile = ordinal <= 23 || ordinal == 97 ? MachineProfile::IndoorBike :
+                             ordinal <= 83 || (ordinal >= 91 && ordinal <= 96) ? MachineProfile::Treadmill :
+                             MachineProfile::CrossTrainer;
+        expected.emplace("ifit-model-" + std::to_string(ordinal), profile);
+    }
+    for (const char* id : {
+             "horizon-tm", "horizon-paragon", "spirit-treadmill", "spirit-xt485", "spirit-xt800",
+             "sole-treadmill", "sole-f63", "sole-f65", "sole-tt8", "walkingpad-r1", "walkingpad-flat",
+             "walkingpad-re", "walkingpad-g1", "walkingpad-g1b", "walkingpad-r2",
+             "wp2-c0-s2c2", "wp2-c0-s1c1",
+             "wp2-c2-s0", "wp2-c2-s2c2", "wp2-c2-s1c1",
+             "wp2-c3-s0", "wp2-c3-s2c2", "wp2-c3-s1c1",
+             "wp2-c4-s0", "wp2-c4-s2c2", "wp2-c4-s1c1",
+             "wp2-c5-s0", "wp2-c5-s2c2", "wp2-c5-s1c1",
+             "wp2-c6-s0", "wp2-c6-s2c2", "wp2-c6-s1c1",
+             "wp2-c7-s0", "wp2-c7-s2c2", "wp2-c7-s1c1"})
+        expected.emplace(id, MachineProfile::Treadmill);
+    assert(expected.size() == protocols::protocolCount());
+    for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
+        const auto& info = protocols::protocolAt(index);
+        assert(expected.at(info.id) == info.profile);
+        auto source = protocols::createProtocol(info.id);
+        assert(source && source->profile() == info.profile);
+        source->reset();
+        assert(source->profile() == info.profile);
+        // Enumeration and factory calls must not modify descriptor identities.
+        assert(protocols::findProtocol(info.id) == &info);
+    }
+}
+
+void testFtmsProfiles() {
+    using Source = protocols::FtmsSource;
+    const std::array<MachineProfile, 4> profiles{{MachineProfile::IndoorBike, MachineProfile::Treadmill,
+                                                MachineProfile::CrossTrainer, MachineProfile::Rower}};
+    const std::array<Bytes, 4> frames{{{0, 0, 0xC4, 9}, {0, 0, 0xB0, 4},
+                                      {0, 0, 0, 0xE8, 3}, {0, 0, 0x30, 0x10, 0}}};
+    const std::array<std::uint8_t, 4> typeBits{{0x20, 1, 2, 0x10}};
+    for (std::size_t index = 0; index < profiles.size(); ++index) {
+        Source source;
+        assert(source.onConnected(1U << index, 100));
+        assert(source.profile() == profiles[index]);
+        source.onNotify(index, frames[index].data(), frames[index].size(), 200);
+        assert(source.profile() == profiles[index] && source.hasData());
+        source.reset();
+        assert(source.profile() == MachineProfile::IndoorBike && !source.sample().distance.valid);
+        ble::Advertisement advertisement;
+        advertisement.ftmsServiceData = {1, typeBits[index], 0};
+        source.onAdvertisement(advertisement, 300);
+        assert(source.profile() == profiles[index]);
+        assert(source.onConnected(0x1f, 300));  // Some machines expose every data characteristic.
+        assert(source.profile() == profiles[index]);
+        for (std::size_t other = 0; other < frames.size(); ++other) {
+            source.onNotify(other, frames[other].data(), frames[other].size(), 400);
+            assert(source.profile() == profiles[index]);
+        }
+    }
+    Source source;
+    ble::Advertisement advertisement;
+    for (const Bytes& invalid : {Bytes{1, 1}, Bytes{0, 1, 0}, Bytes{1, 0, 0}, Bytes{1, 3, 0},
+                                 Bytes{1, 4, 0}}) {
+        advertisement.ftmsServiceData = invalid;
+        source.onAdvertisement(advertisement, 100);
+        assert(source.profile() == MachineProfile::IndoorBike);
+    }
+    // A sole available characteristic overrides contradictory advertising.
+    advertisement.ftmsServiceData = {1, 0x20, 0};
+    source.onAdvertisement(advertisement, 100);
+    assert(source.onConnected(1U << Source::SubTreadmill, 100));
+    assert(source.profile() == MachineProfile::Treadmill);
+    source.reset();
+    assert(source.onConnected(0x0f, 200));
+    source.onNotify(Source::SubRower, frames[3].data(), frames[3].size(), 300);
+    assert(source.profile() == MachineProfile::Rower);
+    const Bytes distance{0x10, 0, 0xC4, 9, 0x10, 0x27, 0};
+    source.onNotify(Source::SubBike, distance.data(), distance.size(), 400);
+    assert(source.profile() == MachineProfile::Rower && !source.sample().distance.valid);
+    assert(near(source.sample().cadence.value, 24));
+    advertisement.ftmsServiceData = {1, 0x20, 0};
+    source.onAdvertisement(advertisement, 400);
+    assert(source.profile() == MachineProfile::IndoorBike && !source.hasData());
+    assert(!source.sample().cadence.valid && source.capabilities().metrics == 0);
+    source.onNotify(Source::SubBike, distance.data(), distance.size(), 400);
+    assert(source.sample().distance.valid && near(source.sample().distance.value, 10000));
+    const Bytes moreData{1, 0};
+    source.onNotify(Source::SubBike, moreData.data(), moreData.size(), 500);
+    assert(near(source.sample().distance.value, 10000));
+    auto schwinn = protocols::createProtocol("schwinn-ic4");
+    advertisement.ftmsServiceData = {1, 1, 0};
+    schwinn->onAdvertisement(advertisement, 100);
+    assert(schwinn->onConnected(1, 100));
+    assert(schwinn->profile() == MachineProfile::IndoorBike);
+}
+
+void testFtmsControlDoesNotStartTreadmill() {
+    using Source = protocols::FtmsSource;
+    const Bytes feature{0, 0, 0, 0, 0x0c, 0, 0, 0};
+    const Bytes granted{0x80, 0, 1};
+    for (std::size_t index = Source::SubBike; index <= Source::SubRower; ++index) {
+        Source source;
+        source.onRead(Source::ReadFeature, feature.data(), feature.size());
+        assert(source.onConnected((1U << index) | (1U << Source::SubControlPoint), 100));
+        ble::GattWrite write;
+        assert(source.pendingWrites() == 1 && source.takeWrite(write));
+        assert(write.payload() == ftms::encodeRequestControl());
+        assert(!source.takeWrite(write));
+        source.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 200);
+        assert(source.controlState() == Source::ControlState::Granted);
+        if (index == Source::SubBike)
+            assert(source.takeWrite(write) && write.payload() == ftms::encodeStartOrResume());
+        assert(source.pendingWrites() == 0 && !source.takeWrite(write));
+    }
+    // Advertising selects treadmill even if the device subscribes every data UUID.
+    Source source;
+    ble::Advertisement advertisement;
+    advertisement.ftmsServiceData = {1, 1, 0};
+    source.onAdvertisement(advertisement, 100);
+    source.onRead(Source::ReadFeature, feature.data(), feature.size());
+    assert(source.onConnected(0x1f, 100));
+    ble::GattWrite write;
+    assert(source.takeWrite(write) && write.payload() == ftms::encodeRequestControl());
+    source.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 200);
+    assert(source.profile() == MachineProfile::Treadmill && !source.takeWrite(write));
+    // The bike compatibility default is not proof that an ambiguous machine is a bike.
+    source.reset();
+    source.onRead(Source::ReadFeature, feature.data(), feature.size());
+    assert(source.onConnected(0x1f, 300));
+    assert(source.takeWrite(write) && write.payload() == ftms::encodeRequestControl());
+    source.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 400);
+    assert(!source.takeWrite(write));
+}
+
 struct Harness {
     std::uint32_t now = 1000;
     FakeCentral central;
@@ -470,6 +625,131 @@ struct Harness {
         adapter.loop();
     }
 };
+
+void testAdapterProfiles() {
+    Harness h;
+    assert(h.adapter.profile() == MachineProfile::IndoorBike);
+    h.adapter.startScan();
+    ble::ScanReport report;
+    report.address = address("aa:00:00:00:00:01");
+    report.addService(ble::Uuid::from16(0x1826));
+    const Bytes treadmillType{1, 1, 0};
+    report.setFtmsServiceData(treadmillType.data(), treadmillType.size());
+    assert(ble::Advertisement::from(report).ftmsServiceData == treadmillType);
+    h.central.reports.push_back(report);
+    h.adapter.loop();
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    h.central.pushEvent(ble::CentralEventType::Connected, 0x1f);
+    h.adapter.loop();
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    SimulatedDeviceAdapter simulation;
+    InputSelector selector(simulation, &h.adapter);
+    assert(selector.profile() == MachineProfile::IndoorBike);
+    selector.select(InputSelector::Source::Ble);
+    assert(selector.profile() == MachineProfile::Treadmill);
+    h.adapter.clearPairedDevice();
+    assert(h.adapter.profile() == MachineProfile::IndoorBike);
+    h.pair("aa:00:00:00:00:02", "ifit-model-24");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    h.adapter.disconnect();
+    h.pair("aa:00:00:00:00:03", "ifit-model-84");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::CrossTrainer);
+    h.adapter.disconnect();
+    h.pair("aa:00:00:00:00:04", "concept2-pm5");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::Rower);
+}
+
+void testFtmsDistanceTelemetry() {
+    Harness h;
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.adapter.loop();
+    assert(!h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.capabilities().supports(Metric::Distance));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, 0,
+                        {0x10, 0, 0xC4, 9, 0x10, 0x27, 0});
+    h.adapter.loop();
+    assert(h.adapter.telemetry().distanceValid && near(h.adapter.telemetry().distance, 10000));
+    assert(h.adapter.capabilities().supports(Metric::Distance));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, 0, {1, 0});
+    h.adapter.loop();
+    assert(h.adapter.telemetry().distanceValid && near(h.adapter.telemetry().distance, 10000));
+    h.advance(5001);
+    assert(!h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.capabilities().supports(Metric::Distance));
+    h.adapter.disconnect();
+    assert(!h.adapter.telemetry().distanceValid && h.adapter.telemetry().distance == 0);
+}
+
+void testFtmsElapsedTelemetry() {
+    Harness h;
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1U << protocols::FtmsSource::SubTreadmill);
+    h.adapter.loop();
+    assert(!h.adapter.telemetry().elapsedValid);
+    assert(!h.adapter.capabilities().supports(Metric::ElapsedTime));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, protocols::FtmsSource::SubTreadmill,
+                        {0x04, 0x04, 0xB0, 4, 0x10, 0x27, 0, 0x2c, 1});
+    h.adapter.loop();
+    const auto telemetry = h.adapter.telemetry();
+    assert(telemetry.elapsedValid && near(telemetry.elapsed, 300));
+    assert(telemetry.distanceValid && near(telemetry.distance, 10000));
+    assert(h.adapter.capabilities().supports(Metric::ElapsedTime));
+    assert(h.adapter.capabilities().supports(Metric::Distance));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, protocols::FtmsSource::SubTreadmill, {1, 0});
+    h.adapter.loop();
+    assert(h.adapter.telemetry().elapsedValid && near(h.adapter.telemetry().elapsed, 300));
+    h.advance(5001);
+    assert(!h.adapter.telemetry().elapsedValid && !h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.capabilities().supports(Metric::ElapsedTime));
+    h.adapter.disconnect();
+    assert(!h.adapter.telemetry().elapsedValid && h.adapter.telemetry().elapsed == 0);
+}
+
+void testStaleFtmsTreadmillControlSafety() {
+    Harness h;
+    using Source = protocols::FtmsSource;
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::ReadResult, 0, Source::ReadFeature,
+                        {0, 0, 0, 0, 3, 0, 0, 0});
+    h.central.pushEvent(ble::CentralEventType::Connected,
+                        (1U << Source::SubTreadmill) | (1U << Source::SubControlPoint));
+    h.adapter.loop();
+    assert(h.central.writes.size() == 1 && h.central.writes.back().payload() == ftms::encodeRequestControl());
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, Source::SubControlPoint, {0x80, 0, 1});
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, Source::SubTreadmill, {0, 0, 0xB0, 4});
+    h.adapter.loop();
+    assert(h.adapter.profile() == MachineProfile::Treadmill && h.central.writes.size() == 1);
+    assert(h.adapter.capabilities().supports(Control::Speed));
+    assert(h.adapter.apply({Control::Speed, 8}));
+    const std::size_t writes = h.central.writes.size();
+    h.advance(5001);
+    assert(h.adapter.stale() && h.adapter.capabilities().metrics == 0 && h.adapter.capabilities().controls == 0);
+    assert(!h.adapter.apply({Control::Speed, 9}));
+    assert(!h.adapter.apply({Control::Incline, 2}));
+    assert(h.central.writes.size() == writes);
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, Source::SubTreadmill, {0, 0, 0xB0, 4});
+    h.adapter.loop();
+    assert(!h.adapter.stale() && h.adapter.capabilities().supports(Control::Speed));
+    assert(h.adapter.apply({Control::Speed, 9}));
+    h.central.pushEvent(ble::CentralEventType::Disconnected);
+    h.adapter.loop();
+    assert(h.adapter.capabilities().metrics == 0 && h.adapter.capabilities().controls == 0);
+    assert(!h.adapter.apply({Control::Speed, 10}));
+}
 
 void testScanDedupAndExclusion() {
     Harness h;
@@ -1051,6 +1331,13 @@ void runBleInputTests() {
     testDomyos();
     testYesoulAndKeiser();
     testRegistry();
+    testProtocolProfiles();
+    testFtmsProfiles();
+    testFtmsControlDoesNotStartTreadmill();
+    testAdapterProfiles();
+    testFtmsDistanceTelemetry();
+    testFtmsElapsedTelemetry();
+    testStaleFtmsTreadmillControlSafety();
     testScanDedupAndExclusion();
     testFtmsLifecycle();
     testProtocolFailureAndControlDenied();

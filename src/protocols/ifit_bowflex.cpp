@@ -413,14 +413,24 @@ bool schwinnMatch(const ble::Advertisement& a) { return !a.hasService(0x1826) &&
 template<Kind kind> std::unique_ptr<SourceProtocol> create() {
     return std::unique_ptr<SourceProtocol>(new IfitBowflexSource(kind));
 }
+MachineProfile machineProfile(Kind kind) {
+    switch (kind) {
+        case Kind::Treadmill:
+        case Kind::BowflexT216: return MachineProfile::Treadmill;
+        case Kind::FreeStride:
+        case Kind::Elliptical:
+        case Kind::EllipticalTrainer: return MachineProfile::CrossTrainer;
+        default: return MachineProfile::IndoorBike;
+    }
+}
 const ProtocolInfo descriptors[] = {
-    {"ifit-bike","iFit / NordicTrack / ProForm BLE bike",85,bikeMatch,create<Kind::Bike>,true,false},
-    {"ifit-treadmill","iFit / NordicTrack / ProForm BLE treadmill",85,treadmillMatch,create<Kind::Treadmill>,true,false},
-    {"ifit-freestride","ProForm BLE FreeStride",85,strideMatch,create<Kind::FreeStride>,false,false},
-    {"ifit-elliptical","NordicTrack BLE elliptical",85,ellipticalMatch,create<Kind::Elliptical>,true,false},
-    {"ifit-el-trainer","ProForm BLE elliptical trainer",85,trainerMatch,create<Kind::EllipticalTrainer>,true,false},
-    {"bowflex-t216","Bowflex T216 BLE treadmill",85,bowMatch,create<Kind::BowflexT216>,false,false},
-    {"schwinn-170","Schwinn 170/270 BLE bike",85,schwinnMatch,create<Kind::Schwinn170>,false,false}
+    {"ifit-bike","iFit / NordicTrack / ProForm BLE bike",85,bikeMatch,create<Kind::Bike>,true,false,MachineProfile::IndoorBike},
+    {"ifit-treadmill","iFit / NordicTrack / ProForm BLE treadmill",85,treadmillMatch,create<Kind::Treadmill>,true,false,MachineProfile::Treadmill},
+    {"ifit-freestride","ProForm BLE FreeStride",85,strideMatch,create<Kind::FreeStride>,false,false,MachineProfile::CrossTrainer},
+    {"ifit-elliptical","NordicTrack BLE elliptical",85,ellipticalMatch,create<Kind::Elliptical>,true,false,MachineProfile::CrossTrainer},
+    {"ifit-el-trainer","ProForm BLE elliptical trainer",85,trainerMatch,create<Kind::EllipticalTrainer>,true,false,MachineProfile::CrossTrainer},
+    {"bowflex-t216","Bowflex T216 BLE treadmill",85,bowMatch,create<Kind::BowflexT216>,false,false,MachineProfile::Treadmill},
+    {"schwinn-170","Schwinn 170/270 BLE bike",85,schwinnMatch,create<Kind::Schwinn170>,false,false,MachineProfile::IndoorBike}
 };
 constexpr std::size_t kManualProfiles = 97;
 static_assert(sizeof(ifit_bowflex::models) / sizeof(ifit_bowflex::models[0]) == kManualProfiles,
@@ -444,7 +454,7 @@ struct ManualDescriptors {
             const auto& model = ifit_bowflex::modelAt(i);
             const bool controls = model.kind == Kind::Bike || model.kind == Kind::Treadmill ||
                                   model.kind == Kind::Elliptical || model.kind == Kind::EllipticalTrainer;
-            entries[i] = {ids[i].c_str(),model.name,0,manualMatch,factories[i],controls,false};
+            entries[i] = {ids[i].c_str(),model.name,0,manualMatch,factories[i],controls,false,machineProfile(model.kind)};
         }
     }
 };

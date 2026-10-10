@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "bridge/ftms_roles.hpp"
+#include "bridge/machine_profile.hpp"
 #include "config_backend.h"
 
 // The paired BLE source device (used by the BLE input adapter on boot).
@@ -32,6 +33,8 @@ struct BridgeConfig {
     std::string wifiSsid;         // empty: SoftAP only
     std::string wifiPassword;     // empty (open network) or 8..63 characters
     std::string apPassword = "smartfitness";  // SoftAP WPA2 password, 8..63 printable ASCII characters
+    // Schema v3:
+    smartfitness::FtmsOutputProfile ftmsOutputProfile = smartfitness::FtmsOutputProfile::Auto;
 
     bool operator==(const BridgeConfig& other) const {
         return pairedDeviceName == other.pairedDeviceName && antEnabled == other.antEnabled &&
@@ -39,7 +42,7 @@ struct BridgeConfig {
                ftmsName == other.ftmsName && simulatedTrainer == other.simulatedTrainer &&
                pairedSource == other.pairedSource && pairedAdapterId == other.pairedAdapterId &&
                wifiSsid == other.wifiSsid && wifiPassword == other.wifiPassword &&
-               apPassword == other.apPassword;
+               apPassword == other.apPassword && ftmsOutputProfile == other.ftmsOutputProfile;
     }
     bool operator!=(const BridgeConfig& other) const { return !(*this == other); }
 };
@@ -49,7 +52,7 @@ enum class ConfigSaveResult { Written, Unchanged, Invalid, Failed };
 
 class ConfigStore {
 public:
-    static constexpr std::uint8_t kSchemaVersion = 2;
+    static constexpr std::uint8_t kSchemaVersion = 3;
     static constexpr std::size_t kMaxFtmsNameLength = 20;
     static constexpr std::size_t kMaxPairedNameLength = 32;
     static constexpr std::size_t kMaxAdapterIdLength = 16;

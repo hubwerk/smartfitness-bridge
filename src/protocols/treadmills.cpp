@@ -780,7 +780,7 @@ bool g1FallbackMatch(const ble::Advertisement& a) {
 template<Model M, int Limit = 0>
 void addModel(std::vector<ProtocolInfo>& out, const char* label) {
     TreadmillSource source(M, Cipher::Classic, R2Service::Standard, Limit);
-    out.push_back({source.id(), label, kMatchPriority, modelMatch<M,Limit>, modelFactory<M,Limit>, true, false});
+    out.push_back({source.id(), label, kMatchPriority, modelMatch<M,Limit>, modelFactory<M,Limit>, true, false, MachineProfile::Treadmill});
 }
 template<Cipher C, R2Service S>
 void addR2(std::vector<ProtocolInfo>& out) {
@@ -794,7 +794,7 @@ void addR2(std::vector<ProtocolInfo>& out) {
         ", " + serviceNames[static_cast<unsigned>(S)] +
         (C != Cipher::Classic && C != Cipher::MXG ? " (manual)" : "");
     out.push_back({source.id(), label.c_str(),
-                   kR2MatchPriority, r2Match<C,S>, r2Factory<C,S>, true, false});
+                   kR2MatchPriority, r2Match<C,S>, r2Factory<C,S>, true, false, MachineProfile::Treadmill});
 }
 const std::vector<ProtocolInfo>& descriptors() {
     static const std::vector<ProtocolInfo> values = [] {
@@ -811,8 +811,8 @@ const std::vector<ProtocolInfo>& descriptors() {
         addModel<Model::WalkingPadR1>(out,"WalkingPad R1 Pro");
         addModel<Model::WalkingPadR1,6>(out,"WalkingPad flat A1/C2");
         addModel<Model::WalkingPadRE>(out,"WalkingPad RE");
-        out.push_back({"walkingpad-g1","WalkingPad G1",kR2MatchPriority,g1Match,g1Factory,true,false});
-        out.push_back({"walkingpad-g1b","WalkingPad G1 alternate service",kR2MatchPriority,g1FallbackMatch,g1FallbackFactory,true,false});
+        out.push_back({"walkingpad-g1","WalkingPad G1",kR2MatchPriority,g1Match,g1Factory,true,false,MachineProfile::Treadmill});
+        out.push_back({"walkingpad-g1b","WalkingPad G1 alternate service",kR2MatchPriority,g1FallbackMatch,g1FallbackFactory,true,false,MachineProfile::Treadmill});
 #define ADD_CIPHER(c) \
         addR2<c,R2Service::Standard>(out); \
         addR2<c,R2Service::Service2Chars2>(out); \

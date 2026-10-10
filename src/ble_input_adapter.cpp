@@ -106,6 +106,12 @@ bool BleInputAdapter::startConnection() {
         return false;
     }
     protocol_->reset();
+    if (const auto* result = findResult(paired_.address)) {
+        ble::Advertisement advertisement;
+        advertisement.address = result->address;
+        advertisement.ftmsServiceData = result->ftmsServiceData;
+        protocol_->onAdvertisement(advertisement, now);
+    }
     ++attempts_;
     stateSinceMs_ = now;
     if (protocol_->advertisementOnly()) {
@@ -316,7 +322,8 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     if (isExcluded(report.address)) return;
     const std::uint32_t now = clock_();
     ble::Advertisement advertisement = ble::Advertisement::from(report);
-    if (state_ == LinkState::Listening && protocol_ && report.address == paired_.address)
+    if (protocol_ && report.address == paired_.address &&
+        (state_ == LinkState::Listening || state_ == LinkState::Connecting || state_ == LinkState::Ready))
         protocol_->onAdvertisement(advertisement, now);
     if (!userScan_) return;
 
@@ -338,6 +345,7 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     entry->connectable = report.connectable;
     entry->lastSeenMs = now;
     if (!advertisement.name.empty()) entry->name = advertisement.name;
+    if (!advertisement.ftmsServiceData.empty()) entry->ftmsServiceData = advertisement.ftmsServiceData;
     for (const auto& service : advertisement.services) {
         bool known = false;
         for (const auto& existing : entry->services) known = known || existing == service;
@@ -383,11 +391,18 @@ TrainerCapabilities BleInputAdapter::capabilities() const {
     if (!isConnected()) return {};
     TrainerCapabilities capabilities = protocol_->capabilities();
     // Stale telemetry: samples become invalid (and BridgeCore clears targets).
-    if (stale()) capabilities.metrics = 0;
+    if (stale()) {
+        capabilities.metrics = 0;
+        if (profile() == MachineProfile::Treadmill) capabilities.controls = 0;
+    }
     return capabilities;
 }
 
 bool BleInputAdapter::trainerDetected() const { return isConnected() && capabilities().controls != 0; }
+
+MachineProfile BleInputAdapter::profile() const {
+    return protocol_ ? protocol_->profile() : MachineProfile::IndoorBike;
+}
 
 const char* BleInputAdapter::protocolId() const { return protocol_ ? protocol_->id() : ""; }
 
@@ -406,11 +421,16 @@ FitnessTelemetry BleInputAdapter::telemetry() const {
     telemetry.incline = valueOf(sample.incline);
     telemetry.resistance = valueOf(sample.resistance);
     telemetry.targetPower = targetPower_;
+    telemetry.distance = valueOf(sample.distance);
+    telemetry.distanceValid = sample.distance.valid && !stale();
+    telemetry.elapsed = valueOf(sample.elapsed);
+    telemetry.elapsedValid = sample.elapsed.valid && !stale();
     return telemetry;
 }
 
 bool BleInputAdapter::apply(const ControlRequest& request) {
     if (state_ != LinkState::Ready || !protocol_) return false;
+    if (profile() == MachineProfile::Treadmill && stale()) return false;
     if (!protocol_->control(request, clock_())) return false;
     if (!flushWrites()) return false;
     if (request.control == Control::Power) targetPower_ = request.value;
@@ -485,6 +505,7 @@ bool InputSelector::scanAndConnect() { return active().scanAndConnect(); }
 void InputSelector::disconnect() { active().disconnect(); }
 bool InputSelector::isConnected() const { return active().isConnected(); }
 bool InputSelector::trainerDetected() const { return active().trainerDetected(); }
+MachineProfile InputSelector::profile() const { return active().profile(); }
 FitnessTelemetry InputSelector::telemetry() const { return active().telemetry(); }
 TrainerCapabilities InputSelector::capabilities() const { return active().capabilities(); }
 bool InputSelector::apply(const ControlRequest& request) { return active().apply(request); }

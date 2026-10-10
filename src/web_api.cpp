@@ -200,12 +200,27 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
 
     if (endpoint == "config") {
         if (!onlyKeys(object,
-                      {"ftmsName", "ftmsOutput", "ftmsInput", "ant", "simulatedTrainer", "wifiSsid", "wifiPassword",
+                      {"ftmsName", "ftmsOutputProfile", "ftmsOutput", "ftmsInput", "ant", "simulatedTrainer", "wifiSsid", "wifiPassword",
                        "apPassword", "save"},
                       error))
             return false;
         std::string text;
         bool present = false;
+        if (!object["ftmsOutputProfile"].isUnbound()) {
+            FtmsOutputProfile profile;
+            if (!object["ftmsOutputProfile"].is<const char*>()) {
+                error = "ftmsOutputProfile must be a string";
+                return false;
+            }
+            if (!optionalText(object, "ftmsOutputProfile", text, present, error)) return false;
+            if (!parseFtmsOutputProfile(text, profile)) {
+                error = "profile must be auto, bike, treadmill, cross-trainer or rower";
+                return false;
+            }
+            Command command = simple(CommandType::FtmsProfile);
+            command.text = text;
+            commands.push_back(command);
+        }
         if (!optionalText(object, "ftmsName", text, present, error)) return false;
         if (present) {
             Command command = simple(CommandType::FtmsName);

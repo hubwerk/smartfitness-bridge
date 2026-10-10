@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include "bridge_types.h"
+#include "bridge/machine_profile.hpp"
 
 class BtDeviceAdapter;
 class AntOutput;
@@ -17,6 +18,7 @@ enum class Metric : std::uint8_t {
     Power,
     HeartRate,
     Incline,
+    ElapsedTime,
     Count
 };
 
@@ -47,6 +49,7 @@ struct TrainerState {
     bool connected = false;
     bool trainerDetected = false;
     TrainerCapabilities capabilities;
+    MachineProfile profile = MachineProfile::IndoorBike;
     std::array<MetricSample, static_cast<std::size_t>(Metric::Count)> telemetry{};
 
     const MetricSample& sample(Metric metric) const;

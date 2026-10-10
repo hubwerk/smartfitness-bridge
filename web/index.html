@@ -58,6 +58,8 @@ table{width:100%;border-collapse:collapse}td,th{padding:6px 4px;border-bottom:1p
  <div class="card"><div class="label">Outputs</div>
   <div class="row"><label for="c-ftmsName">FTMS output name</label><input id="c-ftmsName" maxlength="20"></div>
   <div class="row"><label for="c-ftmsOutput">FTMS output</label><input id="c-ftmsOutput" type="checkbox"></div>
+  <div class="row"><label for="c-ftmsOutputProfile">FTMS output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option></select></div>
+  <p class="small">Cross trainer and rower currently use indoor bike output. The dashboard shows the effective profile.</p>
   <div class="row"><label for="c-ant">ANT+ FE-C</label><input id="c-ant" type="checkbox"><span class="pill warn">requires hardware (not implemented)</span></div>
   <div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div></div>
  <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
@@ -95,12 +97,12 @@ function renderStatus(s){
  $("m-target").textContent=s.target?s.target.control+" "+fmt(s.target.value):"–";
  fill($("s-bridge"),[pill(s.state,s.state==="disconnected"?"bad":"ok"),pill(s.trainer?"trainer":"no trainer",s.trainer?"ok":""),pill(s.canControl?"control ready":"no control",s.canControl?"ok":""),
   ...(s.controls||[]).map(c=>pill(c)),pill(s.deviceName||"no device")]);
- const i=s.input||{},items=[pill("source: "+i.source)];
+ const i=s.input||{},items=[pill("source: "+i.source),pill("profile: "+(i.profile||"bike"))];
  if(i.link)items.push(pill("link: "+i.link,i.link==="ready"||i.link==="listening"?"ok":i.link==="backoff"?"warn":""));
  if(i.protocol)items.push(pill("adapter: "+i.protocol));if(i.stale)items.push(pill("stale data","warn"));if(i.scanning)items.push(pill("scanning"));
  if(i.error)items.push(pill(i.error,"bad"));if(i.link==="backoff")items.push(pill("retry in "+Math.ceil(i.nextAttemptMs/1000)+" s"));
  fill($("s-input"),items);
- const f=s.ftmsOutput||{};fill($("s-ftms"),[pill(f.enabled?"enabled":"disabled",f.enabled?"ok":""),pill(f.name||""),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);
+ const f=s.ftmsOutput||{};fill($("s-ftms"),[pill(f.enabled?"enabled":"disabled",f.enabled?"ok":""),pill(f.name||""),pill("profile: "+(f.profile||"bike")),pill("override: "+(f.override||"auto")),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);
  const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
  const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
  $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
@@ -118,6 +120,7 @@ function renderScan(sc){
   tr.append(name,el("td",d.rssi),svc,ad,act);return tr}));}
 function renderConfig(c){
  $("c-ftmsName").value=c.ftmsName||"";for(const k of["ftmsOutput","ant","simulatedTrainer"])$("c-"+k).checked=!!c[k];
+ $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
  $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
  $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}
@@ -127,13 +130,13 @@ $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run(
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
 $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
  const r=await run("control",{control:$("ctl-kind").value,value:v},true);if(r){$("ctl-result").textContent=r.message;$("ctl-result").style.color=r.ok?"var(--ok)":"var(--bad)"}};
-$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutput:$("c-ftmsOutput").checked,ant:$("c-ant").checked,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
+$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutput:$("c-ftmsOutput").checked,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ant:$("c-ant").checked,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
  const r=await run("config",b);if(r&&r.ok)loadConfig()};
 $("btn-restart").onclick=()=>{if(confirm("Restart the bridge?"))run("restart")};
 $("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?"))run("factory-reset").then(loadConfig)};
 function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m)};
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m)};
  ws.onclose=()=>{$("conn").textContent="offline";$("conn").className="pill bad";setTimeout(connectWs,2000)}}
 fetch("/api/status").then(r=>r.json()).then(s=>{if(s.type)renderStatus(s)}).catch(()=>{});
 fetch("/api/scan/results").then(r=>r.json()).then(s=>{if(s.devices)renderScan(s)}).catch(()=>{});

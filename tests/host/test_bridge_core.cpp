@@ -34,6 +34,7 @@ public:
     bool accept = true;
     unsigned int calls = 0;
     TrainerCapabilities supported;
+    MachineProfile machine = MachineProfile::IndoorBike;
 
     void begin() override {}
     void loop() override {}
@@ -42,6 +43,7 @@ public:
     bool isConnected() const override { return connected; }
     bool trainerDetected() const override { return trainer; }
     TrainerCapabilities capabilities() const override { return supported; }
+    MachineProfile profile() const override { return machine; }
     FitnessTelemetry telemetry() const override {
         FitnessTelemetry value;
         value.connected = connected;
@@ -331,6 +333,62 @@ void testReattachmentAndCallbackCleanup() {
     second.scanAndConnect();
 }
 
+void testRuntimeProfiles() {
+    RuntimeAdapter adapter;
+    AntOutput ant;
+    FtmsOutput ftms;
+    BridgeCore bridge;
+    adapter.connected = true;
+    adapter.trainer = true;
+    adapter.machine = MachineProfile::Treadmill;
+    adapter.supported.setControl(Control::Speed, true);
+    bridge.attach(adapter, ant, ftms);
+    bridge.begin();
+    assert(bridge.trainerState().profile == MachineProfile::Treadmill);
+    assert(ftms.trainerState().profile == MachineProfile::Treadmill);
+    assert(bridge.routeControl({Control::Speed, 8}) == ControlResult::Applied);
+    bridge.loop();
+    assert(bridge.hasControlTarget());
+    adapter.machine = MachineProfile::IndoorBike;
+    bridge.loop();
+    assert(bridge.trainerState().profile == MachineProfile::IndoorBike);
+    assert(!bridge.hasControlTarget());
+    assert(!ftms.hasControlTarget());
+    adapter.machine = MachineProfile::Rower;
+    adapter.connected = false;
+    bridge.loop();
+    assert(bridge.trainerState().profile == MachineProfile::Rower);
+    assert(!bridge.trainerState().connected);
+}
+
+void testOptionalTreadmillTotals() {
+    BridgeCore bridge;
+    TrainerState state;
+    state.connected = true;
+    state.profile = MachineProfile::Treadmill;
+    state.capabilities.setMetric(Metric::Distance, true);
+    state.capabilities.setMetric(Metric::ElapsedTime, true);
+    bridge.setTrainerState(state);
+    FitnessTelemetry telemetry;
+    telemetry.connected = true;
+    telemetry.distance = 1234;
+    telemetry.elapsed = 321;
+    bridge.setTelemetry(telemetry);
+    assert(!bridge.trainerState().sample(Metric::Distance).valid);
+    assert(!bridge.trainerState().sample(Metric::ElapsedTime).valid);
+    telemetry.distanceValid = true;
+    telemetry.elapsedValid = true;
+    bridge.setTelemetry(telemetry);
+    assert(bridge.trainerState().sample(Metric::Distance).value == 1234);
+    assert(bridge.trainerState().sample(Metric::Distance).valid);
+    assert(bridge.trainerState().sample(Metric::ElapsedTime).value == 321);
+    assert(bridge.trainerState().sample(Metric::ElapsedTime).valid);
+    telemetry.connected = false;
+    bridge.setTelemetry(telemetry);
+    assert(!bridge.trainerState().sample(Metric::Distance).valid);
+    assert(!bridge.trainerState().sample(Metric::ElapsedTime).valid);
+}
+
 }  // namespace
 
 void runFtmsTests();
@@ -351,6 +409,8 @@ int main() {
     testConsoleAndConfig();
     testAuthoritativeAdapterState();
     testReattachmentAndCallbackCleanup();
+    testRuntimeProfiles();
+    testOptionalTreadmillTotals();
     runFtmsTests();
     runConfigStoreTests();
     runBleInputTests();

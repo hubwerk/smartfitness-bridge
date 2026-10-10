@@ -111,6 +111,7 @@ void BridgeCore::refreshDeviceState() {
     next.connected = device_->isConnected();
     next.trainerDetected = next.connected && device_->trainerDetected();
     next.capabilities = next.connected ? device_->capabilities() : TrainerCapabilities{};
+    next.profile = device_->profile();
     setTrainerState(next);
 }
 
@@ -118,7 +119,8 @@ void BridgeCore::setTrainerState(const TrainerState& state) {
     if (trainer_.connected != state.connected ||
         trainer_.trainerDetected != state.trainerDetected ||
         trainer_.capabilities.controls != state.capabilities.controls ||
-        trainer_.capabilities.metrics != state.capabilities.metrics) {
+        trainer_.capabilities.metrics != state.capabilities.metrics ||
+        trainer_.profile != state.profile) {
         hasTarget_ = false;
         target_ = {Control::Power, 0.0F};
         dirty_ = true;
@@ -130,6 +132,7 @@ void BridgeCore::setTrainerState(const TrainerState& state) {
     }
     if (!trainer_.connected) {
         trainer_ = {};
+        trainer_.profile = state.profile;
         telemetry_ = {};
         hasTarget_ = false;
         target_ = {Control::Power, 0.0F};
@@ -157,6 +160,10 @@ void BridgeCore::setTelemetry(const FitnessTelemetry& telemetry) {
     trainer_.setSample(Metric::Power, telemetry_.power, trainer_.connected && trainer_.capabilities.supports(Metric::Power));
     trainer_.setSample(Metric::HeartRate, telemetry_.heartRate, trainer_.connected && trainer_.capabilities.supports(Metric::HeartRate));
     trainer_.setSample(Metric::Incline, telemetry_.incline, trainer_.connected && trainer_.capabilities.supports(Metric::Incline));
+    trainer_.setSample(Metric::Distance, telemetry_.distance,
+                      trainer_.connected && telemetry_.distanceValid && trainer_.capabilities.supports(Metric::Distance));
+    trainer_.setSample(Metric::ElapsedTime, telemetry_.elapsed,
+                      trainer_.connected && telemetry_.elapsedValid && trainer_.capabilities.supports(Metric::ElapsedTime));
     dirty_ = true;
 }
 

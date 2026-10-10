@@ -199,6 +199,94 @@ void testWifiCommands() {
     assert(rig.ui.handleCommand("restart") == "restarting" && rig.ui.restartRequested());
 }
 
+void testOutputProfiles() {
+    Rig rig;
+    assert(parse(rig.ui.configJson())["ftmsOutputProfile"] == "auto");
+    auto status = parse(rig.ui.statusJson());
+    assert(status["input"]["profile"] == "bike");
+    assert(status["ftmsOutput"]["profile"] == "bike");
+    assert(status["ftmsOutput"]["override"] == "auto");
+    assert(status["telemetry"]["elapsed"].isNull());
+    assert(contains(rig.ui.handleCommand("help"), "ftms-profile"));
+    for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower"}) {
+        Command command;
+        std::string error;
+        assert(parseConsoleCommand("ftms-profile " + value, command, error));
+        assert(command.type == CommandType::FtmsProfile && command.text == value);
+        assert(rig.ui.execute(command).ok);
+        FtmsOutputProfile profile;
+        assert(parseFtmsOutputProfile(value, profile));
+        assert(rig.config.config().ftmsOutputProfile == profile);
+        assert(rig.ftms.profile() == effectiveOutputProfile(profile, rig.core.trainerState().profile));
+        status = parse(rig.ui.statusJson());
+        assert(status["ftmsOutput"]["override"].as<std::string>() == value);
+        assert(status["ftmsOutput"]["profile"].as<std::string>() == machineProfileName(rig.ftms.profile()));
+        assert(contains(rig.ui.status(), std::string("input-profile=bike output-profile=") +
+                        machineProfileName(rig.ftms.profile())));
+        assert(parse(rig.ui.configJson())["ftmsOutputProfile"].as<std::string>() == value);
+    }
+    for (const std::string value : {"", "AUTO", "elliptical", "bike ", "treadmill extra"}) {
+        Command command;
+        std::string error;
+        assert(!parseConsoleCommand("ftms-profile " + value, command, error));
+        command.type = CommandType::FtmsProfile;
+        command.text = value;
+        assert(!rig.ui.execute(command).ok);
+        assert(rig.config.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
+    }
+    assert(contains(rig.ui.handleCommand("ftms-profile treadmill"), "output-profile=treadmill"));
+    assert(rig.config.hasUnsavedChanges());
+    assert(rig.ui.handleCommand("save") == "configuration saved");
+    rig.ui.handleCommand("ftms-profile bike");
+    assert(contains(rig.ui.handleCommand("load"), "output-profile=treadmill"));
+    assert(rig.ftms.profile() == MachineProfile::Treadmill);
+    assert(contains(rig.ui.handleCommand("factory-reset"), "ftms-profile=auto"));
+    assert(rig.ftms.profile() == MachineProfile::IndoorBike);
+
+    rig.ui.handleCommand("ant off");
+    ApiExchange api;
+    for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower"}) {
+        const auto response = api.submit("config", "{\"ftmsOutputProfile\":\"" + value + "\",\"save\":true}");
+        assert(response.status == 202);
+        const auto id = parse(response.body)["id"].as<std::uint32_t>();
+        assert(api.process(rig.ui).size() == 1);
+        assert(parse(api.result(id).body)["ok"] == true);
+        ConfigStore rebooted(rig.backend);
+        assert(rebooted.begin() == ConfigLoadResult::Loaded);
+        assert(std::string(ftmsOutputProfileName(rebooted.config().ftmsOutputProfile)) == value);
+        api.publish(ApiExchange::Snapshot::Status, rig.ui.statusJson());
+        assert(parse(api.snapshot(ApiExchange::Snapshot::Status))["ftmsOutput"]["override"].as<std::string>() == value);
+    }
+    for (const std::string body : {R"({"ftmsOutputProfile":"invalid"})", R"({"ftmsOutputProfile":3})",
+                                   R"({"ftmsOutputProfile":null})", R"({"ftmsOutputProfile":false})",
+                                   R"({"ftmsOutputProfile":"bike\u0000"})", R"({"ftmsOutputProfile":""})",
+                                   R"({"ftmsName":"Changed","ftmsOutputProfile":"invalid","save":true})"}) {
+        const auto previous = rig.config.config();
+        assert(api.submit("config", body).status == 400);
+        assert(rig.config.config() == previous);
+    }
+    const auto omitted = api.submit("config", R"({"ant":false})");
+    assert(omitted.status == 202);
+    api.process(rig.ui);
+    assert(rig.config.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
+    rig.ui.handleCommand("ftms-profile auto");
+    for (const auto profile : {MachineProfile::Treadmill, MachineProfile::CrossTrainer, MachineProfile::Rower}) {
+        TrainerState input;
+        input.connected = true;
+        input.profile = profile;
+        input.capabilities.setMetric(Metric::ElapsedTime, true);
+        input.setSample(Metric::ElapsedTime, 321, true);
+        rig.core.setTrainerState(input);
+        rig.ftms.publishTrainerState(input);
+        status = parse(rig.ui.statusJson());
+        assert(status["input"]["profile"].as<std::string>() == machineProfileName(profile));
+        assert(status["telemetry"]["elapsed"] == 321);
+        assert(status["ftmsOutput"]["profile"].as<std::string>() ==
+               machineProfileName(effectiveOutputProfile(FtmsOutputProfile::Auto, profile)));
+        assert(contains(rig.ui.status(), std::string("input-profile=") + machineProfileName(profile)));
+    }
+}
+
 void testApiParsing() {
     std::vector<Command> commands;
     std::string error;
@@ -508,6 +596,7 @@ void runWebTests() {
     testConsoleBlePairing();
     testPairOverrideAndExclusion();
     testWifiCommands();
+    testOutputProfiles();
     testApiParsing();
     testApiExchange();
     testApiExchangeThreads();
