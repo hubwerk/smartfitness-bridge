@@ -394,12 +394,14 @@ public:
         if (request.control == Control::Speed) value.speed = request.value;
         else if (request.control == Control::Incline) value.incline = request.value;
         else return false;
+        if (afterApply) afterApply();
         return true;
     }
     FitnessTelemetry value;
     bool writable = true;
     bool reject = false;
     unsigned writes = 0;
+    std::function<void()> afterApply;
 };
 
 void testTreadmillOutput() {
@@ -508,6 +510,19 @@ void testTreadmillOutput() {
     bridge.loop();
     assert(output.lastMachineStatus() == (Bytes{4}));
     assert(adapter.writes == writes);
+    adapter.writable = true;
+    bridge.loop();
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    adapter.afterApply = [&] { output.notifyClientDisconnected(); };
+    const Bytes first{2, 100, 0};
+    const Bytes second{2, 200, 0};
+    assert(output.enqueueControlPoint(first.data(), first.size()));
+    assert(output.enqueueControlPoint(second.data(), second.size()));
+    bridge.loop();
+    assert(adapter.writes == writes + 1 && adapter.value.speed == 1);
+    adapter.afterApply = {};
+    bridge.loop();
+    assert(!output.clientConnected() && !output.controlGranted());
 }
 
 }  // namespace

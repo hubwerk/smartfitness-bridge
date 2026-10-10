@@ -209,8 +209,8 @@ not claims that every model can use every cipher.
   not each source's universal negotiated range. Start never starts the belt and
   returns Operation Failed because there is no safe source start primitive;
   Stop/Pause requires an accepted speed-zero command or returns Operation Failed.
-  The FTMS input handshake sends automatic Start/Resume only for bike inputs,
-  never treadmills, cross-trainers or rowers; stale treadmill
+  The FTMS input handshake sends automatic Start/Resume only for confirmed bike
+  inputs, not ambiguous bike fallback or treadmills/cross-trainers/rowers; stale treadmill
   telemetry disables controls until fresh data restores readiness.
   Disconnect/stale data never send stop/speed; physical controls and the safety
   key remain primary. See [FTMS output](../README.md#ftms-output-bluetooth-le).

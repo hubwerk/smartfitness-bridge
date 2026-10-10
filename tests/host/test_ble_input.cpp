@@ -677,6 +677,34 @@ void testFtmsDistanceTelemetry() {
     assert(!h.adapter.telemetry().distanceValid && h.adapter.telemetry().distance == 0);
 }
 
+void testFtmsElapsedTelemetry() {
+    Harness h;
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1U << protocols::FtmsSource::SubTreadmill);
+    h.adapter.loop();
+    assert(!h.adapter.telemetry().elapsedValid);
+    assert(!h.adapter.capabilities().supports(Metric::ElapsedTime));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, protocols::FtmsSource::SubTreadmill,
+                        {0x04, 0x04, 0xB0, 4, 0x10, 0x27, 0, 0x2c, 1});
+    h.adapter.loop();
+    const auto telemetry = h.adapter.telemetry();
+    assert(telemetry.elapsedValid && near(telemetry.elapsed, 300));
+    assert(telemetry.distanceValid && near(telemetry.distance, 10000));
+    assert(h.adapter.capabilities().supports(Metric::ElapsedTime));
+    assert(h.adapter.capabilities().supports(Metric::Distance));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, protocols::FtmsSource::SubTreadmill, {1, 0});
+    h.adapter.loop();
+    assert(h.adapter.telemetry().elapsedValid && near(h.adapter.telemetry().elapsed, 300));
+    h.advance(5001);
+    assert(!h.adapter.telemetry().elapsedValid && !h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.capabilities().supports(Metric::ElapsedTime));
+    h.adapter.disconnect();
+    assert(!h.adapter.telemetry().elapsedValid && h.adapter.telemetry().elapsed == 0);
+}
+
 void testScanDedupAndExclusion() {
     Harness h;
     h.central.own = address("00:00:00:00:00:01");
@@ -1262,6 +1290,7 @@ void runBleInputTests() {
     testFtmsControlDoesNotStartTreadmill();
     testAdapterProfiles();
     testFtmsDistanceTelemetry();
+    testFtmsElapsedTelemetry();
     testScanDedupAndExclusion();
     testFtmsLifecycle();
     testProtocolFailureAndControlDenied();

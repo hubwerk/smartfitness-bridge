@@ -236,7 +236,9 @@ void FtmsOutput::drainControlPoint() {
     for (std::size_t index = 0; index < count; ++index) {
         // Writes from an earlier (now disconnected) session are dropped.
         if (connected_ && pending[index].generation == seenGeneration_ &&
-            pending[index].generation == generation_.load()) handleControlPoint(pending[index]);
+            pending[index].generation == generation_.load() &&
+            (profile_ != MachineProfile::Treadmill || connections_.load() > 0))
+            handleControlPoint(pending[index]);
     }
 }
 
