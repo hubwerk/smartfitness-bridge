@@ -134,6 +134,14 @@ bool NimbleCentral::stopScan() {
     Cmd cmd;
     cmd.op = Op::StopScan;
     std::lock_guard<std::mutex> lock(commandMutex_);
+    const std::uint32_t pending = pendingConnection_.cancel();
+    if (pending != 0) {
+        std::uint32_t expected = pending;
+        requestedSession_.compare_exchange_strong(expected, 0);
+        if (session_.load() == pending && impl_ && impl_->client->isConnected())
+            impl_->client->disconnect();
+        pushEvent(ble::CentralEventType::ConnectFailed, pending);
+    }
     cmd.session = ++scanGeneration_;  // invalidate scan starts waiting behind a connect
     const bool wasScanning = scanning_.exchange(false);
     if (impl_ && NimBLEDevice::getScan()->isScanning()) NimBLEDevice::getScan()->stop();
@@ -150,6 +158,7 @@ bool NimbleCentral::connect(std::uint32_t session, const ble::BleAddress& addres
     std::lock_guard<std::mutex> lock(commandMutex_);
     if (!send(cmd)) return false;
     requestedSession_ = session;
+    pendingConnection_.start(session);
     return true;
 }
 
@@ -162,6 +171,7 @@ bool NimbleCentral::disconnect(std::uint32_t session) {
     std::lock_guard<std::mutex> lock(commandMutex_);
     std::uint32_t expected = session;
     requestedSession_.compare_exchange_strong(expected, 0);
+    pendingConnection_.complete(session);
     if (session == session_.load() && impl_ && impl_->client->isConnected())
         impl_->client->disconnect();  // also releases pending GATT operations
     return send(cmd);
@@ -233,6 +243,11 @@ void NimbleCentral::doStartScan(const Cmd& cmd) {
 }
 
 void NimbleCentral::doConnect(const Cmd& cmd) {
+    struct PendingGuard {
+        ble::PendingConnection& pending;
+        std::uint32_t session;
+        ~PendingGuard() { pending.complete(session); }
+    } pendingGuard{pendingConnection_, cmd.session};
     {
         std::lock_guard<std::mutex> lock(commandMutex_);
         if (cancelled(cmd.session)) return;
@@ -299,14 +314,16 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         };
         if (characteristic->subscribe(!subscription.indicate, callback, true)) mask |= 1UL << index;
     }
+    std::lock_guard<std::mutex> lock(commandMutex_);
     if (cancelled(cmd.session)) {
-        doDisconnect();
+        if (client->isConnected()) client->disconnect();
         return;
     }
     if (!client->isConnected()) {
         pushEvent(ble::CentralEventType::ConnectFailed, cmd.session);
         return;
     }
+    pendingConnection_.complete(cmd.session);
     pushEvent(ble::CentralEventType::Connected, cmd.session, 0, mask);
 }
 

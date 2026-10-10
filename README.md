@@ -505,6 +505,9 @@ cannot hide a disconnect; existing read/connection event ordering is preserved.
 Stop/disconnect requests flag pending connection work
 for cancellation even if the command queue is full; rejected queue submissions
 are counted and reported instead of silently succeeding.
+`scan-stop` during connection setup cancels that attempt and automatic reconnect;
+stopping an ordinary scan does not disconnect a ready device. Queued scan starts
+are invalidated by a later stop.
 NimBLE 1.4.3 still performs synchronous connection and GATT operations in the
 worker. The connect timeout is 5 s (NimBLE's wait can add roughly 1 s); cancellation
 is checked between discovery/read/subscribe steps. Individual GATT calls retain

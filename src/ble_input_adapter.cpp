@@ -269,6 +269,7 @@ bool BleInputAdapter::startScan(std::uint32_t durationMs) {
 }
 
 bool BleInputAdapter::stopScan() {
+    if (state_ == LinkState::Connecting) return requestDisconnect();
     if (!userScan_) return true;
     if (state_ != LinkState::Listening && !transport_.stopScan()) {
         lastError_ = "stop scan request rejected";

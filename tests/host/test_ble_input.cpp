@@ -658,6 +658,31 @@ void testProtocolFailureAndControlDenied() {
 }
 
 void testSessionReplacementAndCancellation() {
+    ble::PendingConnection pendingLink;
+    pendingLink.start(1);
+    pendingLink.start(2);
+    pendingLink.complete(1);  // an old worker must not clear the new request
+    assert(pendingLink.active() == 2 && pendingLink.cancel() == 2);
+    assert(pendingLink.active() == 0);
+    pendingLink.start(3);
+    pendingLink.complete(3);  // Ready links are not cancelled by scan stop
+    assert(pendingLink.cancel() == 0);
+
+    FakeCentral transport;
+    const auto peer = address("aa:00:00:00:00:01");
+    assert(transport.connect(1, peer, {}));
+    transport.acceptStop = false;
+    assert(!transport.stopScan());  // cancellation survives queue rejection
+    assert(transport.pendingConnection.active() == 0);
+    assert(transport.cancelledConnects.back() == 1 && transport.droppedCommands() == 1);
+    ble::CentralEvent cancelled;
+    assert(transport.pollEvent(cancelled) && cancelled.type == ble::CentralEventType::ConnectFailed);
+    assert(cancelled.session == 1);
+    transport.acceptStop = true;
+    assert(transport.connect(2, peer, {}));
+    transport.pushEvent(ble::CentralEventType::Connected, 1);
+    assert(transport.stopScan() && transport.cancelledConnects.size() == 1);
+
     Harness h;
     ble::ConnectionSession link;
     h.pair("aa:00:00:00:00:01", "hrs", "A");
@@ -692,6 +717,28 @@ void testSessionReplacementAndCancellation() {
     h.advance(60000);
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
     assert(!h.adapter.isConnected() && !h.adapter.autoConnect());
+    assert(h.adapter.scanAndConnect());
+    const std::uint32_t stopped = h.central.lastSession();
+    assert(h.adapter.stopScan());
+    assert(h.central.disconnects.back() == stopped);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(1);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
+    assert(!h.adapter.autoConnect());
+
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(1);
+    assert(h.adapter.isConnected());
+    const std::size_t disconnects = h.central.disconnects.size();
+    assert(h.adapter.startScan() && h.adapter.stopScan());
+    assert(h.adapter.isConnected() && h.central.disconnects.size() == disconnects);
+    assert(h.adapter.requestDisconnect());
+    assert(h.adapter.scanAndConnect());
+    h.central.acceptDisconnect = false;
+    assert(!h.adapter.stopScan());
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
+    assert(h.adapter.lastError() == "disconnect/stop request rejected");
 }
 
 void testLifecycleQueueOverflow() {

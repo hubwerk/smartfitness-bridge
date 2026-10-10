@@ -19,6 +19,7 @@
 
 #include "ble/bounded_queue.hpp"
 #include "ble/central_transport.hpp"
+#include "ble/connection_session.hpp"
 
 class NimbleCentral final : public smartfitness::ble::CentralTransport {
 public:
@@ -82,6 +83,7 @@ private:
     std::uint32_t scanGeneration_ = 0;  // protected by commandMutex_
     std::atomic<std::uint32_t> session_{0};
     std::atomic<std::uint32_t> requestedSession_{0};
+    smartfitness::ble::PendingConnection pendingConnection_;
     std::atomic<std::uint32_t> droppedCommands_{0};
     std::mutex commandMutex_;
     smartfitness::ble::BleAddress own_;

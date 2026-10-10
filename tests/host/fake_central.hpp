@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ble/central_transport.hpp"
+#include "ble/connection_session.hpp"
 
 namespace smartfitness {
 namespace testing {
@@ -29,6 +30,11 @@ public:
     }
     bool stopScan() override {
         ++scanStops;
+        const std::uint32_t pending = pendingConnection.cancel();
+        if (pending) {
+            cancelledConnects.push_back(pending);
+            pushEvent(ble::CentralEventType::ConnectFailed);
+        }
         if (!acceptStop) { ++commandDrops; return false; }
         scanning_ = false;
         return true;
@@ -37,10 +43,13 @@ public:
     bool connect(std::uint32_t session, const ble::BleAddress& address, const ble::ConnectPlan& plan) override {
         connects.push_back({session, address, plan});
         if (!acceptConnect) { ++commandDrops; return false; }
+        pendingConnection.start(session);
         return true;
     }
     bool disconnect(std::uint32_t session) override {
         disconnects.push_back(session);
+        if (pendingConnection.active() == session) cancelledConnects.push_back(session);
+        pendingConnection.complete(session);
         if (!acceptDisconnect) { ++commandDrops; return false; }
         return true;
     }
@@ -73,6 +82,8 @@ public:
         ble::CentralEvent event;
         event.type = type;
         event.session = lastSession();
+        if (type == ble::CentralEventType::Connected || type == ble::CentralEventType::ConnectFailed)
+            pendingConnection.complete(event.session);
         event.mask = mask;
         event.index = index;
         event.setData(data.data(), data.size());
@@ -103,6 +114,8 @@ public:
     ble::BleAddress own;
     std::vector<ConnectCall> connects;
     std::vector<std::uint32_t> disconnects;
+    std::vector<std::uint32_t> cancelledConnects;
+    ble::PendingConnection pendingConnection;
     std::vector<ble::GattWrite> writes;
     std::deque<ble::ScanReport> reports;
     ble::CentralEventQueue<32> events;
