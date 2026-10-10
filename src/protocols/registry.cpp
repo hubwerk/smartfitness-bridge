@@ -6,7 +6,10 @@
 #include "protocols/domyos.hpp"
 #include "protocols/echelon.hpp"
 #include "protocols/ftms_source.hpp"
+#include "protocols/ifit_bowflex.hpp"
 #include "protocols/sensor_sources.hpp"
+#include "protocols/trainers_rower.hpp"
+#include "protocols/treadmills.hpp"
 #include "protocols/yesoul_keiser.hpp"
 
 namespace smartfitness {
@@ -85,6 +88,12 @@ const ProtocolInfo kProtocols[] = {
     {"domyos", "Domyos / Decathlon bike", 80, matchesDomyos, make<DomyosSource>, true, false},
     {"schwinn-ic4", "Schwinn IC4 / IC8", 70, matchesSchwinn, makeSchwinn, false, false},
     {"yesoul", "Yesoul bike", 70, matchesYesoul, make<YesoulSource>, false, false},
+    {"tacx-fec", "Tacx Neo / Flux BLE FE-C", 80, matchesTacxFec, makeTacxFec, true, false},
+    {"elite-legacy", "Elite legacy trainer", 80, matchesEliteLegacy, makeEliteLegacy, true, false},
+    {"elite-dr", "Elite DR trainer", 80, matchesEliteDr, makeEliteDr, true, false},
+    {"elite-misuro", "Elite Misuro B+ (read-only)", 70, matchesEliteMisuro, makeEliteMisuro, false, false},
+    {"wahoo-legacy", "Wahoo KICKR legacy", 80, matchesWahooKickr, makeWahooKickr, true, false},
+    {"concept2-pm5", "Concept2 PM5 rower", 80, matchesConcept2Pm5, makeConcept2Pm5, false, false},
     {"ftms", "FTMS fitness machine", 50, matchesFtms, make<FtmsSource>, true, false},
     {"cps", "Cycling Power sensor", 40, matchesCps, make<CyclingPowerSource>, false, false},
     {"csc", "Speed/Cadence sensor", 30, matchesCsc, make<CscSource>, false, false},
@@ -93,11 +102,21 @@ const ProtocolInfo kProtocols[] = {
 
 }  // namespace
 
-std::size_t protocolCount() { return sizeof(kProtocols) / sizeof(kProtocols[0]); }
-const ProtocolInfo& protocolAt(std::size_t index) { return kProtocols[index < protocolCount() ? index : 0]; }
+std::size_t protocolCount() {
+    return sizeof(kProtocols) / sizeof(kProtocols[0]) + ifit_bowflex::descriptorCount() + treadmills::descriptorCount();
+}
+const ProtocolInfo& protocolAt(std::size_t index) {
+    if (index >= protocolCount()) index = 0;
+    const std::size_t baseCount = sizeof(kProtocols) / sizeof(kProtocols[0]);
+    if (index < baseCount) return kProtocols[index];
+    index -= baseCount;
+    if (index < ifit_bowflex::descriptorCount()) return ifit_bowflex::descriptorAt(index);
+    return treadmills::descriptorAt(index - ifit_bowflex::descriptorCount());
+}
 
 const ProtocolInfo* findProtocol(const std::string& id) {
-    for (const auto& info : kProtocols) {
+    for (std::size_t index = 0; index < protocolCount(); ++index) {
+        const auto& info = protocolAt(index);
         if (id == info.id) return &info;
     }
     return nullptr;
@@ -105,7 +124,8 @@ const ProtocolInfo* findProtocol(const std::string& id) {
 
 const ProtocolInfo* detectProtocol(const ble::Advertisement& advertisement) {
     const ProtocolInfo* best = nullptr;
-    for (const auto& info : kProtocols) {
+    for (std::size_t index = 0; index < protocolCount(); ++index) {
+        const auto& info = protocolAt(index);
         if ((!best || info.priority > best->priority) && info.matches(advertisement)) best = &info;
     }
     return best;

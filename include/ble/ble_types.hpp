@@ -116,6 +116,10 @@ constexpr std::size_t kMaxReads = 6;
 // What the central must do after connecting: subscribe and read. Results are
 // reported by index (bit N of the connected mask = subscription N succeeded).
 struct ConnectPlan {
+    // Opt-in dynamic subscription discovery for protocols whose upstream
+    // enumerates GATT. Writes are restricted to these characteristic UUIDs.
+    bool discoverNotifications = false;
+    std::array<Uuid, 2> discoveryWriteCharacteristics{};
     std::uint8_t subscriptionCount = 0;
     std::array<Subscription, kMaxSubscriptions> subscriptions{};
     std::uint8_t readCount = 0;

@@ -15,6 +15,7 @@
 #include "ble/connection_session.hpp"
 #include "ble_input_adapter.h"
 #include "bridge/bridge_core.hpp"
+#include "config_store.h"
 #include "fake_central.hpp"
 #include "ftms/ftms_codec.hpp"
 #include "ftms_output.h"
@@ -400,13 +401,45 @@ void testRegistry() {
     assert(detected(advert("Pedals", {0x1816, 0x1818})) == "cps");
     assert(detected(advert("Sensor", {0x1816})) == "csc");
     assert(detected(advert("Lamp", {0x1234})).empty());
+    // Native FTMS firmware must not be stolen by a legacy vendor adapter.
+    for (const char* name : {"Tacx Neo 2T", "TACX FLUX S", "KICKR CORE", "ELITETRAINER",
+                             "MISURO B+", "PM5 123 ROW"}) {
+        assert(detected(advert(name, {0x1826, 0x1818})) == "ftms");
+    }
+    assert(detected(advert("Tacx Neo 2T", {0x1818})) == "tacx-fec");
+    assert(detected(advert("KICKR CORE", {0x1818})) == "wahoo-legacy");
+    assert(detected(advert("ELITETRAINER", {0x1818})) == "elite-legacy");
+    assert(detected(advert("DR", {0x1818})) == "elite-dr");
+    assert(detected(advert("MISURO B+", {0x1818})) == "elite-misuro");
+    assert(detected(advert("PM5 123 ROW")) == "concept2-pm5");
+    assert(detected(advert("KICKR RUN")).empty());
+    assert(detected(advert("PM5 123 SKI")).empty());
+    assert(detected(advert("Peloton Bike")).empty());
+    assert(detected(advert("DFC")).empty());
+    for (const char* name : {"I_EB123", "I_TL123", "I_EL123", "I_FS123", "I_VE123",
+                             "BOWFLEX T216", "SCHWINN 170/270", "XT385", "F80", "R1 PRO", "KS-X21"}) {
+        assert(detected(advert(name, {0x1826})) == "ftms");
+    }
+    auto proprietaryIfit = advert("I_EB123", {0x1826});
+    proprietaryIfit.services.push_back(ble::Uuid::fromString("00001533-1412-efde-1523-785feabcd123"));
+    assert(detected(proprietaryIfit) == "ifit-bike");
+    auto proprietaryBowflex = advert("BOWFLEX T216", {0x1826});
+    proprietaryBowflex.services.push_back(ble::Uuid::fromString("edff9e80-cad7-11e5-ab63-0002a5d5c51b"));
+    assert(detected(proprietaryBowflex) == "bowflex-t216");
 
     for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
         const auto& info = protocols::protocolAt(index);
         auto protocol = info.create();
         assert(protocol && std::string(protocol->id()) == info.id);
+        assert(std::string(info.id).size() <= ConfigStore::kMaxAdapterIdLength);
+        assert(ConfigStore::isValidAdapterId(info.id));
         assert(protocol->advertisementOnly() == info.advertisementOnly);
         assert(protocols::findProtocol(info.id) == &info);
+        const auto plan = protocol->plan();
+        assert(plan.subscriptionCount <= ble::kMaxSubscriptions);
+        assert(plan.readCount <= ble::kMaxReads);
+        for (std::size_t other = index + 1; other < protocols::protocolCount(); ++other)
+            assert(std::string(info.id) != protocols::protocolAt(other).id);
     }
     assert(!protocols::createProtocol("unknown"));
 }
@@ -923,6 +956,90 @@ void testCoreIntegration() {
     assert(ble.scanResults().size() == 1 && core.telemetry().deviceType == "simulation");
 }
 
+void testVendorControlRouting() {
+    std::uint32_t now = 1000;
+    FakeCentral central;
+    BleInputAdapter input{central, [&] { return now; }};
+    AntOutput ant;
+    FtmsOutput ftms;
+    BridgeCore core;
+    core.attach(input, ant, ftms);
+    PairedDevice device;
+    device.address = address("aa:00:00:00:00:08");
+    device.adapterId = "tacx-fec";
+    device.valid = true;
+    input.setPairedDevice(device);
+    core.begin();
+    core.scanAndConnect();
+    central.pushEvent(ble::CentralEventType::Connected, 1);
+    central.pushEvent(ble::CentralEventType::Notification, 0, 0, {0, 0, 0xfa, 0});
+    core.loop();
+    assert(core.trainerState().sample(Metric::Power).value == 250);
+    const auto writes = central.writes.size();
+    assert(core.routeControl({Control::Power, 250}) == ControlResult::Applied);
+    assert(central.writes.size() == writes + 1);
+    assert(central.writes.back().data[4] == 0x31);
+    assert(core.routeControl({Control::Power, 2001}) == ControlResult::InvalidValue);
+    assert(core.routeControl({Control::Speed, 10}) == ControlResult::Unsupported);
+
+    // The same input lifecycle must not promote a mechanical rower to trainer.
+    core.disconnect();
+    device.adapterId = "concept2-pm5";
+    input.setPairedDevice(device);
+    core.scanAndConnect();
+    central.pushEvent(ble::CentralEventType::Connected, 7);
+    core.loop();
+    assert(!input.trainerDetected());
+    assert(core.routeControl({Control::Resistance, 50}) == ControlResult::NotTrainer);
+}
+
+void testVendorStartupGrace() {
+    Harness h;
+    h.pair("aa:00:00:00:00:09", "ifit-bike");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.adapter.loop();
+    // A paced vendor handshake must not be cut off by the normal 20s timeout.
+    for (unsigned iteration = 0; iteration < 55; ++iteration) h.advance(400);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Ready);
+    assert(!h.adapter.capabilities().metrics);
+    h.advance(100000);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+
+    Harness standard;
+    standard.pair("aa:00:00:00:00:10", "cps");
+    assert(standard.adapter.scanAndConnect());
+    standard.central.pushEvent(ble::CentralEventType::Connected, 1);
+    standard.adapter.loop();
+    standard.advance(20001);
+    assert(standard.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+}
+
+void testDiscoveredVendorEndpoint() {
+    Harness h;
+    h.pair("aa:00:00:00:00:11", "schwinn-170");
+    assert(h.adapter.scanAndConnect());
+    const auto& plan = h.central.connects.back().plan;
+    assert(plan.discoverNotifications && !plan.discoveryWriteCharacteristics[0].isZero());
+    const auto service = ble::Uuid::from16(0xfff0);
+    Bytes endpoint(service.bytes.begin(), service.bytes.end());
+    endpoint.insert(endpoint.end(), plan.discoveryWriteCharacteristics[0].bytes.begin(),
+                    plan.discoveryWriteCharacteristics[0].bytes.end());
+    h.central.pushEvent(ble::CentralEventType::WriteEndpoint, 0, 0, endpoint);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.adapter.loop();
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Ready);
+    assert(!h.central.writes.empty());
+    assert(h.central.writes.back().service == service);
+    assert(h.central.writes.back().payload() == (Bytes{7, 1, 0xd3, 0, 0x1f, 5, 1}));
+    h.advance(400);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, 0,
+                        {0, 0, 0, 0x58, 2, 0, 0x10, 0x27, 0, 0, 0, 0, 0, 0});
+    h.adapter.loop();
+    assert(h.adapter.capabilities().supports(Metric::Speed));
+    assert(!h.adapter.trainerDetected());
+}
+
 }  // namespace
 
 void runBleInputTests() {
@@ -942,4 +1059,7 @@ void runBleInputTests() {
     testTransportRejectionPropagation();
     testAdvertisementOnlyDevice();
     testCoreIntegration();
+    testVendorControlRouting();
+    testVendorStartupGrace();
+    testDiscoveredVendorEndpoint();
 }

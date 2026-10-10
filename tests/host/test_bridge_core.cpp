@@ -337,6 +337,9 @@ void runFtmsTests();
 void runConfigStoreTests();
 void runBleInputTests();
 void runWebTests();
+void runIfitBowflexTests();
+void runTrainersRowerTests();
+void runTreadmillTests();
 
 int main() {
     testCapabilitiesAndSamples();
@@ -352,4 +355,7 @@ int main() {
     runConfigStoreTests();
     runBleInputTests();
     runWebTests();
+    runIfitBowflexTests();
+    runTrainersRowerTests();
+    runTreadmillTests();
 }
