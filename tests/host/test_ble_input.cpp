@@ -63,6 +63,11 @@ void testBleTypes() {
     assert(report.nameString()[4] == '?');
     for (std::uint16_t value = 0; value < 10; ++value) report.addService(ble::Uuid::from16(value));
     assert(report.serviceCount == ble::kMaxAdvertisedServices);
+    const Bytes serviceData{1, 1, 0};
+    report.setFtmsServiceData(serviceData.data(), serviceData.size());
+    assert(report.ftmsServiceDataLength == 3);
+    report.setFtmsServiceData(nullptr, 3);
+    assert(report.ftmsServiceDataLength == 0 && ble::Advertisement::from(report).ftmsServiceData.empty());
 
     ble::ConnectPlan plan;
     for (std::size_t index = 0; index < ble::kMaxSubscriptions; ++index)
@@ -538,6 +543,13 @@ void testFtmsProfiles() {
     assert(source.profile() == MachineProfile::Rower);
     const Bytes distance{0x10, 0, 0xC4, 9, 0x10, 0x27, 0};
     source.onNotify(Source::SubBike, distance.data(), distance.size(), 400);
+    assert(source.profile() == MachineProfile::Rower && !source.sample().distance.valid);
+    assert(near(source.sample().cadence.value, 24));
+    advertisement.ftmsServiceData = {1, 0x20, 0};
+    source.onAdvertisement(advertisement, 400);
+    assert(source.profile() == MachineProfile::IndoorBike && !source.hasData());
+    assert(!source.sample().cadence.valid && source.capabilities().metrics == 0);
+    source.onNotify(Source::SubBike, distance.data(), distance.size(), 400);
     assert(source.sample().distance.valid && near(source.sample().distance.value, 10000));
     const Bytes moreData{1, 0};
     source.onNotify(Source::SubBike, moreData.data(), moreData.size(), 500);
@@ -703,6 +715,40 @@ void testFtmsElapsedTelemetry() {
     assert(!h.adapter.capabilities().supports(Metric::ElapsedTime));
     h.adapter.disconnect();
     assert(!h.adapter.telemetry().elapsedValid && h.adapter.telemetry().elapsed == 0);
+}
+
+void testStaleFtmsTreadmillControlSafety() {
+    Harness h;
+    using Source = protocols::FtmsSource;
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::ReadResult, 0, Source::ReadFeature,
+                        {0, 0, 0, 0, 3, 0, 0, 0});
+    h.central.pushEvent(ble::CentralEventType::Connected,
+                        (1U << Source::SubTreadmill) | (1U << Source::SubControlPoint));
+    h.adapter.loop();
+    assert(h.central.writes.size() == 1 && h.central.writes.back().payload() == ftms::encodeRequestControl());
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, Source::SubControlPoint, {0x80, 0, 1});
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, Source::SubTreadmill, {0, 0, 0xB0, 4});
+    h.adapter.loop();
+    assert(h.adapter.profile() == MachineProfile::Treadmill && h.central.writes.size() == 1);
+    assert(h.adapter.capabilities().supports(Control::Speed));
+    assert(h.adapter.apply({Control::Speed, 8}));
+    const std::size_t writes = h.central.writes.size();
+    h.advance(5001);
+    assert(h.adapter.stale() && h.adapter.capabilities().metrics == 0 && h.adapter.capabilities().controls == 0);
+    assert(!h.adapter.apply({Control::Speed, 9}));
+    assert(!h.adapter.apply({Control::Incline, 2}));
+    assert(h.central.writes.size() == writes);
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, Source::SubTreadmill, {0, 0, 0xB0, 4});
+    h.adapter.loop();
+    assert(!h.adapter.stale() && h.adapter.capabilities().supports(Control::Speed));
+    assert(h.adapter.apply({Control::Speed, 9}));
+    h.central.pushEvent(ble::CentralEventType::Disconnected);
+    h.adapter.loop();
+    assert(h.adapter.capabilities().metrics == 0 && h.adapter.capabilities().controls == 0);
+    assert(!h.adapter.apply({Control::Speed, 10}));
 }
 
 void testScanDedupAndExclusion() {
@@ -1291,6 +1337,7 @@ void runBleInputTests() {
     testAdapterProfiles();
     testFtmsDistanceTelemetry();
     testFtmsElapsedTelemetry();
+    testStaleFtmsTreadmillControlSafety();
     testScanDedupAndExclusion();
     testFtmsLifecycle();
     testProtocolFailureAndControlDenied();

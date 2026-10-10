@@ -78,6 +78,7 @@ protected:
                     bool withResponse = true);
     // Record that a fresh sample arrived; also accumulates observed metrics.
     void touch(std::uint32_t nowMs);
+    void clearSample();
     std::uint32_t observedMetrics() const { return observedMetrics_; }
     void setError(const std::string& error) { lastError_ = error; }
     void fail(const std::string& error) {

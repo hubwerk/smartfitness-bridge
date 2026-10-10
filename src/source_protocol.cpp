@@ -18,13 +18,17 @@ void SourceProtocol::tick(std::uint32_t) {}
 bool SourceProtocol::control(const ControlRequest&, std::uint32_t) { return false; }
 
 void SourceProtocol::reset() {
-    sample_ = {};
+    clearSample();
     outbox_.clear();
     lastError_.clear();
+    failed_ = false;
+}
+
+void SourceProtocol::clearSample() {
+    sample_ = {};
     lastDataMs_ = 0;
     observedMetrics_ = 0;
     hasData_ = false;
-    failed_ = false;
 }
 
 bool SourceProtocol::takeWrite(ble::GattWrite& out) {

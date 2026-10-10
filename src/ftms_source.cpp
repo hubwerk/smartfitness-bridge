@@ -56,6 +56,7 @@ void FtmsSource::reset() {
     profile_ = MachineProfile::IndoorBike;
     advertisedProfileValid_ = false;
     dataSubscribedMask_ = 0;
+    dataProfileSelected_ = false;
     features_ = {};
     featuresRead_ = false;
     resistanceRange_ = {};
@@ -81,7 +82,9 @@ void FtmsSource::onAdvertisement(const ble::Advertisement& advertisement, std::u
     advertisedProfileValid_ = true;
     for (std::size_t index = SubBike; index <= SubRower; ++index) {
         if ((dataSubscribedMask_ & (1U << index)) && subscriptionProfile(index) == advertisedProfile_) {
+            if (profile_ != advertisedProfile_) clearSample();
             profile_ = advertisedProfile_;
+            dataProfileSelected_ = true;
             return;
         }
     }
@@ -110,6 +113,7 @@ bool FtmsSource::onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) 
         setError("no FTMS bike data characteristic");
         return false;
     }
+    dataProfileSelected_ = (dataSubscribedMask_ & (dataSubscribedMask_ - 1U)) == 0;
     for (std::size_t index = SubBike; index <= SubRower; ++index) {
         if (dataSubscribedMask_ & (1U << index)) {
             profile_ = subscriptionProfile(index);
@@ -118,8 +122,10 @@ bool FtmsSource::onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) 
     }
     if (advertisedProfileValid_) {
         for (std::size_t index = SubBike; index <= SubRower; ++index)
-            if ((dataSubscribedMask_ & (1U << index)) && subscriptionProfile(index) == advertisedProfile_)
+            if ((dataSubscribedMask_ & (1U << index)) && subscriptionProfile(index) == advertisedProfile_) {
                 profile_ = advertisedProfile_;
+                dataProfileSelected_ = true;
+            }
     }
     controlPointSubscribed_ = options_.allowControl && !options_.bikeDataOnly &&
                               (subscribedMask & (1U << SubControlPoint)) != 0;
@@ -201,9 +207,9 @@ void FtmsSource::onNotify(std::size_t index, const std::uint8_t* data, std::size
     if (ok) {
         if (options_.bikeDataOnly && index != SubBike) return;
         if (dataSubscribedMask_ && !(dataSubscribedMask_ & (1U << index))) return;
-        if (advertisedProfileValid_ && profile_ == advertisedProfile_ &&
-            subscriptionProfile(index) != profile_) return;
+        if (dataProfileSelected_ && subscriptionProfile(index) != profile_) return;
         profile_ = subscriptionProfile(index);
+        dataProfileSelected_ = true;
         apply(decoded, nowMs);
     }
 }

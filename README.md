@@ -521,6 +521,9 @@ and FTMS input derives it from discovered data characteristics and FTMS service
 data rather than treating every `0x1826` source as a bike. Simulation and sensor
 sources default to bike. An explicit output-profile override is saved in schema
 v3; it changes presentation, not the source's controls or safety limits.
+For ambiguous FTMS subscriptions, the first valid data notification fixes the
+input profile; other machine-data UUIDs are ignored. An explicit supported FTMS
+advertised type can change that selection and clears old metrics/freshness.
 
 Bike and treadmill output are implemented. **Full Cross Trainer Data and Rower
 Data output are deferred to follow-up work**, including their profile-specific

@@ -57,6 +57,7 @@ private:
     MachineProfile advertisedProfile_ = MachineProfile::IndoorBike;
     bool advertisedProfileValid_ = false;
     std::uint32_t dataSubscribedMask_ = 0;
+    bool dataProfileSelected_ = false;
     ftms::Features features_;
     bool featuresRead_ = false;
     ftms::SupportedRange resistanceRange_;
