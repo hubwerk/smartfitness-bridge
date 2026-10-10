@@ -259,14 +259,14 @@ void testMatchers() {
         for (const char* excluded : {"Peloton","DFC","VeloCore","NordicTrack WiFi","ProForm","I_RW123"}) {
             ad.name = excluded; assert(!desc.matches(ad));
         }
-        assert(descriptorCount() == 7+modelCount());
-        for (std::size_t i = 7; i < descriptorCount(); ++i) {
-            const auto& desc = descriptorAt(i);
-            ble::Advertisement ad; ad.name = "I_EB123";
-            assert(!desc.matches(ad) && desc.priority == 0 && std::strlen(desc.id) <= 16);
-            assert(std::strcmp(desc.create()->id(),desc.id) == 0);
-            assert(std::strcmp(desc.label,modelAt(i-7).name) == 0);
-        }
+    }
+    assert(descriptorCount() == 7+modelCount());
+    for (std::size_t i = 7; i < descriptorCount(); ++i) {
+        const auto& desc = descriptorAt(i);
+        ble::Advertisement ad; ad.name = "I_EB123";
+        assert(!desc.matches(ad) && desc.priority == 0 && std::strlen(desc.id) <= 16);
+        assert(std::strcmp(desc.create()->id(),desc.id) == 0);
+        assert(std::strcmp(desc.label,modelAt(i-7).name) == 0);
     }
 }
 void testNoInterleavedControl() {

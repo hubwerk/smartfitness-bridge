@@ -22,7 +22,8 @@ registered id. Names are case-sensitive unless explicitly noted below.
 | `ifit-elliptical` (85) | BLE NordicTrack elliptical | Case-insensitive `I_EL` prefix | Cadence/speed/resistance; incline/power/HR only in profiles with those fields | Normalized resistance; incline only on compatible profiles | `src/devices/nordictrackelliptical/nordictrackelliptical.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
 | `ifit-el-trainer` (85) | BLE ProForm elliptical trainer | Case-insensitive `I_VE` prefix | Speed, cadence, resistance as reported | Normalized resistance | `src/devices/proformellipticaltrainer/proformellipticaltrainer.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
 | `bowflex-t216` (85) | Bowflex T216 BLE treadmill | Case-insensitive `BOWFLEX T` prefix | Speed and incline; variant-specific frame layouts | None; upstream buttons cannot remotely set these targets | `src/devices/bowflext216treadmill/bowflext216treadmill.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
-| `schwinn-170` (85) | Schwinn 170/270 BLE bike | Case-insensitive `SCHWINN 170/270` prefix | Speed, power, crank-derived cadence, resistance | None | `src/devices/schwinn170bike/schwinn170bike.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
+| `schwinn-170` (85) | Schwinn 170/270 BLE bike | Case-insensitive `SCHWINN 170/270` prefix; no FTMS | Speed, power, crank-derived cadence, resistance | None | `src/devices/schwinn170bike/schwinn170bike.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
+| `ifit-model-1` … `ifit-model-97` (0, manual) | Explicit iFit / Bowflex / Schwinn firmware profiles | Manual pairing override only; model labels are shown in the UI, and the exact inventory is below | Profile-specific metrics described above | Profile-specific controls; FreeStride/Bowflex/Schwinn remain read-only | Same pinned files as the corresponding family; every init/poll transcript host-tested | host-tested, not hardware-verified |
 | `tacx-fec` (80) | Tacx Neo / Flux | Case-insensitive `TACX NEO` / `TACX FLUX` or custom service `6e40fec1-b5a3-f393-e0a9-e50e24dcca9e`; no FTMS | CPS power, CPS/CSC cadence and wheel-derived speed, optional HR | Target power and simulated grade via BLE FE-C tunnel; upstream resistance emulation maps 0–100% to 0–10% grade, not a physical brake level | `src/devices/tacxneo2/tacxneo2.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
 | `elite-legacy` (80) | Elite legacy trainers | Case-insensitive `ELITETRAINER`, exact `KU` / `QD` / `RM`, or custom service `347b0001-7635-408b-8918-8ff3949ce592`; no FTMS | CPS power, CPS/CSC cadence and wheel-derived speed, optional HR | Power, brake resistance, simulation grade after timed proprietary initialization | `src/devices/stagesbike/stagesbike.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
 | `elite-dr` (80) | Elite DR variant | Exact case-insensitive `DR`; no FTMS | CPS/CSC/HR as available | Power and brake resistance; no simulation grade | `src/devices/stagesbike/stagesbike.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified |
@@ -118,10 +119,45 @@ PlatformIO build could not download the `espressif32` platform
 (`HTTPClientError`, before compilation). A firmware flash/RAM delta must be
 measured from a completed build; host object sizes are not ESP32 size measurements.
 Host tests use upstream byte layouts and literal commands, not hardware captures.
+The audited iFit/Bowflex host `-Os` object totals about **120 KB** before final
+registry expansion; init/poll hex literals occupy **81,801 bytes** and resistance
+maps **7,168 bytes**. These are host/storage estimates, **not measured firmware
+flash/RAM deltas**. Only one source object is allocated at runtime; manual profile
+registry metadata and IDs also consume memory. ESP32 totals remain pending CI.
 The iFit initialization deadline is 33 seconds with 35 seconds of startup grace;
 the longest audited transcript is 71 writes (28.4 seconds nominal). Treadmill
 handshakes request 90 seconds; the adapter caps any protocol grace at 120 seconds.
 Neither startup grace nor subscription success fabricates telemetry.
+
+The pairing UI offers `ifit-model-N` overrides with exact upstream model keys
+as labels. Use a matching firmware profile when the generic `I_*` advertisement
+cannot distinguish it. IDs use immutable pinned-table ordinals; existing entries
+must not be reordered when adding profiles. Bowflex models with differing
+service/frame layouts require their explicit profile rather than the T216 default.
+
+#### Manual profile inventory
+
+Each range lists model keys **in ordinal order**: the first key uses the first
+`ifit-model-N` ID in that range. These are the exact pinned upstream setting keys,
+not advertised names. Metrics, controls and source files follow the family table
+above; all entries are **host-tested, not hardware-verified**.
+
+| IDs | Family | Model keys in order |
+|---|---|---|
+| 1–7 | Bike | `proformbike`, `freemotion_coachbike_b22_7`, `nordictrack_GX4_5_bike`, `nordictrack_gx_2_7`, `nordictrack_gx_44_pro`, `nordictrack_gx_4_5_pro`, `nordictrack_vr21` |
+| 8–14 | Bike | `proform_225_csx_PFEX32925_INT_0`, `proform_bike_225_csx`, `proform_bike_325_csx`, `proform_bike_325_csx_PFEX439210INT_0`, `proform_bike_PFEVEX71316_0`, `proform_bike_PFEVEX71316_1`, `proform_bike_sb` |
+| 15–23 | Bike | `proform_csx210`, `proform_cycle_trainer_300_ci`, `proform_cycle_trainer_400`, `proform_hybrid_trainer_PFEL03815`, `proform_studio`, `proform_studio_NTEX71021`, `proform_tdf_10`, `proform_tour_de_france_clc`, `proform_xbike` |
+| 24–30 | Treadmill | `proformtreadmill`, `nordictrack_10_treadmill`, `nordictrack_elite_800`, `nordictrack_incline_trainer_x7i`, `nordictrack_incline_trainer_x7i_netl18716_0`, `nordictrack_incline_trainer_x7i_ntl15010_0`, `nordictrack_s20_treadmill` |
+| 31–37 | Treadmill | `nordictrack_s20i_treadmill`, `nordictrack_s30_treadmill`, `nordictrack_series_7`, `nordictrack_t65s_83_treadmill`, `nordictrack_t65s_treadmill`, `nordictrack_t65s_treadmill_81_miles`, `nordictrack_t70_treadmill` |
+| 38–44 | Treadmill | `nordictrack_treadmill_commercial_le`, `nordictrack_treadmill_exp_5i`, `nordictrack_treadmill_ultra_le`, `nordictrack_tseries5_treadmill`, `norditrack_s25_treadmill`, `norditrack_s25i_treadmill`, `proform_2000_treadmill` |
+| 45–51 | Treadmill | `proform_505_cst_80_44`, `proform_595i_proshox2`, `proform_8_5_treadmill`, `proform_carbon_tl`, `proform_carbon_tl_PFTL59720`, `proform_carbon_tl_PFTL59722c`, `proform_carbon_tl_PFTL59723_6` |
+| 52–58 | Treadmill | `proform_carbon_tlx_treadmill`, `proform_carbon_tlx_v84_314_treadmill`, `proform_performance_300i`, `proform_performance_400i`, `proform_pro_1000_treadmill`, `proform_proshox2`, `proform_trainer_8_0` |
+| 59–65 | Treadmill | `proform_trainer_8_0_pftl59721_0`, `proform_trainer_8_0_pftl59721_int_0`, `proform_treadmill_105_cst`, `proform_treadmill_1500_pro`, `proform_treadmill_1800i`, `proform_treadmill_505_cst`, `proform_treadmill_575i` |
+| 66–72 | Treadmill | `proform_treadmill_705_cst`, `proform_treadmill_705_cst_V78_239`, `proform_treadmill_705_cst_V80_44`, `proform_treadmill_8_0`, `proform_treadmill_8_7`, `proform_treadmill_995i`, `proform_treadmill_9_0` |
+| 73–79 | Treadmill | `proform_treadmill_c700`, `proform_treadmill_c960i`, `proform_treadmill_cadence_lt`, `proform_treadmill_carbon_tls`, `proform_treadmill_cst_505_pftl59420_0`, `proform_treadmill_l6_0s`, `proform_treadmill_se` |
+| 80–83 | Treadmill | `proform_treadmill_sport_3_0`, `proform_treadmill_sport_70`, `proform_treadmill_sport_8_5`, `proform_treadmill_z1300i` |
+| 84–90 | Ellipticals | `proformelliptical` (FreeStride), `nordictrackelliptical`, `nordictrack_elliptical_c7_5`, `proform_hybrid_trainer_xt`, `proformellipticaltrainer`, `nordictrack_se7i`, `nordictrack_elliptical_s700` |
+| 91–97 | Bowflex / Schwinn | `bowflex-t216`, `bowflex-t216-alt`, `bowflex-t6`, `bowflex-btx116`, `bowflex-t8j`, `bowflex-t128`, `schwinn-170` |
 
 Schwinn 170 opts into bounded GATT notification discovery (at most eight
 subscriptions). Its init write is restricted to the two upstream characteristic
