@@ -5,6 +5,8 @@
 #include <ArduinoJson.h>
 
 #include <cassert>
+#include <array>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,6 +20,7 @@
 #include "ftms_output.h"
 #include "web_api.h"
 #include "web_ui.h"
+#include "web_request.h"
 #include "wifi_policy.h"
 
 using namespace smartfitness;
@@ -187,7 +190,7 @@ void testWifiCommands() {
     assert(rig.ui.handleCommand("wifi Home short") == "password must be empty or 8-63 printable characters");
     assert(rig.ui.handleCommand("wifi Home secret-pass") == "wifi: Home; save and restart to apply");
     assert(rig.config.config().wifiSsid == "Home" && rig.config.config().wifiPassword == "secret-pass");
-    assert(rig.ui.handleCommand("ap-pass 1234") == "access point password must be 8-63 printable characters");
+    assert(rig.ui.handleCommand("ap-pass 1234") == "access point password must be 8-63 printable ASCII characters");
     assert(rig.ui.handleCommand("ap-pass new-ap-pass") == "access point password set; save and restart to apply");
     assert(rig.ui.handleCommand("save") == "configuration saved");
     assert(rig.ui.handleCommand("wifi-clear") == "wifi cleared (access point only); save and restart to apply");
@@ -239,6 +242,18 @@ void testApiParsing() {
     assert(parseApiRequest("config", R"({"wifiSsid":""})", commands, error) &&
            commands[0].type == CommandType::WifiClear);
     assert(!parseApiRequest("config", R"({"wifiPassword":"secret-pass"})", commands, error));
+    for (const auto& password : {std::string("short"), std::string(64, 'a'), std::string("invalid\npass")}) {
+        JsonDocument body;
+        body["apPassword"] = password;
+        std::string json;
+        serializeJson(body, json);
+        assert(!parseApiRequest("config", json, commands, error));
+        assert(contains(error, "8-63 printable ASCII"));
+    }
+    assert(parseApiRequest("config", R"({"apPassword":"12345678"})", commands, error));
+    assert(!parseApiRequest("config", R"({"apPassword":"12345678\u0000bad"})", commands, error));
+    assert(contains(error, "NUL"));
+    assert(!parseApiRequest("pair", R"({"address":"aa:00:00:00:00:01\u0000bad"})", commands, error));
     assert(!parseApiRequest("config", R"({"ant":"yes"})", commands, error) && contains(error, "true or false"));
     assert(!parseApiRequest("config", R"({"unknown":1})", commands, error) && error == "unknown field: unknown");
     assert(!parseApiRequest("config", "{}", commands, error) && error == "no settings given");
@@ -337,6 +352,41 @@ void testApiExchangeThreads() {
     assert(ids.size() + api.droppedRequests() == 200);
 }
 
+void testApiBleQueueRejections() {
+    Rig rig;
+    ApiExchange api;
+    const auto execute = [&](const std::string& endpoint, const std::string& body) {
+        const auto response = api.submit(endpoint, body);
+        assert(response.status == 202);
+        const auto id = parse(response.body)["id"].as<std::uint32_t>();
+        api.process(rig.ui);
+        return parse(api.result(id).body);
+    };
+    rig.ui.handleCommand("scan");
+    rig.central.acceptStop = false;
+    auto result = execute("scan", R"({"action":"stop"})");
+    assert(result["ok"] == false);
+    assert(contains(result["message"].as<std::string>(), "rejected"));
+
+    rig.central.acceptStop = true;
+    rig.central.acceptConnect = false;
+    result = execute("pair", R"({"address":"aa:00:00:00:00:21","adapter":"ftms"})");
+    assert(result["ok"] == false);
+    assert(contains(result["message"].as<std::string>(), "connection request rejected"));
+    assert(rig.config.config().pairedSource.valid);  // Pairing remains persisted for a later retry.
+
+    result = execute("connect", "{}");
+    assert(result["ok"] == false);
+    rig.central.acceptConnect = true;
+    result = execute("connect", "{}");
+    assert(result["ok"] == true);
+    rig.central.acceptDisconnect = false;
+    result = execute("disconnect", "{}");
+    assert(result["ok"] == false);
+    assert(contains(result["message"].as<std::string>(), "disconnect request rejected"));
+    assert(parse(rig.ui.statusJson())["input"]["dropped"]["commands"].as<unsigned>() >= 4);
+}
+
 void testJsonViews() {
     Rig rig;
     rig.ui.handleCommand("wifi Home secret-pass");
@@ -367,6 +417,11 @@ void testJsonViews() {
     assert(document["controls"].size() == 4 && document["canControl"] == true);
     assert(document["network"]["ip"] == "192.168.4.1" && document["input"]["paired"].isNull());
     assert(document["ftmsOutput"]["advertising"] == true);
+    assert(document["input"]["dropped"]["scans"] == 0);
+    assert(document["input"]["dropped"]["events"] == 0);
+    assert(document["input"]["dropped"]["notifications"] == 0);
+    assert(document["input"]["dropped"]["commands"] == 0);
+    assert(contains(rig.ui.status(), "dropped(scans=0,events=0,notifications=0,commands=0)"));
 }
 
 void testWifiPolicy() {
@@ -388,6 +443,64 @@ void testWifiPolicy() {
     assert(std::string(wifiModeName(WifiMode::ApSta)) == "ap+sta");
 }
 
+void testRequestProtection() {
+    const auto policy = [](const std::string& type, const std::string& origin, bool present = true) {
+        return web::postRequestStatus(type, present, origin, "192.168.1.12", "192.168.4.1");
+    };
+    assert(policy("application/json", "", false) == 200);
+    for (const auto* origin : {"http://smartfitness.local", "http://smartfitness.local:80",
+                              "http://192.168.1.12", "http://192.168.4.1"})
+        assert(policy(" Application/JSON; charset=utf-8", origin) == 200);
+    for (const auto* origin : {"", "null", "https://smartfitness.local", "http://smartfitness.local.evil",
+                              "http://smartfitness.local@evil", "http://smartfitness.local:8080",
+                              "http://smartfitness.local/", "http://192.168.1.13", "http://0.0.0.0"})
+        assert(policy("application/json", origin) == 403);
+    for (const auto* type : {"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data",
+                            "application/jsonp"})
+        assert(policy(type, "", false) == 415);
+    assert(web::postRequestStatus("application/json", false, "", "", "", true) == 400);
+
+    assert(!web::canBroadcast(0, true));
+    assert(!web::canBroadcast(1, false));
+    assert(web::canBroadcast(2, true));
+}
+
+void testBodyReceipt() {
+    std::array<char, ApiExchange::kMaxBodySize + 1> bytes{};
+    web::BodyReceipt body{4, 0, false};
+    body.append(bytes.data(), "{\"", 2, 0, 4);
+    assert(web::bodyStatus(&body, 4, false) == 400);
+    body.append(bytes.data(), "\"}", 2, 2, 4);
+    assert(web::bodyStatus(&body, 4, false) == 200);
+    assert(bytes[4] == '\0');
+    assert(web::bodyStatus(nullptr, 4, true) == 500);
+    assert(web::bodyStatus(nullptr, 0, true) == 500);  // Never execute a bodyless reset on allocation failure.
+    assert(web::bodyStatus(nullptr, 4, false) == 400);
+    assert(web::bodyStatus(nullptr, 0, false) == 200);
+    assert(web::bodyStatus(&body, 3, false) == 400);
+    for (const auto index : {std::size_t(0), std::size_t(3), std::numeric_limits<std::size_t>::max()}) {
+        body = {4, 2, false};
+        body.append(bytes.data(), "ab", 2, index, 4);
+        assert(web::bodyStatus(&body, 4, false) == 400);  // Overlap, gap, overflow.
+    }
+    body = {4, 0, false};
+    body.append(bytes.data(), "abcd", 4, 0, 5);
+    assert(body.invalid);  // Changing total.
+    body = {4, 0, false};
+    body.append(bytes.data(), "abcd", std::numeric_limits<std::size_t>::max(), 0, 4);
+    assert(body.invalid);
+    body = {4, 0, false};
+    body.append(bytes.data(), "a\0bc", 4, 0, 4);
+    assert(body.invalid);
+    body = {ApiExchange::kMaxBodySize, 0, false};
+    const std::string full(ApiExchange::kMaxBodySize, ' ');
+    body.append(bytes.data(), full.data(), full.size(), 0, full.size());
+    assert(web::bodyStatus(&body, full.size(), false) == 200);
+    assert(bytes.back() == '\0');
+    body.append(bytes.data(), "x", 1, full.size(), full.size());
+    assert(body.invalid);
+}
+
 }  // namespace
 
 void runWebTests() {
@@ -398,6 +511,9 @@ void runWebTests() {
     testApiParsing();
     testApiExchange();
     testApiExchangeThreads();
+    testApiBleQueueRejections();
     testJsonViews();
     testWifiPolicy();
+    testRequestProtection();
+    testBodyReceipt();
 }

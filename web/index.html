@@ -116,11 +116,12 @@ function renderScan(sc){
    btn.disabled=true;await run("pair",{address:d.address,addressType:d.addressType,adapter:sel.value});btn.disabled=false};
   const svc=el("td",(d.services||[]).join(" "),"small"),ad=el("td"),act=el("td");ad.append(sel);act.append(btn);
   tr.append(name,el("td",d.rssi),svc,ad,act);return tr}));}
-async function loadConfig(){try{const c=await(await fetch("/api/config")).json();
+function renderConfig(c){
  $("c-ftmsName").value=c.ftmsName||"";for(const k of["ftmsOutput","ant","simulatedTrainer"])$("c-"+k).checked=!!c[k];
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
  $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
- $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}catch(e){toast("could not load settings",false)}}
+ $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}
+ async function loadConfig(){try{renderConfig(await(await fetch("/api/config")).json())}catch(e){toast("could not load settings",false)}}
 $("btn-scan").onclick=()=>run("scan",{seconds:10},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
 $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run("disconnect");$("btn-sim").onclick=()=>run("simulate");
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
@@ -132,7 +133,7 @@ $("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutp
 $("btn-restart").onclick=()=>{if(confirm("Restart the bridge?"))run("restart")};
 $("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?"))run("factory-reset").then(loadConfig)};
 function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="result"&&m.done)finish(m)};
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m)};
  ws.onclose=()=>{$("conn").textContent="offline";$("conn").className="pill bad";setTimeout(connectWs,2000)}}
 fetch("/api/status").then(r=>r.json()).then(s=>{if(s.type)renderStatus(s)}).catch(()=>{});
 fetch("/api/scan/results").then(r=>r.json()).then(s=>{if(s.devices)renderScan(s)}).catch(()=>{});

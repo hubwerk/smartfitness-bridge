@@ -1,5 +1,7 @@
 #include "bridge_commands.h"
+#include "config_store.h"
 
+#include <cmath>
 #include <cstdlib>
 
 using namespace smartfitness;
@@ -99,7 +101,7 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
     }
     if (key == "scan") {
         float seconds = 0.0F;
-        if (!parseFloat(value, seconds) || seconds < 1.0F || seconds > 60.0F) {
+        if (!parseFloat(value, seconds) || !std::isfinite(seconds) || seconds < 1.0F || seconds > 60.0F) {
             error = "expected scan duration 1-60 s";
             return false;
         }
@@ -140,6 +142,10 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
         return true;
     }
     if (key == "ap-pass") {
+        if (!ConfigStore::isValidApPassword(value)) {
+            error = "access point password must be 8-63 printable ASCII characters";
+            return false;
+        }
         command.type = CommandType::ApPassword;
         command.text = value;
         return true;

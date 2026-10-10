@@ -7,10 +7,12 @@
 // BridgeCore is never touched from a BLE callback.
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
 #include "ble/ble_types.hpp"
+#include "ble/bounded_queue.hpp"
 
 namespace smartfitness {
 namespace ble {
@@ -41,6 +43,31 @@ struct CentralEvent {
     }
 };
 
+template <std::size_t Capacity>
+class CentralEventQueue {
+public:
+    bool push(const CentralEvent& event) {
+        bool evicted = false;
+        const bool accepted = event.type == CentralEventType::Notification
+            ? queue_.push(event)
+            : queue_.pushOrEvict(event, [](const CentralEvent& queued) {
+                  return queued.type == CentralEventType::Notification;
+              }, evicted);
+        if (evicted || (!accepted && event.type == CentralEventType::Notification)) ++notificationsDropped_;
+        if (!accepted && event.type != CentralEventType::Notification) ++lifecycleDropped_;
+        return accepted;
+    }
+    bool pop(CentralEvent& event) { return queue_.pop(event); }
+    std::uint32_t dropped() const { return queue_.dropped(); }
+    std::uint32_t droppedNotifications() const { return notificationsDropped_.load(); }
+    std::uint32_t droppedLifecycleEvents() const { return lifecycleDropped_.load(); }
+
+private:
+    BoundedQueue<CentralEvent, Capacity> queue_;
+    std::atomic<std::uint32_t> notificationsDropped_{0};
+    std::atomic<std::uint32_t> lifecycleDropped_{0};
+};
+
 class CentralTransport {
 public:
     virtual ~CentralTransport() = default;
@@ -49,16 +76,21 @@ public:
     // Active scan; durationMs == 0 scans until stopScan(). With duplicates
     // every advertisement is reported (needed for broadcast-only devices).
     virtual bool startScan(std::uint32_t durationMs, bool duplicates) = 0;
-    virtual void stopScan() = 0;
+    virtual bool stopScan() = 0;
     virtual bool scanning() const = 0;
     // Starts an asynchronous connection identified by `session`.
     virtual bool connect(std::uint32_t session, const BleAddress& address, const ConnectPlan& plan) = 0;
-    virtual void disconnect(std::uint32_t session) = 0;
+    virtual bool disconnect(std::uint32_t session) = 0;
     virtual bool write(std::uint32_t session, const GattWrite& write) = 0;
     virtual bool pollScan(ScanReport& report) = 0;
     virtual bool pollEvent(CentralEvent& event) = 0;
     // Address of this bridge, used to never connect to ourselves.
     virtual BleAddress ownAddress() const = 0;
+    virtual std::uint32_t droppedScanReports() const { return 0; }
+    virtual std::uint32_t droppedEvents() const { return 0; }
+    virtual std::uint32_t droppedNotifications() const { return 0; }
+    virtual std::uint32_t droppedLifecycleEvents() const { return 0; }
+    virtual std::uint32_t droppedCommands() const { return 0; }
 };
 
 }  // namespace ble

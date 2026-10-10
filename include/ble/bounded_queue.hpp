@@ -27,6 +27,27 @@ public:
         return true;
     }
 
+    // Critical events can displace the oldest expendable item, without
+    // reordering the remaining FIFO (notably reads before Connected).
+    template <typename Predicate>
+    bool pushOrEvict(const T& item, Predicate expendable, bool& evicted) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        evicted = false;
+        if (count_ == Capacity) {
+            std::size_t index = 0;
+            while (index < count_ && !expendable(items_[(head_ + index) % Capacity])) ++index;
+            ++dropped_;
+            if (index == count_) return false;
+            for (; index + 1 < count_; ++index)
+                items_[(head_ + index) % Capacity] = items_[(head_ + index + 1) % Capacity];
+            --count_;
+            evicted = true;
+        }
+        items_[(head_ + count_) % Capacity] = item;
+        ++count_;
+        return true;
+    }
+
     bool pop(T& item) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (count_ == 0) return false;

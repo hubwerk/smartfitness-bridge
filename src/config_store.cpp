@@ -150,8 +150,10 @@ bool ConfigStore::persistPartial(const BridgeConfig& next) {
 bool ConfigStore::factoryReset() {
     const bool erased = backend_.erase();
     config_ = BridgeConfig{};
-    saved_ = config_;
-    persisted_ = serialize(config_);
+    if (erased) {
+        saved_ = config_;
+        persisted_ = serialize(config_);
+    }
     return erased;
 }
 
@@ -211,10 +213,14 @@ bool ConfigStore::isValidPassword(const std::string& password, bool allowEmpty) 
            isPrintableAscii(password);
 }
 
+bool ConfigStore::isValidApPassword(const std::string& password) {
+    return isValidPassword(password, false);
+}
+
 bool ConfigStore::isValid(const BridgeConfig& config) {
     if (!isValidFtmsName(config.ftmsName)) return false;
     if (!isValidAdapterId(config.pairedAdapterId) || !isValidSsid(config.wifiSsid) ||
-        !isValidPassword(config.wifiPassword, true) || !isValidPassword(config.apPassword, false))
+        !isValidPassword(config.wifiPassword, true) || !isValidApPassword(config.apPassword))
         return false;
     if (config.pairedDeviceName.size() > kMaxPairedNameLength || !isPrintableAscii(config.pairedDeviceName))
         return false;
@@ -272,7 +278,7 @@ bool ConfigStore::deserialize(const std::vector<std::uint8_t>& data, BridgeConfi
         (!reader.readText(next.pairedAdapterId, kMaxAdapterIdLength) ||
          !reader.readText(next.wifiSsid, kMaxSsidLength) ||
          !reader.readText(next.wifiPassword, kMaxPasswordLength) ||
-         !reader.readText(next.apPassword, kMaxPasswordLength)))
+         !reader.readText(next.apPassword, 255)))
         return false;
     if (!reader.readByte(sourceValid) ||
         sourceValid > 1 || !reader.readByte(next.pairedSource.addressType))
@@ -281,7 +287,11 @@ bool ConfigStore::deserialize(const std::vector<std::uint8_t>& data, BridgeConfi
     for (auto& octet : next.pairedSource.address) {
         if (!reader.readByte(octet)) return false;
     }
-    if (!reader.done() || !isValid(next)) return false;
+    if (!reader.done()) return false;
+    // Recover a legacy invalid AP passphrase without losing the paired source
+    // or station credentials. The original record is retained until save().
+    if (!isValidApPassword(next.apPassword)) next.apPassword = BridgeConfig{}.apPassword;
+    if (!isValid(next)) return false;
     config = next;
     return true;
 }

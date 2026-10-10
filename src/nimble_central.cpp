@@ -1,6 +1,7 @@
 #ifdef ARDUINO
 
 #include "nimble_central.h"
+#include "ble/connection_session.hpp"
 
 #include <Arduino.h>
 #include <NimBLEDevice.h>
@@ -51,12 +52,23 @@ struct NimbleCentral::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimB
             gCentral->pushEvent(ble::CentralEventType::ScanComplete, 0);
     }
 
+    void onConnect(NimBLEClient* client) override {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        if (client->isConnected()) connectedSession.connected(owner.session_.load());
+    }
+
     void onDisconnect(NimBLEClient*) override {
-        owner.pushEvent(ble::CentralEventType::Disconnected, owner.session_.load());
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        // Capture the link identity before releasing it for reuse. A queued
+        // disconnect must never acquire the next connection's session.
+        const std::uint32_t session = connectedSession.disconnected();
+        if (session != 0) owner.pushEvent(ble::CentralEventType::Disconnected, session);
     }
 
     NimbleCentral& owner;
     NimBLEClient* client = nullptr;
+    ble::ConnectionSession connectedSession;
+    std::mutex callbackMutex;
 };
 
 bool NimbleCentral::begin() {
@@ -75,16 +87,31 @@ bool NimbleCentral::begin() {
     scan->setMaxResults(0);  // results are only delivered through the callback
 
     impl_->client = NimBLEDevice::createClient();
+    if (!impl_->client) {
+        delete impl_;
+        impl_ = nullptr;
+        gCentral = nullptr;
+        return false;
+    }
     impl_->client->setClientCallbacks(impl_, false);
     impl_->client->setConnectTimeout(kConnectTimeoutS);
 
     queue_ = xQueueCreate(kCommandQueue, sizeof(Cmd));
-    if (!queue_) return false;
-    return xTaskCreatePinnedToCore(workerEntry, "ble-central", 6144, this, 1, nullptr, 1) == pdPASS;
+    if (queue_ && xTaskCreatePinnedToCore(workerEntry, "ble-central", 6144, this, 1, nullptr, 1) == pdPASS)
+        return true;
+    if (queue_) vQueueDelete(static_cast<QueueHandle_t>(queue_));
+    queue_ = nullptr;
+    NimBLEDevice::deleteClient(impl_->client);
+    delete impl_;
+    impl_ = nullptr;
+    gCentral = nullptr;
+    return false;
 }
 
 bool NimbleCentral::send(const Cmd& cmd) {
-    return queue_ && xQueueSend(static_cast<QueueHandle_t>(queue_), &cmd, 0) == pdTRUE;
+    if (queue_ && xQueueSend(static_cast<QueueHandle_t>(queue_), &cmd, 0) == pdTRUE) return true;
+    ++droppedCommands_;
+    return false;
 }
 
 bool NimbleCentral::startScan(std::uint32_t durationMs, bool duplicates) {
@@ -92,15 +119,26 @@ bool NimbleCentral::startScan(std::uint32_t durationMs, bool duplicates) {
     cmd.op = Op::StartScan;
     cmd.durationMs = durationMs;
     cmd.duplicates = duplicates;
-    if (!send(cmd)) return false;
-    scanning_ = true;
+    std::lock_guard<std::mutex> lock(commandMutex_);
+    cmd.session = scanGeneration_ + 1;
+    const bool wasScanning = scanning_.exchange(true);
+    if (!send(cmd)) {
+        scanning_ = wasScanning;
+        return false;
+    }
+    scanGeneration_ = cmd.session;
     return true;
 }
 
-void NimbleCentral::stopScan() {
+bool NimbleCentral::stopScan() {
     Cmd cmd;
     cmd.op = Op::StopScan;
-    send(cmd);
+    std::lock_guard<std::mutex> lock(commandMutex_);
+    cmd.session = ++scanGeneration_;  // invalidate scan starts waiting behind a connect
+    const bool wasScanning = scanning_.exchange(false);
+    if (impl_ && NimBLEDevice::getScan()->isScanning()) NimBLEDevice::getScan()->stop();
+    if (wasScanning) pushEvent(ble::CentralEventType::ScanComplete, 0);
+    return send(cmd);
 }
 
 bool NimbleCentral::connect(std::uint32_t session, const ble::BleAddress& address, const ble::ConnectPlan& plan) {
@@ -109,14 +147,24 @@ bool NimbleCentral::connect(std::uint32_t session, const ble::BleAddress& addres
     cmd.session = session;
     cmd.address = address;
     cmd.plan = plan;
-    return send(cmd);
+    std::lock_guard<std::mutex> lock(commandMutex_);
+    if (!send(cmd)) return false;
+    requestedSession_ = session;
+    return true;
 }
 
-void NimbleCentral::disconnect(std::uint32_t session) {
+bool NimbleCentral::disconnect(std::uint32_t session) {
     Cmd cmd;
     cmd.op = Op::Disconnect;
     cmd.session = session;
-    send(cmd);
+    // Cancellation is out-of-band: it still works with a full command queue
+    // and is observed after NimBLE 1.4.3's bounded connect wait (timeout + 1s).
+    std::lock_guard<std::mutex> lock(commandMutex_);
+    std::uint32_t expected = session;
+    requestedSession_.compare_exchange_strong(expected, 0);
+    if (session == session_.load() && impl_ && impl_->client->isConnected())
+        impl_->client->disconnect();  // also releases pending GATT operations
+    return send(cmd);
 }
 
 bool NimbleCentral::write(std::uint32_t session, const ble::GattWrite& write) {
@@ -149,10 +197,13 @@ void NimbleCentral::worker() {
         if (xQueueReceive(static_cast<QueueHandle_t>(queue_), &cmd, portMAX_DELAY) != pdTRUE) continue;
         switch (cmd.op) {
             case Op::StartScan: doStartScan(cmd); break;
-            case Op::StopScan:
+            case Op::StopScan: {
+                std::lock_guard<std::mutex> lock(commandMutex_);
+                if (cmd.session != scanGeneration_) break;
                 if (NimBLEDevice::getScan()->isScanning()) NimBLEDevice::getScan()->stop();
                 if (scanning_.exchange(false)) pushEvent(ble::CentralEventType::ScanComplete, 0);
                 break;
+            }
             case Op::Connect: doConnect(cmd); break;
             case Op::Disconnect:
                 if (cmd.session == session_.load()) doDisconnect();
@@ -163,6 +214,8 @@ void NimbleCentral::worker() {
 }
 
 void NimbleCentral::doStartScan(const Cmd& cmd) {
+    std::lock_guard<std::mutex> lock(commandMutex_);
+    if (cmd.session != scanGeneration_) return;
     NimBLEScan* scan = NimBLEDevice::getScan();
     if (scan->isScanning()) {
         scanning_ = false;  // a restart is not a completed scan: suppress the event
@@ -171,39 +224,68 @@ void NimbleCentral::doStartScan(const Cmd& cmd) {
     scan->setAdvertisedDeviceCallbacks(impl_, cmd.duplicates);
     scan->setDuplicateFilter(!cmd.duplicates);
     // NimBLE-Arduino 1.4.x takes seconds; 0 scans until stopped.
-    const std::uint32_t seconds = cmd.durationMs == 0 ? 0 : (cmd.durationMs + 999) / 1000;
+    const std::uint32_t seconds = cmd.durationMs / 1000 + (cmd.durationMs % 1000 != 0);
+    scanning_ = true;
     if (!scan->start(seconds, Impl::scanComplete, false)) {
         if (scanning_.exchange(false)) pushEvent(ble::CentralEventType::ScanComplete, 0);
         return;
     }
-    scanning_ = true;
 }
 
 void NimbleCentral::doConnect(const Cmd& cmd) {
-    session_ = cmd.session;
-    NimBLEScan* scan = NimBLEDevice::getScan();
-    if (scan->isScanning()) {
-        scan->stop();
-        if (scanning_.exchange(false)) pushEvent(ble::CentralEventType::ScanComplete, 0);
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        if (cancelled(cmd.session)) return;
     }
     NimBLEClient* client = impl_->client;
-    if (client->isConnected()) client->disconnect();
+    doDisconnect();
+    const std::uint32_t waitStarted = millis();
+    while (client->isConnected() || impl_->connectedSession.active() != 0) {
+        if (cancelled(cmd.session)) return;
+        if (millis() - waitStarted >= kConnectTimeoutS * 1000UL) {
+            pushEvent(ble::CentralEventType::ConnectFailed, cmd.session);
+            return;  // never reuse a client whose old disconnect is outstanding
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        if (cancelled(cmd.session)) return;
+        session_ = cmd.session;
+    }
+    {
+        std::lock_guard<std::mutex> lock(commandMutex_);
+        if (cancelled(cmd.session)) return;
+        NimBLEScan* scan = NimBLEDevice::getScan();
+        if (scan->isScanning()) {
+            scan->stop();
+            if (scanning_.exchange(false)) pushEvent(ble::CentralEventType::ScanComplete, 0);
+        }
+    }
+    if (cancelled(cmd.session)) return;
     const NimBLEAddress address(cmd.address.toString(), cmd.address.type);
     if (!client->connect(address, true)) {
         pushEvent(ble::CentralEventType::ConnectFailed, cmd.session);
         return;
     }
+    if (cancelled(cmd.session)) {
+        doDisconnect();
+        return;
+    }
     // Reads are reported before Connected so protocols can derive capabilities.
     for (std::uint8_t index = 0; index < cmd.plan.readCount; ++index) {
+        if (cancelled(cmd.session)) { doDisconnect(); return; }
         const auto& read = cmd.plan.reads[index];
         NimBLERemoteCharacteristic* characteristic = findCharacteristic(client, read.service, read.characteristic);
         if (!characteristic || !characteristic->canRead()) continue;
         const NimBLEAttValue value = characteristic->readValue();
+        if (cancelled(cmd.session)) { doDisconnect(); return; }
         pushEvent(ble::CentralEventType::ReadResult, cmd.session, index, 0, value.data(), value.length());
     }
     std::uint32_t mask = 0;
     const std::uint32_t session = cmd.session;
     for (std::uint8_t index = 0; index < cmd.plan.subscriptionCount; ++index) {
+        if (cancelled(cmd.session)) { doDisconnect(); return; }
         const auto& subscription = cmd.plan.subscriptions[index];
         NimBLERemoteCharacteristic* characteristic =
             findCharacteristic(client, subscription.service, subscription.characteristic);
@@ -217,6 +299,10 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         };
         if (characteristic->subscribe(!subscription.indicate, callback, true)) mask |= 1UL << index;
     }
+    if (cancelled(cmd.session)) {
+        doDisconnect();
+        return;
+    }
     if (!client->isConnected()) {
         pushEvent(ble::CentralEventType::ConnectFailed, cmd.session);
         return;
@@ -225,12 +311,13 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
 }
 
 void NimbleCentral::doDisconnect() {
+    std::lock_guard<std::mutex> lock(commandMutex_);
     if (impl_->client->isConnected()) impl_->client->disconnect();
 }
 
 void NimbleCentral::doWrite(const Cmd& cmd) {
     NimBLEClient* client = impl_->client;
-    if (cmd.session != session_.load() || !client->isConnected()) {
+    if (cmd.session != session_.load() || cancelled(cmd.session) || !client->isConnected()) {
         pushEvent(ble::CentralEventType::WriteFailed, cmd.session);
         return;
     }
