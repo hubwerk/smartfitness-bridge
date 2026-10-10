@@ -99,6 +99,16 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
         command.text = value;
         return true;
     }
+    if (key == "ftms-profile") {
+        FtmsOutputProfile profile;
+        if (!parseFtmsOutputProfile(value, profile)) {
+            error = "profile must be auto, bike, treadmill, cross-trainer or rower";
+            return false;
+        }
+        command.type = CommandType::FtmsProfile;
+        command.text = value;
+        return true;
+    }
     if (key == "scan") {
         float seconds = 0.0F;
         if (!parseFloat(value, seconds) || !std::isfinite(seconds) || seconds < 1.0F || seconds > 60.0F) {

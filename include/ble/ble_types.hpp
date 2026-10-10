@@ -65,11 +65,14 @@ struct ScanReport {
     std::array<Uuid, kMaxAdvertisedServices> services{};
     std::uint8_t manufacturerLength = 0;
     std::array<std::uint8_t, kMaxManufacturerData> manufacturer{};
+    std::uint8_t ftmsServiceDataLength = 0;
+    std::array<std::uint8_t, 3> ftmsServiceData{};
 
     void setName(const std::string& value);
     std::string nameString() const;
     bool addService(const Uuid& uuid);
     void setManufacturerData(const std::uint8_t* data, std::size_t length);
+    void setFtmsServiceData(const std::uint8_t* data, std::size_t length);
 };
 
 // Heap-friendly advertisement view used by the protocol matchers.
@@ -79,6 +82,7 @@ struct Advertisement {
     int rssi = 0;
     std::vector<Uuid> services;
     Bytes manufacturerData;  // includes the 2-byte company identifier (little endian)
+    Bytes ftmsServiceData;   // FTMS flags and little-endian Fitness Machine Type
 
     static Advertisement from(const ScanReport& report);
     bool hasService(const Uuid& uuid) const;

@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include "bridge/bridge_core.hpp"
+#include "bridge/machine_profile.hpp"
 
 class BtDeviceAdapter : public smartfitness::TrainerControlAdapter {
 public:
@@ -13,6 +14,7 @@ public:
     virtual void disconnect() = 0;
     virtual bool isConnected() const = 0;
     virtual bool trainerDetected() const = 0;
+    virtual smartfitness::MachineProfile profile() const { return smartfitness::MachineProfile::IndoorBike; }
 
     virtual FitnessTelemetry telemetry() const = 0;
     virtual smartfitness::TrainerCapabilities capabilities() const = 0;

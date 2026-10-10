@@ -28,6 +28,7 @@ struct ScanResult {
     int rssi = 0;
     bool connectable = true;
     std::vector<smartfitness::ble::Uuid> services;
+    smartfitness::ble::Bytes ftmsServiceData;
     std::string detectedAdapter;  // empty when no adapter matches
     std::uint32_t lastSeenMs = 0;
 };
@@ -64,6 +65,7 @@ public:
     bool requestDisconnect();
     bool isConnected() const override;
     bool trainerDetected() const override;
+    smartfitness::MachineProfile profile() const override;
     FitnessTelemetry telemetry() const override;
     smartfitness::TrainerCapabilities capabilities() const override;
     bool apply(const smartfitness::ControlRequest& request) override;
@@ -161,6 +163,7 @@ public:
     void disconnect() override;
     bool isConnected() const override;
     bool trainerDetected() const override;
+    smartfitness::MachineProfile profile() const override;
     FitnessTelemetry telemetry() const override;
     smartfitness::TrainerCapabilities capabilities() const override;
     bool apply(const smartfitness::ControlRequest& request) override;

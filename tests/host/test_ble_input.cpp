@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <map>
 #include <thread>
 
 #include "ant_output.h"
@@ -22,9 +23,11 @@
 #include "protocols/domyos.hpp"
 #include "protocols/echelon.hpp"
 #include "protocols/ftms_source.hpp"
+#include "protocols/ifit_bowflex.hpp"
 #include "protocols/registry.hpp"
 #include "protocols/sensor_codec.hpp"
 #include "protocols/sensor_sources.hpp"
+#include "protocols/treadmills.hpp"
 #include "protocols/yesoul_keiser.hpp"
 
 using namespace smartfitness;
@@ -444,6 +447,98 @@ void testRegistry() {
     assert(!protocols::createProtocol("unknown"));
 }
 
+void testProtocolProfiles() {
+    std::map<std::string, MachineProfile> expected{
+        {"keiser-m3i", MachineProfile::IndoorBike}, {"echelon", MachineProfile::IndoorBike},
+        {"domyos", MachineProfile::IndoorBike}, {"schwinn-ic4", MachineProfile::IndoorBike},
+        {"yesoul", MachineProfile::IndoorBike}, {"tacx-fec", MachineProfile::IndoorBike},
+        {"elite-legacy", MachineProfile::IndoorBike}, {"elite-dr", MachineProfile::IndoorBike},
+        {"elite-misuro", MachineProfile::IndoorBike}, {"wahoo-legacy", MachineProfile::IndoorBike},
+        {"concept2-pm5", MachineProfile::Rower}, {"ftms", MachineProfile::IndoorBike},
+        {"cps", MachineProfile::IndoorBike}, {"csc", MachineProfile::IndoorBike},
+        {"hrs", MachineProfile::IndoorBike}, {"ifit-bike", MachineProfile::IndoorBike},
+        {"ifit-treadmill", MachineProfile::Treadmill}, {"ifit-freestride", MachineProfile::CrossTrainer},
+        {"ifit-elliptical", MachineProfile::CrossTrainer}, {"ifit-el-trainer", MachineProfile::CrossTrainer},
+        {"bowflex-t216", MachineProfile::Treadmill}, {"schwinn-170", MachineProfile::IndoorBike}
+    };
+    assert(protocols::ifit_bowflex::modelCount() == 97);
+    for (unsigned ordinal = 1; ordinal <= 97; ++ordinal) {
+        const auto profile = ordinal <= 23 || ordinal == 97 ? MachineProfile::IndoorBike :
+                             ordinal <= 83 || (ordinal >= 91 && ordinal <= 96) ? MachineProfile::Treadmill :
+                             MachineProfile::CrossTrainer;
+        expected.emplace("ifit-model-" + std::to_string(ordinal), profile);
+    }
+    for (std::size_t index = 0; index < protocols::treadmills::descriptorCount(); ++index)
+        expected.emplace(protocols::treadmills::descriptorAt(index).id, MachineProfile::Treadmill);
+    assert(expected.size() == protocols::protocolCount());
+    for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
+        const auto& info = protocols::protocolAt(index);
+        assert(expected.at(info.id) == info.profile);
+        auto source = protocols::createProtocol(info.id);
+        assert(source && source->profile() == info.profile);
+        source->reset();
+        assert(source->profile() == info.profile);
+        // Enumeration and factory calls must not modify descriptor identities.
+        assert(protocols::findProtocol(info.id) == &info);
+    }
+}
+
+void testFtmsProfiles() {
+    using Source = protocols::FtmsSource;
+    const std::array<MachineProfile, 4> profiles{{MachineProfile::IndoorBike, MachineProfile::Treadmill,
+                                                MachineProfile::CrossTrainer, MachineProfile::Rower}};
+    const std::array<Bytes, 4> frames{{{0, 0, 0xC4, 9}, {0, 0, 0xB0, 4},
+                                      {0, 0, 0, 0xE8, 3}, {0, 0, 0x30, 0x10, 0}}};
+    const std::array<std::uint8_t, 4> typeBits{{0x20, 1, 2, 0x10}};
+    for (std::size_t index = 0; index < profiles.size(); ++index) {
+        Source source;
+        assert(source.onConnected(1U << index, 100));
+        assert(source.profile() == profiles[index]);
+        source.onNotify(index, frames[index].data(), frames[index].size(), 200);
+        assert(source.profile() == profiles[index] && source.hasData());
+        source.reset();
+        assert(source.profile() == MachineProfile::IndoorBike && !source.sample().distance.valid);
+        ble::Advertisement advertisement;
+        advertisement.ftmsServiceData = {1, typeBits[index], 0};
+        source.onAdvertisement(advertisement, 300);
+        assert(source.profile() == profiles[index]);
+        assert(source.onConnected(0x1f, 300));  // Some machines expose every data characteristic.
+        assert(source.profile() == profiles[index]);
+        for (std::size_t other = 0; other < frames.size(); ++other) {
+            source.onNotify(other, frames[other].data(), frames[other].size(), 400);
+            assert(source.profile() == profiles[index]);
+        }
+    }
+    Source source;
+    ble::Advertisement advertisement;
+    for (const Bytes& invalid : {Bytes{1, 1}, Bytes{0, 1, 0}, Bytes{1, 0, 0}, Bytes{1, 3, 0},
+                                 Bytes{1, 4, 0}}) {
+        advertisement.ftmsServiceData = invalid;
+        source.onAdvertisement(advertisement, 100);
+        assert(source.profile() == MachineProfile::IndoorBike);
+    }
+    // A sole available characteristic overrides contradictory advertising.
+    advertisement.ftmsServiceData = {1, 0x20, 0};
+    source.onAdvertisement(advertisement, 100);
+    assert(source.onConnected(1U << Source::SubTreadmill, 100));
+    assert(source.profile() == MachineProfile::Treadmill);
+    source.reset();
+    assert(source.onConnected(0x0f, 200));
+    source.onNotify(Source::SubRower, frames[3].data(), frames[3].size(), 300);
+    assert(source.profile() == MachineProfile::Rower);
+    const Bytes distance{0x10, 0, 0xC4, 9, 0x10, 0x27, 0};
+    source.onNotify(Source::SubBike, distance.data(), distance.size(), 400);
+    assert(source.sample().distance.valid && near(source.sample().distance.value, 10000));
+    const Bytes moreData{1, 0};
+    source.onNotify(Source::SubBike, moreData.data(), moreData.size(), 500);
+    assert(near(source.sample().distance.value, 10000));
+    auto schwinn = protocols::createProtocol("schwinn-ic4");
+    advertisement.ftmsServiceData = {1, 1, 0};
+    schwinn->onAdvertisement(advertisement, 100);
+    assert(schwinn->onConnected(1, 100));
+    assert(schwinn->profile() == MachineProfile::IndoorBike);
+}
+
 struct Harness {
     std::uint32_t now = 1000;
     FakeCentral central;
@@ -470,6 +565,69 @@ struct Harness {
         adapter.loop();
     }
 };
+
+void testAdapterProfiles() {
+    Harness h;
+    assert(h.adapter.profile() == MachineProfile::IndoorBike);
+    h.adapter.startScan();
+    ble::ScanReport report;
+    report.address = address("aa:00:00:00:00:01");
+    report.addService(ble::Uuid::from16(0x1826));
+    const Bytes treadmillType{1, 1, 0};
+    report.setFtmsServiceData(treadmillType.data(), treadmillType.size());
+    assert(ble::Advertisement::from(report).ftmsServiceData == treadmillType);
+    h.central.reports.push_back(report);
+    h.adapter.loop();
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    h.central.pushEvent(ble::CentralEventType::Connected, 0x1f);
+    h.adapter.loop();
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    SimulatedDeviceAdapter simulation;
+    InputSelector selector(simulation, &h.adapter);
+    assert(selector.profile() == MachineProfile::IndoorBike);
+    selector.select(InputSelector::Source::Ble);
+    assert(selector.profile() == MachineProfile::Treadmill);
+    h.adapter.clearPairedDevice();
+    assert(h.adapter.profile() == MachineProfile::IndoorBike);
+    h.pair("aa:00:00:00:00:02", "ifit-model-24");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::Treadmill);
+    h.adapter.disconnect();
+    h.pair("aa:00:00:00:00:03", "ifit-model-84");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::CrossTrainer);
+    h.adapter.disconnect();
+    h.pair("aa:00:00:00:00:04", "concept2-pm5");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.profile() == MachineProfile::Rower);
+}
+
+void testFtmsDistanceTelemetry() {
+    Harness h;
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.adapter.loop();
+    assert(!h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.capabilities().supports(Metric::Distance));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, 0,
+                        {0x10, 0, 0xC4, 9, 0x10, 0x27, 0});
+    h.adapter.loop();
+    assert(h.adapter.telemetry().distanceValid && near(h.adapter.telemetry().distance, 10000));
+    assert(h.adapter.capabilities().supports(Metric::Distance));
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, 0, {1, 0});
+    h.adapter.loop();
+    assert(h.adapter.telemetry().distanceValid && near(h.adapter.telemetry().distance, 10000));
+    h.advance(5001);
+    assert(!h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.capabilities().supports(Metric::Distance));
+    h.adapter.disconnect();
+    assert(!h.adapter.telemetry().distanceValid && h.adapter.telemetry().distance == 0);
+}
 
 void testScanDedupAndExclusion() {
     Harness h;
@@ -1051,6 +1209,10 @@ void runBleInputTests() {
     testDomyos();
     testYesoulAndKeiser();
     testRegistry();
+    testProtocolProfiles();
+    testFtmsProfiles();
+    testAdapterProfiles();
+    testFtmsDistanceTelemetry();
     testScanDedupAndExclusion();
     testFtmsLifecycle();
     testProtocolFailureAndControlDenied();

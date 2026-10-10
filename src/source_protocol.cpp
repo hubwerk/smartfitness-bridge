@@ -1,9 +1,15 @@
 #include "protocols/source_protocol.hpp"
+#include "protocols/registry.hpp"
 
 #include <cmath>
 
 namespace smartfitness {
 namespace protocols {
+
+MachineProfile SourceProtocol::profile() const {
+    const auto* info = findProtocol(id());
+    return info ? info->profile : MachineProfile::IndoorBike;
+}
 
 void SourceProtocol::onRead(std::size_t, const std::uint8_t*, std::size_t) {}
 void SourceProtocol::onAdvertisement(const ble::Advertisement&, std::uint32_t) {}
@@ -49,6 +55,8 @@ void SourceProtocol::touch(std::uint32_t nowMs) {
     observe(sample_.power, Metric::Power);
     observe(sample_.heartRate, Metric::HeartRate);
     observe(sample_.incline, Metric::Incline);
+    observe(sample_.distance, Metric::Distance);
+    observe(sample_.elapsed, Metric::ElapsedTime);
 }
 
 int percentToLevel(float percent, int minimum, int maximum) {

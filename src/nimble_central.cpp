@@ -43,6 +43,12 @@ struct NimbleCentral::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimB
             const std::string data = device->getManufacturerData();
             report.setManufacturerData(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
         }
+        for (std::uint8_t index = 0; index < device->getServiceDataCount(); ++index) {
+            if (device->getServiceDataUUID(index) != NimBLEUUID(static_cast<std::uint16_t>(0x1826))) continue;
+            const std::string data = device->getServiceData(index);
+            report.setFtmsServiceData(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            report.addService(ble::Uuid::from16(0x1826));
+        }
         owner.scans_.push(report);
     }
 

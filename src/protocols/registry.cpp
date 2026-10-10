@@ -83,21 +83,21 @@ std::unique_ptr<SourceProtocol> makeSchwinn() {
 }
 
 const ProtocolInfo kProtocols[] = {
-    {"keiser-m3i", "Keiser M3i (broadcast)", 90, matchesKeiser, make<KeiserM3iSource>, false, true},
-    {"echelon", "Echelon Connect Sport", 80, matchesEchelon, make<EchelonSource>, true, false},
-    {"domyos", "Domyos / Decathlon bike", 80, matchesDomyos, make<DomyosSource>, true, false},
-    {"schwinn-ic4", "Schwinn IC4 / IC8", 70, matchesSchwinn, makeSchwinn, false, false},
-    {"yesoul", "Yesoul bike", 70, matchesYesoul, make<YesoulSource>, false, false},
-    {"tacx-fec", "Tacx Neo / Flux BLE FE-C", 80, matchesTacxFec, makeTacxFec, true, false},
-    {"elite-legacy", "Elite legacy trainer", 80, matchesEliteLegacy, makeEliteLegacy, true, false},
-    {"elite-dr", "Elite DR trainer", 80, matchesEliteDr, makeEliteDr, true, false},
-    {"elite-misuro", "Elite Misuro B+ (read-only)", 70, matchesEliteMisuro, makeEliteMisuro, false, false},
-    {"wahoo-legacy", "Wahoo KICKR legacy", 80, matchesWahooKickr, makeWahooKickr, true, false},
-    {"concept2-pm5", "Concept2 PM5 rower", 80, matchesConcept2Pm5, makeConcept2Pm5, false, false},
-    {"ftms", "FTMS fitness machine", 50, matchesFtms, make<FtmsSource>, true, false},
-    {"cps", "Cycling Power sensor", 40, matchesCps, make<CyclingPowerSource>, false, false},
-    {"csc", "Speed/Cadence sensor", 30, matchesCsc, make<CscSource>, false, false},
-    {"hrs", "Heart rate monitor", 20, matchesHrs, make<HeartRateSource>, false, false},
+    {"keiser-m3i", "Keiser M3i (broadcast)", 90, matchesKeiser, make<KeiserM3iSource>, false, true, MachineProfile::IndoorBike},
+    {"echelon", "Echelon Connect Sport", 80, matchesEchelon, make<EchelonSource>, true, false, MachineProfile::IndoorBike},
+    {"domyos", "Domyos / Decathlon bike", 80, matchesDomyos, make<DomyosSource>, true, false, MachineProfile::IndoorBike},
+    {"schwinn-ic4", "Schwinn IC4 / IC8", 70, matchesSchwinn, makeSchwinn, false, false, MachineProfile::IndoorBike},
+    {"yesoul", "Yesoul bike", 70, matchesYesoul, make<YesoulSource>, false, false, MachineProfile::IndoorBike},
+    {"tacx-fec", "Tacx Neo / Flux BLE FE-C", 80, matchesTacxFec, makeTacxFec, true, false, MachineProfile::IndoorBike},
+    {"elite-legacy", "Elite legacy trainer", 80, matchesEliteLegacy, makeEliteLegacy, true, false, MachineProfile::IndoorBike},
+    {"elite-dr", "Elite DR trainer", 80, matchesEliteDr, makeEliteDr, true, false, MachineProfile::IndoorBike},
+    {"elite-misuro", "Elite Misuro B+ (read-only)", 70, matchesEliteMisuro, makeEliteMisuro, false, false, MachineProfile::IndoorBike},
+    {"wahoo-legacy", "Wahoo KICKR legacy", 80, matchesWahooKickr, makeWahooKickr, true, false, MachineProfile::IndoorBike},
+    {"concept2-pm5", "Concept2 PM5 rower", 80, matchesConcept2Pm5, makeConcept2Pm5, false, false, MachineProfile::Rower},
+    {"ftms", "FTMS fitness machine", 50, matchesFtms, make<FtmsSource>, true, false, MachineProfile::IndoorBike},
+    {"cps", "Cycling Power sensor", 40, matchesCps, make<CyclingPowerSource>, false, false, MachineProfile::IndoorBike},
+    {"csc", "Speed/Cadence sensor", 30, matchesCsc, make<CscSource>, false, false, MachineProfile::IndoorBike},
+    {"hrs", "Heart rate monitor", 20, matchesHrs, make<HeartRateSource>, false, false, MachineProfile::IndoorBike},
 };
 
 }  // namespace

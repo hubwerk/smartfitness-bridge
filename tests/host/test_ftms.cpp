@@ -318,9 +318,194 @@ void testFtmsClientAddress() {
     assert(!ftms.clientAddress(address, type));
 }
 
+void testTreadmillCodec() {
+    ftms::TreadmillData data;
+    data.speed = valid(8.5F);
+    data.incline = valid(-5);
+    data.distance = valid(1234);
+    data.heartRate = valid(120);
+    const Bytes payload{0x0C, 0x01, 0x52, 0x03, 0xD2, 0x04, 0x00, 0xCE, 0xFF, 0xE3, 0xFF, 0x78};
+    assert(ftms::encodeTreadmillData(data) == payload);
+    ftms::MachineData decoded;
+    assert(ftms::decodeTreadmillData(payload.data(), payload.size(), decoded));
+    assert(decoded.speed.value == 8.5F && decoded.incline.value == -5);
+    assert(decoded.distance.value == 1234 && decoded.heartRate.value == 120);
+    assert(ftms::encodeTreadmillData({}) == (Bytes{1, 0}));
+    data = {};
+    data.distance = valid(1.0e30F);
+    data.incline = valid(1.0e30F);
+    assert(ftms::encodeTreadmillData(data) ==
+           (Bytes{0x0D, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x84, 0x03}));
+    data = {};
+    data.elapsed = valid(42);
+    data.speed = {NAN, true};
+    assert(ftms::encodeTreadmillData(data) == (Bytes{1, 4, 42, 0}));
+    const auto timed = ftms::encodeTreadmillData(data);
+    assert(ftms::decodeTreadmillData(timed.data(), timed.size(), decoded));
+    assert(decoded.elapsed.valid && decoded.elapsed.value == 42);
+    TrainerState state;
+    state.connected = true;
+    state.setSample(Metric::ElapsedTime, 42);
+    state.setSample(Metric::Distance, 100);
+    assert(ftms::encodeTreadmillData(ftms::treadmillDataFrom(state)) == (Bytes{5, 4, 100, 0, 0, 42, 0}));
+    state.connected = false;
+    assert(ftms::encodeTreadmillData(ftms::treadmillDataFrom(state)) == (Bytes{1, 0}));
+    assert(ftms::encodeAdvertisingServiceData(MachineProfile::Treadmill) == (Bytes{1, 1, 0}));
+    assert(ftms::encodeSupportedSpeedRange() == (Bytes{0, 0, 0x10, 0x27, 1, 0}));
+    ftms::ControlPointCommand command;
+    const Bytes speed{2, 0x52, 3};
+    assert(ftms::decodeControlPoint(speed.data(), speed.size(), command, MachineProfile::Treadmill));
+    assert(command.status == ResultCode::Success && command.hasRequest &&
+           command.request.control == Control::Speed && command.request.value == 8.5F);
+    assert(ftms::encodeMachineStatus(command) == (Bytes{5, 0x52, 3}));
+    assert(ftms::decodeControlPoint(speed.data(), 2, command, MachineProfile::Treadmill));
+    assert(command.status == ResultCode::InvalidParameter);
+    const Bytes outOfRange{2, 0x11, 0x27};
+    assert(ftms::decodeControlPoint(outOfRange.data(), outOfRange.size(), command, MachineProfile::Treadmill));
+    assert(command.status == ResultCode::InvalidParameter && !command.hasRequest);
+    for (const Bytes& bytes : {Bytes{5, 100, 0}, Bytes{4, 10}, Bytes{0x11, 0, 0, 0, 0, 0, 0}}) {
+        assert(ftms::decodeControlPoint(bytes.data(), bytes.size(), command, MachineProfile::Treadmill));
+        assert(command.status == ResultCode::NotSupported && !command.hasRequest);
+    }
+}
+
+class FakeTreadmill final : public BtDeviceAdapter {
+public:
+    void begin() override {}
+    void loop() override { emitTelemetry(value); }
+    bool scanAndConnect() override { value.connected = true; return true; }
+    void disconnect() override { value.connected = false; }
+    bool isConnected() const override { return value.connected; }
+    bool trainerDetected() const override { return writable; }
+    MachineProfile profile() const override { return MachineProfile::Treadmill; }
+    FitnessTelemetry telemetry() const override { return value; }
+    TrainerCapabilities capabilities() const override {
+        TrainerCapabilities result;
+        for (Metric metric : {Metric::Speed, Metric::Incline, Metric::HeartRate}) result.setMetric(metric, true);
+        if (writable) {
+            result.setControl(Control::Speed, true);
+            result.setControl(Control::Incline, true);
+        }
+        return result;
+    }
+    bool apply(const ControlRequest& request) override {
+        if (!writable || reject) return false;
+        ++writes;
+        if (request.control == Control::Speed) value.speed = request.value;
+        else if (request.control == Control::Incline) value.incline = request.value;
+        else return false;
+        return true;
+    }
+    FitnessTelemetry value;
+    bool writable = true;
+    bool reject = false;
+    unsigned writes = 0;
+};
+
+void testTreadmillOutput() {
+    FakeTreadmill adapter;
+    AntOutput ant;
+    FtmsOutput output;
+    BridgeCore bridge;
+    std::uint32_t clock = 10000;
+    output.setClock([&] { return clock; });
+    bridge.attach(adapter, ant, output);
+    bridge.begin();
+    assert(bridge.scanAndConnect());
+    bridge.loop();
+    assert(output.profile() == MachineProfile::Treadmill);
+    assert(output.feature() == (Bytes{8, 4, 0, 0, 3, 0, 0, 0}));
+    assert(adapter.writes == 0);
+    output.notifyClientConnected();
+    bridge.loop();
+    assert(output.lastIndoorBikeData().empty());
+    ftms::MachineData data;
+    auto payload = output.lastTreadmillData();
+    assert(ftms::decodeTreadmillData(payload.data(), payload.size(), data));
+    assert(data.speed.valid && data.speed.value == 0);
+    assert(write(output, bridge, {2, 0x20, 3}) == (Bytes{0x80, 2, 5}));
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 4}));
+    assert(adapter.writes == 0); // start never manufactures motion
+    assert(write(output, bridge, {2, 0x20, 3}) == (Bytes{0x80, 2, 1}));
+    assert(adapter.value.speed == 8);
+    assert(output.lastMachineStatus() == (Bytes{5, 0x20, 3}));
+    clock += 300;
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{4}));
+    payload = output.lastTreadmillData();
+    assert(ftms::decodeTreadmillData(payload.data(), payload.size(), data));
+    assert(data.speed.value == 8);
+    assert(write(output, bridge, {2, 0x20}) == (Bytes{0x80, 2, 3}));
+    assert(write(output, bridge, {2, 0x11, 0x27}) == (Bytes{0x80, 2, 3}));
+    assert(write(output, bridge, {3, 50, 0}) == (Bytes{0x80, 3, 1}));
+    assert(adapter.value.incline == 5);
+    for (Bytes bytes : {Bytes{5, 100, 0}, Bytes{4, 10}, Bytes{0x11, 0, 0, 0, 0, 0, 0}})
+        assert(write(output, bridge, bytes) == (Bytes{0x80, bytes[0], 2}));
+    adapter.reject = true;
+    assert(write(output, bridge, {8, 1}) == (Bytes{0x80, 8, 4}));
+    assert(adapter.value.speed == 8);
+    adapter.reject = false;
+    assert(write(output, bridge, {8, 1}) == (Bytes{0x80, 8, 1}));
+    assert(adapter.value.speed == 0);
+    assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    clock += 300;
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    const Bytes stale{2, 0xB0, 4};
+    assert(output.enqueueControlPoint(stale.data(), stale.size()));
+    const auto writes = adapter.writes;
+    output.setProfileOverride(FtmsOutputProfile::IndoorBike);
+    bridge.loop();
+    assert(!output.controlGranted() && !output.clientConnected() && output.advertising());
+    assert(adapter.writes == writes && adapter.value.speed == 0);
+    assert(output.profile() == MachineProfile::IndoorBike);
+    output.setProfileOverride(FtmsOutputProfile::Auto);
+    bridge.loop();
+    output.notifyClientConnected();
+    bridge.loop();
+    assert(write(output, bridge, stale) == (Bytes{0x80, 2, 5}));
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    assert(output.enqueueControlPoint(stale.data(), stale.size()));
+    output.notifyClientDisconnected();
+    bridge.loop();
+    assert(adapter.writes == writes && adapter.value.speed == 0);
+    output.notifyClientConnected();
+    bridge.loop();
+    assert(write(output, bridge, stale) == (Bytes{0x80, 2, 5}));
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    adapter.writable = false;
+    bridge.loop();
+    assert(write(output, bridge, stale) == (Bytes{0x80, 2, 5}));
+    assert(output.feature() == (Bytes{8, 4, 0, 0, 0, 0, 0, 0}));
+    assert(adapter.writes == writes);
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    assert(write(output, bridge, {8, 2}) == (Bytes{0x80, 8, 4}));
+    bridge.disconnect();
+    bridge.loop();
+    assert(!output.controlGranted());
+    output.setProfileOverride(FtmsOutputProfile::Rower);
+    assert(output.profile() == MachineProfile::IndoorBike);
+    output.setProfileOverride(FtmsOutputProfile::CrossTrainer);
+    assert(output.profile() == MachineProfile::IndoorBike);
+    output.setProfileOverride(FtmsOutputProfile::Auto);
+    bridge.scanAndConnect();
+    bridge.loop();
+    output.notifyClientConnected();
+    bridge.loop();
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    assert(output.enqueueControlPoint(stale.data(), stale.size()));
+    output.setProfileOverride(FtmsOutputProfile::Treadmill);
+    bridge.loop();
+    assert(output.profile() == MachineProfile::Treadmill && output.clientConnected());
+    assert(!output.controlGranted() && adapter.writes == writes);
+}
+
 }  // namespace
 
 void runFtmsTests() {
+    testTreadmillCodec();
+    testTreadmillOutput();
     testFtmsClientAddress();
     testIndoorBikeDataEncoding();
     testStaticCharacteristics();

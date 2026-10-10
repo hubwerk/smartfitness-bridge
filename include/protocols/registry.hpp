@@ -22,6 +22,7 @@ struct ProtocolInfo {
     std::unique_ptr<SourceProtocol> (*create)();
     bool controllable;  // can act as trainer (subject to runtime negotiation)
     bool advertisementOnly;
+    MachineProfile profile;
 };
 
 std::size_t protocolCount();

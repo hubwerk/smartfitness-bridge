@@ -17,6 +17,7 @@ constexpr std::uint16_t kServiceUuid = 0x1826;
 constexpr std::uint16_t kFeatureUuid = 0x2ACC;
 constexpr std::uint16_t kIndoorBikeDataUuid = 0x2AD2;
 constexpr std::uint16_t kTrainingStatusUuid = 0x2AD3;
+constexpr std::uint16_t kSupportedSpeedRangeUuid = 0x2AD4;
 constexpr std::uint16_t kSupportedInclinationRangeUuid = 0x2AD5;
 constexpr std::uint16_t kSupportedResistanceRangeUuid = 0x2AD6;
 constexpr std::uint16_t kSupportedPowerRangeUuid = 0x2AD8;
@@ -43,6 +44,7 @@ constexpr std::uint32_t kTargetIndoorBikeSimulation = 1U << 13;
 enum class OpCode : std::uint8_t {
     RequestControl = 0x00,
     Reset = 0x01,
+    SetTargetSpeed = 0x02,
     SetTargetInclination = 0x03,
     SetTargetResistance = 0x04,
     SetTargetPower = 0x05,
@@ -64,6 +66,7 @@ enum class StatusCode : std::uint8_t {
     Reset = 0x01,
     StoppedOrPaused = 0x02,
     StartedOrResumed = 0x04,
+    TargetSpeedChanged = 0x05,
     TargetInclineChanged = 0x06,
     TargetResistanceChanged = 0x07,
     TargetPowerChanged = 0x08,
@@ -83,16 +86,28 @@ struct IndoorBikeData {
     MetricSample heartRate;  // bpm
 };
 
+struct TreadmillData {
+    MetricSample speed;      // km/h
+    MetricSample incline;    // %, ramp angle derived from grade
+    MetricSample heartRate;  // bpm
+    MetricSample distance;   // m
+    MetricSample elapsed;    // seconds, only when supplied by the input
+};
+
+TreadmillData treadmillDataFrom(const TrainerState& state);
+Bytes encodeTreadmillData(const TreadmillData& data);
+
 // Uses only samples the core marked valid (connected and supported by the device).
 IndoorBikeData indoorBikeDataFrom(const TrainerState& state);
 Bytes encodeIndoorBikeData(const IndoorBikeData& data);
-Bytes encodeFeature(const TrainerCapabilities& capabilities);
+Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile profile = MachineProfile::IndoorBike);
+Bytes encodeSupportedSpeedRange();
 Bytes encodeSupportedInclinationRange();
 Bytes encodeSupportedResistanceRange();
 Bytes encodeSupportedPowerRange();
 Bytes encodeTrainingStatus(TrainingStatus status);
-// FTMS advertising Service Data payload: machine available, indoor bike supported.
-Bytes encodeAdvertisingServiceData();
+// FTMS advertising Service Data payload: machine available and selected type.
+Bytes encodeAdvertisingServiceData(MachineProfile profile = MachineProfile::IndoorBike);
 
 struct ControlPointCommand {
     std::uint8_t opcode = 0;
@@ -106,7 +121,8 @@ struct ControlPointCommand {
 };
 
 // Returns false for an empty write, which carries no opcode to respond to.
-bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPointCommand& command);
+bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPointCommand& command,
+                        MachineProfile profile = MachineProfile::IndoorBike);
 Bytes encodeControlPointResponse(std::uint8_t opcode, ResultCode result);
 // Status notification for an acknowledged command; empty when the opcode has none.
 Bytes encodeMachineStatus(const ControlPointCommand& command);
@@ -126,7 +142,7 @@ constexpr std::uint32_t kFeatureResistanceLevel = 1U << 7;
 constexpr std::uint32_t kFeaturePowerAndForce = 1U << 15;
 constexpr std::uint32_t kTargetSpeed = 1U << 0;
 
-enum class MachineType : std::uint8_t { IndoorBike, Treadmill, CrossTrainer, Rower };
+using MachineType = MachineProfile;
 
 // Normalized sample decoded from one data notification. Only fields whose
 // flag was present are marked valid.
@@ -138,6 +154,7 @@ struct MachineData {
     MetricSample incline;     // %
     MetricSample resistance;  // device resistance level (unitless, as sent)
     MetricSample distance;    // m
+    MetricSample elapsed;     // seconds
 };
 
 // Return false when the payload is truncated for the flags it announces.

@@ -14,17 +14,20 @@
 
 #include "ble/ble_types.hpp"
 #include "bridge/bridge_core.hpp"
+#include "bridge/machine_profile.hpp"
 
 namespace smartfitness {
 namespace protocols {
 
 struct SourceSample {
+    MetricSample elapsed;     // s
     MetricSample speed;       // km/h
     MetricSample cadence;     // rpm
     MetricSample power;       // W
     MetricSample heartRate;   // bpm
     MetricSample incline;     // %
     MetricSample resistance;  // device level as reported by the machine
+    MetricSample distance;    // total metres reported by the machine
 };
 
 class SourceProtocol {
@@ -32,6 +35,7 @@ public:
     virtual ~SourceProtocol() = default;
 
     virtual const char* id() const = 0;
+    virtual MachineProfile profile() const;
     // Advertisement-only devices (e.g. Keiser M3i) are never connected.
     virtual bool advertisementOnly() const { return false; }
     virtual ble::ConnectPlan plan() const = 0;

@@ -166,6 +166,14 @@ void ScanReport::setManufacturerData(const std::uint8_t* data, std::size_t lengt
     manufacturerLength = static_cast<std::uint8_t>(length);
 }
 
+void ScanReport::setFtmsServiceData(const std::uint8_t* data, std::size_t length) {
+    ftmsServiceDataLength = 0;
+    if (!data) return;
+    if (length > ftmsServiceData.size()) length = ftmsServiceData.size();
+    for (std::size_t index = 0; index < length; ++index) ftmsServiceData[index] = data[index];
+    ftmsServiceDataLength = static_cast<std::uint8_t>(length);
+}
+
 Advertisement Advertisement::from(const ScanReport& report) {
     Advertisement advertisement;
     advertisement.address = report.address;
@@ -174,6 +182,8 @@ Advertisement Advertisement::from(const ScanReport& report) {
     advertisement.services.assign(report.services.begin(), report.services.begin() + report.serviceCount);
     advertisement.manufacturerData.assign(report.manufacturer.begin(),
                                           report.manufacturer.begin() + report.manufacturerLength);
+    advertisement.ftmsServiceData.assign(report.ftmsServiceData.begin(),
+                                        report.ftmsServiceData.begin() + report.ftmsServiceDataLength);
     return advertisement;
 }
 

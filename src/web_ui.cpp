@@ -74,6 +74,7 @@ void WebUi::applyConfig() {
     adapter_.setTrainer(config.simulatedTrainer);
     ant_.setEnabled(config.antEnabled);
     ftms_.setDeviceName(config.ftmsName);
+    ftms_.setProfileOverride(config.ftmsOutputProfile);
     ftms_.setEnabled(config.ftms.output);
     if (ble_ && selector_) {
         const bool paired = config.pairedSource.valid && !config.pairedAdapterId.empty();
@@ -115,6 +116,9 @@ std::string WebUi::status() const {
                   config_.config().antEnabled, config_.config().ftms.input, config_.config().ftms.output,
                   ftms_.advertising(), ftms_.clientConnected(), ftms_.controlGranted(), config_.hasUnsavedChanges());
     std::string text = buffer;
+    text += std::string(" input-profile=") + machineProfileName(bridge_.trainerState().profile) +
+            " output-profile=" + machineProfileName(ftms_.profile()) +
+            " ftms-profile=" + ftmsOutputProfileName(config_.config().ftmsOutputProfile);
     if (ble_) {
         text += std::string(" input=") + (bleSelected() ? "ble" : "sim") +
                 " link=" + BleInputAdapter::linkStateName(ble_->linkState());
@@ -168,6 +172,7 @@ CommandResult WebUi::execute(const Command& command) {
                       "connect | disconnect | unpair | trainer on/off | "
                       "power W | speed km/h | incline % | resistance % | "
                       "ant on/off | ftms-input on/off | ftms-output on/off | ftms-name <name> | "
+                      "ftms-profile auto/bike/treadmill/cross-trainer/rower | "
                       "wifi <ssid> [password] | wifi-clear | ap-pass <password> | "
                       "save | load | factory-reset | restart");
         case CommandType::Status: return ok(status());
@@ -257,6 +262,14 @@ CommandResult WebUi::execute(const Command& command) {
             applyConfig();
             return ok("ftms name: " + ftms_.deviceName());
         }
+        case CommandType::FtmsProfile: {
+            FtmsOutputProfile profile;
+            if (!parseFtmsOutputProfile(command.text, profile))
+                return fail("profile must be auto, bike, treadmill, cross-trainer or rower");
+            config_.config().ftmsOutputProfile = profile;
+            applyConfig();
+            return ok(status());
+        }
         case CommandType::Trainer:
         case CommandType::Ant:
         case CommandType::FtmsInput:
@@ -311,6 +324,7 @@ std::string WebUi::statusJson() const {
     addMetric(telemetry, "heartRate", state, Metric::HeartRate);
     addMetric(telemetry, "incline", state, Metric::Incline);
     addMetric(telemetry, "distance", state, Metric::Distance);
+    addMetric(telemetry, "elapsed", state, Metric::ElapsedTime);
     document["deviceName"] = bridge_.telemetry().deviceName;
     document["trainer"] = state.trainerDetected;
     document["canControl"] = bridge_.canControl();
@@ -328,6 +342,7 @@ std::string WebUi::statusJson() const {
     }
     JsonObject input = document["input"].to<JsonObject>();
     input["source"] = bleSelected() ? "ble" : "simulation";
+    input["profile"] = machineProfileName(state.profile);
     input["bleAvailable"] = ble_ != nullptr;
     if (ble_) {
         input["link"] = BleInputAdapter::linkStateName(ble_->linkState());
@@ -358,6 +373,8 @@ std::string WebUi::statusJson() const {
     }
     JsonObject ftms = document["ftmsOutput"].to<JsonObject>();
     ftms["enabled"] = config.ftms.output;
+    ftms["profile"] = machineProfileName(ftms_.profile());
+    ftms["override"] = ftmsOutputProfileName(config.ftmsOutputProfile);
     ftms["name"] = ftms_.deviceName();
     ftms["advertising"] = ftms_.advertising();
     ftms["client"] = ftms_.clientConnected();
@@ -412,6 +429,7 @@ std::string WebUi::configJson() const {
     document["version"] = SMARTFITNESS_VERSION;
     document["ftmsName"] = config.ftmsName.empty() ? std::string(FtmsOutput::kDefaultName) : config.ftmsName;
     document["ftmsOutput"] = config.ftms.output;
+    document["ftmsOutputProfile"] = ftmsOutputProfileName(config.ftmsOutputProfile);
     document["ftmsInput"] = config.ftms.input;
     document["ant"] = config.antEnabled;
     document["antRequiresHardware"] = true;

@@ -27,6 +27,7 @@ enum class CommandType : std::uint8_t {
     FtmsInput,
     FtmsOutput,
     FtmsName,
+    FtmsProfile,
     Control,
     Save,
     Load,
@@ -42,7 +43,7 @@ struct Command {
     bool flag = false;
     smartfitness::Control control = smartfitness::Control::Power;
     float value = 0.0F;
-    std::string text;   // ftms name, wifi ssid, ap password
+    std::string text;   // ftms name/profile, wifi ssid, ap password
     std::string text2;  // wifi password
     smartfitness::ble::BleAddress address;
     bool addressTypeGiven = false;

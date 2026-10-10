@@ -29,6 +29,7 @@ BridgeConfig customConfig() {
     config.wifiSsid = "Home WLAN";
     config.wifiPassword = "secret-pass";
     config.apPassword = "bridge-pass";
+    config.ftmsOutputProfile = FtmsOutputProfile::Treadmill;
     return config;
 }
 
@@ -65,6 +66,7 @@ void testMigrationFromV1() {
     expected.wifiSsid.clear();
     expected.wifiPassword.clear();
     expected.apPassword = BridgeConfig{}.apPassword;
+    expected.ftmsOutputProfile = FtmsOutputProfile::Auto;
     assert(decoded == expected);
 
     MemoryConfigBackend backend;
@@ -114,6 +116,51 @@ void testV2Limits() {
     store.config().apPassword = "longenough";
     store.config().wifiPassword = "1234567";
     assert(store.save() == ConfigSaveResult::Invalid);
+}
+
+void testMigrationFromV2() {
+    auto body = ConfigStore::serialize(customConfig());
+    body.resize(body.size() - 5);  // Remove v3 profile and CRC.
+    body[2] = 2;
+    const auto legacy = withCrc(body);
+    BridgeConfig expected = customConfig();
+    expected.ftmsOutputProfile = FtmsOutputProfile::Auto;
+    MemoryConfigBackend backend;
+    backend.setRecord(legacy);
+    ConfigStore store(backend);
+    assert(store.begin() == ConfigLoadResult::Loaded);
+    assert(store.config() == expected && !store.hasUnsavedChanges());
+    assert(backend.writes() == 0);
+    assert(store.save() == ConfigSaveResult::Written);
+    assert(backend.record()[2] == 3);
+    assert(store.save() == ConfigSaveResult::Unchanged);
+    ConfigStore rebooted(backend);
+    assert(rebooted.begin() == ConfigLoadResult::Loaded && rebooted.config() == expected);
+}
+
+void testOutputProfilePersistence() {
+    assert(BridgeConfig{}.ftmsOutputProfile == FtmsOutputProfile::Auto);
+    for (const auto profile : {FtmsOutputProfile::Auto, FtmsOutputProfile::IndoorBike,
+                               FtmsOutputProfile::Treadmill, FtmsOutputProfile::CrossTrainer,
+                               FtmsOutputProfile::Rower}) {
+        MemoryConfigBackend backend;
+        ConfigStore store(backend);
+        store.begin();
+        store.config() = customConfig();
+        store.config().ftmsOutputProfile = profile;
+        assert(store.save() == ConfigSaveResult::Written);
+        ConfigStore rebooted(backend);
+        assert(rebooted.begin() == ConfigLoadResult::Loaded);
+        assert(rebooted.config() == store.config());
+        assert(rebooted.config().ftmsOutputProfile == profile);
+    }
+    MemoryConfigBackend backend;
+    ConfigStore store(backend);
+    store.begin();
+    store.config().ftmsOutputProfile = static_cast<FtmsOutputProfile>(255);
+    assert(store.save() == ConfigSaveResult::Invalid);
+    BridgeConfig decoded;
+    assert(!ConfigStore::deserialize(ConfigStore::serialize(store.config()), decoded));
 }
 
 void testApPasswordValidationAndFallback() {
@@ -263,7 +310,7 @@ void testCorruptAndOldVersionFallback() {
     longName.insert(longName.begin() + 8, 10, 'x');
     bad.push_back(withCrc(longName));
     auto badAddressType = body;
-    badAddressType[badAddressType.size() - 7] = 9;
+    badAddressType[badAddressType.size() - 8] = 9;
     bad.push_back(withCrc(badAddressType));
 
     for (const auto& record : bad) {
@@ -308,6 +355,7 @@ void testUnpairPersistence() {
     store.config() = customConfig();
     store.save();
     store.config().antEnabled = true;  // unsaved edit stays unsaved
+    store.config().ftmsOutputProfile = FtmsOutputProfile::Rower;
     assert(store.unpair());
     assert(!store.hasPairedDevice());
     assert(store.hasUnsavedChanges());
@@ -319,6 +367,8 @@ void testUnpairPersistence() {
     assert(rebooted.config().pairedAdapterId.empty());
     assert(rebooted.config().wifiSsid == "Home WLAN");
     assert(!rebooted.config().antEnabled);
+    assert(rebooted.config().ftmsOutputProfile == FtmsOutputProfile::Treadmill);
+    assert(store.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
     assert(rebooted.config().ftmsName == "Garage Bike");
 }
 
@@ -373,6 +423,7 @@ void testConsolePersistence() {
         assert(ui.status().find("unsaved=0") != std::string::npos);
         assert(ui.handleCommand("save") == "configuration unchanged; nothing written");
         ui.handleCommand("ftms-name Garage Bike");
+        ui.handleCommand("ftms-profile treadmill");
         ui.handleCommand("ftms-output off");
         ui.handleCommand("scan");
         assert(ui.status().find("unsaved=1") != std::string::npos);
@@ -380,8 +431,10 @@ void testConsolePersistence() {
         assert(ui.status().find("unsaved=0") != std::string::npos);
         assert(backend.writes() == 1);
         ui.handleCommand("ftms-name Changed");
+        ui.handleCommand("ftms-profile bike");
         assert(ui.handleCommand("load").find("configuration loaded") == 0);
         assert(ftms.deviceName() == "Garage Bike");
+        assert(ftms.profile() == MachineProfile::Treadmill);
     }
     {
         // Reboot: persisted name and output toggle are applied on begin.
@@ -397,11 +450,13 @@ void testConsolePersistence() {
         ui.begin();
         assert(ftms.deviceName() == "Garage Bike");
         assert(!ftms.enabled() && !ftms.advertising());
+        assert(ftms.profile() == MachineProfile::Treadmill);
         assert(config.hasPairedDevice());
         ui.handleCommand("unpair");
         assert(backend.writes() == 2);
         assert(ui.handleCommand("factory-reset").find("factory defaults restored") == 0);
         assert(ftms.deviceName() == FtmsOutput::kDefaultName);
+        assert(ftms.profile() == MachineProfile::IndoorBike);
         assert(ftms.enabled() && ftms.advertising());
         assert(bridge.state() == RuntimeState::Disconnected);
         assert(ui.handleCommand("load").find("no saved configuration") == 0);
@@ -425,6 +480,8 @@ void runConfigStoreTests() {
     testCorruptAndOldVersionFallback();
     testValidation();
     testMigrationFromV1();
+    testMigrationFromV2();
+    testOutputProfilePersistence();
     testV2Limits();
     testApPasswordValidationAndFallback();
     testNonFiniteScanDurations();

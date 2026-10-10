@@ -11,6 +11,15 @@ ble::Uuid uuid16(std::uint16_t value) { return ble::Uuid::from16(value); }
 const ble::Uuid kService = ble::Uuid::from16(ftms::kServiceUuid);
 const ble::Uuid kControlPoint = ble::Uuid::from16(ftms::kControlPointUuid);
 
+MachineProfile subscriptionProfile(std::size_t index) {
+    switch (index) {
+        case FtmsSource::SubTreadmill: return MachineProfile::Treadmill;
+        case FtmsSource::SubCrossTrainer: return MachineProfile::CrossTrainer;
+        case FtmsSource::SubRower: return MachineProfile::Rower;
+        default: return MachineProfile::IndoorBike;
+    }
+}
+
 const char* resultName(ftms::ResultCode code) {
     switch (code) {
         case ftms::ResultCode::Success: return "success";
@@ -44,6 +53,9 @@ ble::ConnectPlan FtmsSource::plan() const {
 
 void FtmsSource::reset() {
     SourceProtocol::reset();
+    profile_ = MachineProfile::IndoorBike;
+    advertisedProfileValid_ = false;
+    dataSubscribedMask_ = 0;
     features_ = {};
     featuresRead_ = false;
     resistanceRange_ = {};
@@ -53,6 +65,27 @@ void FtmsSource::reset() {
     controlState_ = ControlState::Unavailable;
     controlRequestedMs_ = 0;
     controlAttempts_ = 0;
+}
+
+void FtmsSource::onAdvertisement(const ble::Advertisement& advertisement, std::uint32_t) {
+    if (options_.bikeDataOnly || advertisement.ftmsServiceData.size() < 3 ||
+        !(advertisement.ftmsServiceData[0] & 1U)) return;
+    const unsigned types = advertisement.ftmsServiceData[1] |
+                           (static_cast<unsigned>(advertisement.ftmsServiceData[2]) << 8);
+    // FTMS service data: flags, then the little-endian Fitness Machine Type.
+    const unsigned supported = types & ((1U << 0) | (1U << 1) | (1U << 4) | (1U << 5));
+    if (!supported || (supported & (supported - 1U))) return;
+    advertisedProfile_ = supported & (1U << 0) ? MachineProfile::Treadmill :
+                         supported & (1U << 1) ? MachineProfile::CrossTrainer :
+                         supported & (1U << 4) ? MachineProfile::Rower : MachineProfile::IndoorBike;
+    advertisedProfileValid_ = true;
+    for (std::size_t index = SubBike; index <= SubRower; ++index) {
+        if ((dataSubscribedMask_ & (1U << index)) && subscriptionProfile(index) == advertisedProfile_) {
+            profile_ = advertisedProfile_;
+            return;
+        }
+    }
+    if (!dataSubscribedMask_) profile_ = advertisedProfile_;
 }
 
 void FtmsSource::onRead(std::size_t index, const std::uint8_t* data, std::size_t length) {
@@ -70,6 +103,23 @@ bool FtmsSource::onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) 
     if ((subscribedMask & dataMask) == 0) {
         setError("no FTMS data characteristic");
         return false;
+    }
+    dataSubscribedMask_ = subscribedMask & dataMask;
+    if (options_.bikeDataOnly) dataSubscribedMask_ &= 1U << SubBike;
+    if (!dataSubscribedMask_) {
+        setError("no FTMS bike data characteristic");
+        return false;
+    }
+    for (std::size_t index = SubBike; index <= SubRower; ++index) {
+        if (dataSubscribedMask_ & (1U << index)) {
+            profile_ = subscriptionProfile(index);
+            break;
+        }
+    }
+    if (advertisedProfileValid_) {
+        for (std::size_t index = SubBike; index <= SubRower; ++index)
+            if ((dataSubscribedMask_ & (1U << index)) && subscriptionProfile(index) == advertisedProfile_)
+                profile_ = advertisedProfile_;
     }
     controlPointSubscribed_ = options_.allowControl && !options_.bikeDataOnly &&
                               (subscribedMask & (1U << SubControlPoint)) != 0;
@@ -105,7 +155,7 @@ void FtmsSource::handleResponse(const std::uint8_t* data, std::size_t length) {
         if (controlState_ != ControlState::Requesting) return;
         if (response.result == ftms::ResultCode::Success) {
             controlState_ = ControlState::Granted;
-            sendControl(ftms::encodeStartOrResume());
+            if (profile_ != MachineProfile::Treadmill) sendControl(ftms::encodeStartOrResume());
         } else {
             controlState_ = ControlState::Denied;
             setError(std::string("FTMS Request Control refused: ") + resultName(response.result));
@@ -129,6 +179,8 @@ void FtmsSource::apply(const ftms::MachineData& data, std::uint32_t nowMs) {
     if (data.heartRate.valid && data.heartRate.value > 0.0F) sample_.heartRate = data.heartRate;
     if (data.incline.valid) sample_.incline = data.incline;
     if (data.resistance.valid) sample_.resistance = data.resistance;
+    if (data.distance.valid) sample_.distance = data.distance;
+    if (data.elapsed.valid) sample_.elapsed = data.elapsed;
     touch(nowMs);
 }
 
@@ -143,7 +195,14 @@ void FtmsSource::onNotify(std::size_t index, const std::uint8_t* data, std::size
         case SubControlPoint: handleResponse(data, length); return;
         default: return;
     }
-    if (ok) apply(decoded, nowMs);
+    if (ok) {
+        if (options_.bikeDataOnly && index != SubBike) return;
+        if (dataSubscribedMask_ && !(dataSubscribedMask_ & (1U << index))) return;
+        if (advertisedProfileValid_ && profile_ == advertisedProfile_ &&
+            subscriptionProfile(index) != profile_) return;
+        profile_ = subscriptionProfile(index);
+        apply(decoded, nowMs);
+    }
 }
 
 float FtmsSource::clampTo(const ftms::SupportedRange& range, float value) const {
