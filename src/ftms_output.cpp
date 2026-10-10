@@ -216,6 +216,8 @@ void FtmsOutput::handleConnectionChanges() {
         seenGeneration_ = generation;
         granted_ = false;
         bikeDataSent_ = false;
+        trainingStatusSent_ = false;
+        treadmillData_.clear();
         // The stack stops advertising once a central connects.
         if (connected_) advertising_ = false;
     }
@@ -297,12 +299,14 @@ void FtmsOutput::updateTrainingStatus() {
         status = trainerState().connected && speed.valid && std::isfinite(speed.value) && speed.value > 0
             ? ftms::TrainingStatus::ManualMode : ftms::TrainingStatus::Idle;
     }
-    if (status == trainingStatus_) return;
+    if (status == trainingStatus_ &&
+        (profile_ != MachineProfile::Treadmill || !connected_ || trainingStatusSent_)) return;
     trainingStatus_ = status;
     transportNotifyTrainingStatus();
     if (profile_ == MachineProfile::Treadmill && connected_) {
         status_ = status == ftms::TrainingStatus::Idle ? ftms::Bytes{0x02, 0x01} : ftms::Bytes{0x04};
         transportNotifyStatus();
+        trainingStatusSent_ = true;
     }
 }
 
@@ -324,6 +328,8 @@ void FtmsOutput::stopAdvertising() {
 void FtmsOutput::resetSession() {
     granted_ = false;
     bikeDataSent_ = false;
+    trainingStatusSent_ = false;
+    treadmillData_.clear();
     std::lock_guard<std::mutex> lock(mutex_);
     queueHead_ = 0;
     queueCount_ = 0;

@@ -110,6 +110,7 @@ private:
     std::uint32_t seenGeneration_ = 0;
     std::uint32_t lastBikeDataMs_ = 0;
     bool bikeDataSent_ = false;
+    bool trainingStatusSent_ = false;
     smartfitness::ftms::TrainingStatus trainingStatus_ = smartfitness::ftms::TrainingStatus::Idle;
     smartfitness::ftms::Bytes feature_;
     smartfitness::ftms::Bytes bikeData_;

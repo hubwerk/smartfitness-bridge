@@ -460,6 +460,7 @@ void testTreadmillOutput() {
     assert(!output.controlGranted() && !output.clientConnected() && output.advertising());
     assert(adapter.writes == writes && adapter.value.speed == 0);
     assert(output.profile() == MachineProfile::IndoorBike);
+    assert(output.lastTreadmillData().empty());
     output.setProfileOverride(FtmsOutputProfile::Auto);
     bridge.loop();
     output.notifyClientConnected();
@@ -499,6 +500,14 @@ void testTreadmillOutput() {
     bridge.loop();
     assert(output.profile() == MachineProfile::Treadmill && output.clientConnected());
     assert(!output.controlGranted() && adapter.writes == writes);
+    adapter.value.speed = 6;
+    output.notifyClientDisconnected();
+    bridge.loop();
+    assert(output.lastTreadmillData().empty());
+    output.notifyClientConnected();
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{4}));
+    assert(adapter.writes == writes);
 }
 
 }  // namespace
