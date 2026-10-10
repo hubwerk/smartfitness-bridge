@@ -28,6 +28,80 @@ Copyright Roberto Viola and contributors (GPL-3.0). Attribution is retained in
 Discovery rules follow upstream `src/bluetooth.cpp`. See [license and
 attribution](../README.md#license-and-attribution) and [HD-005](hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports).
 
+## Batch 1: stopped at Peloton feasibility check
+
+The requested order requires stopping and documenting the first infeasible
+device. **Peloton Bike / Bike+ cannot be added as a native BLE input from the
+reviewed upstream implementation.** Consequently, this batch adds no adapters;
+items 2–8 are deferred, not declared technically infeasible or host-tested.
+The supported registry table above is unchanged.
+
+This assessment uses qdomyos-zwift revision
+[`ea70d7ff64bc8bf508fc6401fd056211e05311b3`](https://github.com/cagnulein/qdomyos-zwift/tree/ea70d7ff64bc8bf508fc6401fd056211e05311b3),
+not an assumption based on the device name:
+
+- [`src/devices/pelotonbike/pelotonbike.cpp`](https://github.com/cagnulein/qdomyos-zwift/blob/ea70d7ff64bc8bf508fc6401fd056211e05311b3/src/devices/pelotonbike/pelotonbike.cpp)
+  creates a `QUdpSocket` bound to UDP port **8003**.
+  `pelotonOCRprocessPendingDatagrams()` parses semicolon-separated OCR metrics;
+  there is no input GATT service, subscription, BLE frame decoder or BLE init
+  sequence to port. `forceResistance()` is empty. Its virtual-bike interface is
+  an **output**, not evidence of a native Peloton BLE input.
+- The BLE workaround requires an accessory rather than just bridge firmware.
+  [DFC's installation guide and compatibility FAQ](https://github.com/intelligenate/dfc/blob/c7c4a83bf9b444b554a1fdcd0f7ac8d3ae456ebb/docs/user-guide.md)
+  describe inserting externally powered hardware into the original Bike's
+  data cable and explicitly exclude **Bike+**. This serial-to-BLE accessory is
+  not a native Peloton protocol that can be enabled by a bridge firmware update.
+  Upstream discovery recognizes an exact, case-insensitive `DFC` name via
+  [`src/devices/bluetooth.cpp`](https://github.com/cagnulein/qdomyos-zwift/blob/ea70d7ff64bc8bf508fc6401fd056211e05311b3/src/devices/bluetooth.cpp)
+  and routes it to
+  [`src/devices/stagesbike/stagesbike.cpp`](https://github.com/cagnulein/qdomyos-zwift/blob/ea70d7ff64bc8bf508fc6401fd056211e05311b3/src/devices/stagesbike/stagesbike.cpp),
+  which parses standard Cycling Power Measurement notifications. A compatible
+  accessory advertising `0x1818` can use the existing read-only `cps` adapter;
+  this does **not** add Bike+ compatibility or Peloton resistance control.
+  No accessory has been hardware-verified with this bridge.
+
+Do not pair a native Peloton by forcing a vendor adapter, or infer control
+capabilities from the upstream virtual output. OCR/UDP, Wi-Fi, cloud, USB and
+ANT+ paths remain outside this BLE-only batch.
+
+### Skipped / deferred batch-1 inventory
+
+Source paths below are relative to the pinned upstream revision. Deferred
+entries identify research candidates only: no match rules, telemetry units,
+connection sequences or control support have been certified for them.
+
+| Order | Device / variant | Status and reason | Upstream source / next audit target |
+|---|---|---|---|
+| 1 | Peloton Bike / Bike+ | Unsupported as native BLE: upstream input is OCR over UDP; BLE workaround needs extra hardware. Ordered batch stops here. | `src/devices/pelotonbike/pelotonbike.cpp`; accessory discovery in `src/devices/bluetooth.cpp` and `src/devices/stagesbike/stagesbike.cpp` |
+| 2 | iFit / NordicTrack / ProForm bikes, treadmills and ellipticals | BLE variants deferred because of the item-1 stop. `nordictrackifitadbbike` is excluded: its constructor binds a UDP socket on port 8002, not BLE. Wi-Fi/telnet/ADB paths are not eligible. | `src/devices/proformbike/proformbike.cpp`, `src/devices/proformtreadmill/proformtreadmill.cpp`, `src/devices/nordictrackelliptical/nordictrackelliptical.cpp`, `src/devices/nordictrackifitadbbike/nordictrackifitadbbike.cpp` |
+| 3 | Bowflex / Schwinn C6/IC extensions, T216 treadmill, Schwinn 170 | Deferred because of the item-1 stop. Existing `schwinn-ic4` matching remains unchanged; no broader model support is claimed. | `src/devices/schwinnic4bike/schwinnic4bike.cpp`, `src/devices/bowflext216treadmill/bowflext216treadmill.cpp`, `src/devices/schwinn170bike/schwinn170bike.cpp` |
+| 4 | Tacx Neo / Flux FE-C-over-BLE and non-FTMS Elite trainers | Deferred because of the item-1 stop. Proprietary BLE transport and per-model control still need auditing; ANT+ is excluded. | `src/devices/tacxneo2/tacxneo2.cpp`; Elite discovery in `src/devices/bluetooth.cpp` and `src/devices/stagesbike/stagesbike.cpp` |
+| 5 | Legacy Wahoo KICKR without FTMS | Deferred because of the item-1 stop; proprietary control is not implemented. Standard FTMS variants continue to use `ftms`. | `src/devices/wahookickrsnapbike/wahookickrsnapbike.cpp` |
+| 6 | Concept2 PM5 rower BLE | Deferred because of the item-1 stop; proprietary rowing/CSAFE notifications are not implemented. | `src/devices/csaferower/csaferower.cpp`, `src/devices/bluetooth.cpp` |
+| 7 | Horizon / Spirit / Sole BLE treadmills | Deferred because of the item-1 stop; no new proprietary speed/incline control is claimed. | `src/devices/horizontreadmill/horizontreadmill.cpp`, `src/devices/spirittreadmill/spirittreadmill.cpp`, `src/devices/solef80treadmill/solef80treadmill.cpp` |
+| 8 | Kingsmith / WalkingPad treadmills | Deferred because of the item-1 stop; model-specific framing/init/control still need auditing. | `src/devices/kingsmithr1protreadmill/kingsmithr1protreadmill.cpp`, `src/devices/kingsmithr2treadmill/kingsmithr2treadmill.cpp` |
+
+### Resumption and proposed batch 2
+
+Resume items 2–8 above only after agreeing to skip the Peloton blocker or to
+target a specific external BLE accessory. Each new adapter still needs the
+pure-C++ port, attribution, upstream-layout host vectors, malformed-frame tests,
+registry conflict tests and truthful capabilities required by the guide below.
+Successful ports must be labelled **“host-tested, not hardware-verified”**;
+none of the deferred entries qualifies for that label yet.
+
+After that backlog, a proposed batch 2 from the remaining upstream catalogue is
+Domyos treadmills/rowers/ellipticals (`domyostreadmill`, `domyosrower`,
+`domyoselliptical`), Echelon rower/stride/stair variants (`echelonrower`,
+`echelonstride`, `echelonstairclimber`), Renpho bikes (`renphobike`) and FitShow
+treadmills (`fitshowtreadmill`). These are audit candidates, not promised ports:
+verify BLE transport and model-specific safety/control behavior first.
+
+**Resource impact of this stop:** no compiled source, registry, dependencies,
+web assets or configuration changed; additional firmware flash and static RAM
+are **0 bytes**. This is a documentation-only result, not a measured size
+estimate for the deferred protocols.
+
 ## Important boundaries
 
 - This is **not** the entire qdomyos-zwift catalogue. Echelon rower/stride/stair
