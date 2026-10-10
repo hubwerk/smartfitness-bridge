@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstring>
 #include <cctype>
+#include <array>
+#include <utility>
 namespace smartfitness { namespace protocols { namespace ifit_bowflex {
 const ble::Uuid kIfitService = ble::Uuid::fromString("00001533-1412-efde-1523-785feabcd123");
 const ble::Uuid kIfitWrite = ble::Uuid::fromString("00001534-1412-efde-1523-785feabcd123");
@@ -387,19 +389,27 @@ std::string upper(std::string text) {
     return text;
 }
 bool prefix(const std::string& name, const char* value) { return name.rfind(value, 0) == 0; }
+bool vendorEvidence(const ble::Advertisement& a) {
+    return !a.hasService(0x1826) || a.hasService(ifit_bowflex::kIfitService);
+}
 bool bikeMatch(const ble::Advertisement& a) {
     const auto name = upper(a.name);
-    return prefix(name,"I_EB") || prefix(name,"I_SB") || name.find("_IFIT_BIKE") != std::string::npos;
+    return vendorEvidence(a) && (prefix(name,"I_EB") || prefix(name,"I_SB") || name.find("_IFIT_BIKE") != std::string::npos);
 }
 bool treadmillMatch(const ble::Advertisement& a) {
     const auto name = upper(a.name);
-    return prefix(name,"I_TL") || prefix(name,"I_IT") || name.find("_IFIT TREADMILL") != std::string::npos;
+    return vendorEvidence(a) && (prefix(name,"I_TL") || prefix(name,"I_IT") || name.find("_IFIT TREADMILL") != std::string::npos);
 }
-bool strideMatch(const ble::Advertisement& a) { return prefix(upper(a.name),"I_FS"); }
-bool ellipticalMatch(const ble::Advertisement& a) { return prefix(upper(a.name),"I_EL"); }
-bool trainerMatch(const ble::Advertisement& a) { return prefix(upper(a.name),"I_VE"); }
-bool bowMatch(const ble::Advertisement& a) { return prefix(upper(a.name),"BOWFLEX T"); }
-bool schwinnMatch(const ble::Advertisement& a) { return prefix(upper(a.name),"SCHWINN 170/270"); }
+bool strideMatch(const ble::Advertisement& a) { return vendorEvidence(a) && prefix(upper(a.name),"I_FS"); }
+bool ellipticalMatch(const ble::Advertisement& a) { return vendorEvidence(a) && prefix(upper(a.name),"I_EL"); }
+bool trainerMatch(const ble::Advertisement& a) { return vendorEvidence(a) && prefix(upper(a.name),"I_VE"); }
+bool bowMatch(const ble::Advertisement& a) {
+    if (!prefix(upper(a.name),"BOWFLEX T")) return false;
+    return !a.hasService(0x1826) ||
+           a.hasService(uuid("edff9e80-cad7-11e5-ab63-0002a5d5c51b")) ||
+           a.hasService(uuid("b1216c2e-464e-4c46-b2b4-0b5c8eb23dae"));
+}
+bool schwinnMatch(const ble::Advertisement& a) { return !a.hasService(0x1826) && prefix(upper(a.name),"SCHWINN 170/270"); }
 template<Kind kind> std::unique_ptr<SourceProtocol> create() {
     return std::unique_ptr<SourceProtocol>(new IfitBowflexSource(kind));
 }
@@ -412,21 +422,52 @@ const ProtocolInfo descriptors[] = {
     {"bowflex-t216","Bowflex T216 BLE treadmill",85,bowMatch,create<Kind::BowflexT216>,false,false},
     {"schwinn-170","Schwinn 170/270 BLE bike",85,schwinnMatch,create<Kind::Schwinn170>,false,false}
 };
+constexpr std::size_t kManualProfiles = 97;
+bool manualMatch(const ble::Advertisement&) { return false; }
+template<std::size_t index> std::unique_ptr<SourceProtocol> createModel() {
+    return std::unique_ptr<SourceProtocol>(new IfitBowflexSource(ifit_bowflex::modelAt(index)));
+}
+template<std::size_t... indices>
+std::array<std::unique_ptr<SourceProtocol>(*)(), sizeof...(indices)> modelFactories(std::index_sequence<indices...>) {
+    return {{createModel<indices>...}};
+}
+struct ManualDescriptors {
+    std::array<std::string,kManualProfiles> ids;
+    std::array<ProtocolInfo,kManualProfiles> entries{};
+    ManualDescriptors() {
+        const auto factories = modelFactories(std::make_index_sequence<kManualProfiles>{});
+        for (std::size_t i = 0; i < kManualProfiles; ++i) {
+            // Stable pinned-table ordinal, not a truncated ambiguous model name.
+            ids[i] = "ifit-model-" + std::to_string(i+1);
+            const auto& model = ifit_bowflex::modelAt(i);
+            const bool controls = model.kind == Kind::Bike || model.kind == Kind::Treadmill ||
+                                  model.kind == Kind::Elliptical || model.kind == Kind::EllipticalTrainer;
+            entries[i] = {ids[i].c_str(),model.name,0,manualMatch,factories[i],controls,false};
+        }
+    }
+};
+const ManualDescriptors& manualDescriptors() { static const ManualDescriptors value; return value; }
 } // namespace
 
 namespace ifit_bowflex {
-std::size_t descriptorCount() { return sizeof(descriptors) / sizeof(descriptors[0]); }
-const ProtocolInfo& descriptorAt(std::size_t index) { return descriptors[index < descriptorCount() ? index : 0]; }
+std::size_t descriptorCount() { return 7+kManualProfiles; }
+const ProtocolInfo& descriptorAt(std::size_t index) {
+    if (index < 7) return descriptors[index];
+    return index < descriptorCount() ? manualDescriptors().entries[index-7] : descriptors[0];
+}
 }
 
 IfitBowflexSource::IfitBowflexSource(Kind kind) : model_(&defaultModel(kind)) {}
-IfitBowflexSource::IfitBowflexSource(const ifit_bowflex::Model& model) : model_(&model) {}
+IfitBowflexSource::IfitBowflexSource(const ifit_bowflex::Model& model) : model_(&model), manualProfile_(true) {}
 IfitBowflexSource::IfitBowflexSource(const ifit_bowflex::Model& model, const ble::ConnectPlan& plan,
                                    const ble::Uuid& service, const ble::Uuid& characteristic)
     : model_(&model), customPlan_(plan), writeService_(service), writeCharacteristic_(characteristic) {}
 
 bool IfitBowflexSource::named(const char* name) const { return std::strcmp(model_->name,name) == 0; }
 const char* IfitBowflexSource::id() const {
+    if (manualProfile_)
+        for (std::size_t i = 0; i < ifit_bowflex::modelCount(); ++i)
+            if (model_ == &ifit_bowflex::modelAt(i)) return ifit_bowflex::descriptorAt(7+i).id;
     for (std::size_t i = 0; i < ifit_bowflex::descriptorCount(); ++i)
         if (static_cast<std::size_t>(model_->kind) == i) return ifit_bowflex::descriptorAt(i).id;
     return "ifit-bike";
@@ -442,8 +483,9 @@ ble::ConnectPlan IfitBowflexSource::plan() const {
         if (named("bowflex-t8j")) service = "ebbe6870-d00a-4bf4-bb79-63b35bf4c6b5";
         for (const char* notify : bowNotify) result.subscribe(uuid(service),uuid(notify));
     } else if (model_->kind == Kind::Schwinn170) {
-        // Upstream does NOT pin the service/notification UUIDs for this bike.
-        // An explicit discovered plan is necessary; do not guess a T216 plan.
+        result.discoverNotifications = true;
+        result.discoveryWriteCharacteristics[0] = uuid("5ec4e520-9804-11e3-b4b9-0002a5d5c51b");
+        result.discoveryWriteCharacteristics[1] = bowWrite;
     } else result.subscribe(ifit_bowflex::kIfitService,ifit_bowflex::kIfitNotify);
     return result;
 }
@@ -454,21 +496,37 @@ void IfitBowflexSource::reset() {
     sentMs_ = connectedMs_ = cadenceMs_ = 0;
     crank_ = 0;
     connected_ = ready_ = crankKnown_ = waitingMarker_ = false;
+    subscribedMask_ = 0;
+    if (!customPlan_.subscriptionCount) { writeService_ = {}; writeCharacteristic_ = {}; }
+}
+void IfitBowflexSource::onWriteEndpoint(const ble::Uuid& service, const ble::Uuid& characteristic) {
+    if (model_->kind != Kind::Schwinn170 || service.isZero()) return;
+    const auto p = plan();
+    if (characteristic != p.discoveryWriteCharacteristics[0] && characteristic != p.discoveryWriteCharacteristics[1]) return;
+    writeService_ = service;
+    writeCharacteristic_ = characteristic;
 }
 bool IfitBowflexSource::onConnected(std::uint32_t mask, std::uint32_t nowMs) {
+    const auto service = writeService_, characteristic = writeCharacteristic_;
     reset();
+    writeService_ = service; writeCharacteristic_ = characteristic;
     const auto p = plan();
-    if (!p.subscriptionCount || (mask & ((1U << p.subscriptionCount) - 1U)) == 0) {
+    if ((!p.discoverNotifications && !p.subscriptionCount) || !mask ||
+        (!p.discoverNotifications && (mask & ((1U << p.subscriptionCount) - 1U)) == 0)) {
         setError("BLE telemetry subscription unavailable (Schwinn170 requires discovered endpoints)");
         return false;
     }
     if (model_->kind == Kind::BowflexT216 && !(mask & 4U)) {
         setError("Bowflex telemetry characteristic unavailable"); return false;
     }
+    if (model_->kind == Kind::Schwinn170 && (writeService_.isZero() || writeCharacteristic_.isZero())) {
+        setError("Schwinn170 discovered write endpoint unavailable"); return false;
+    }
     init_ = parseFrames(model_->init);
     poll_ = parseFrames(model_->poll);
     if (init_.empty()) { setError("Missing BLE initialization profile"); return false; }
     connected_ = true;
+    subscribedMask_ = mask;
     connectedMs_ = sentMs_ = nowMs;
     tick(nowMs);
     return !failed();
@@ -493,7 +551,7 @@ void IfitBowflexSource::onWriteFailed(std::uint32_t) {
 void IfitBowflexSource::tick(std::uint32_t nowMs) {
     if (!connected_ || failed()) return;
     if (!ready_) {
-        if (nowMs - connectedMs_ > 90000U) { fail("BLE initialization timed out"); return; }
+        if (nowMs - connectedMs_ > 33000U) { fail("BLE initialization timed out"); return; }
         if (waitingMarker_) {
             if (nowMs - sentMs_ >= 3000U) fail("SE7i initialization response marker timed out");
             return;
@@ -521,7 +579,7 @@ void IfitBowflexSource::tick(std::uint32_t nowMs) {
 
 void IfitBowflexSource::onNotify(std::size_t index, const std::uint8_t* data, std::size_t length,
                                std::uint32_t nowMs) {
-    if (!connected_ || failed() || !data || index >= plan().subscriptionCount) return;
+    if (!connected_ || failed() || !data || index >= ble::kMaxSubscriptions || !(subscribedMask_ & (1U << index))) return;
     if (waitingMarker_ && length >= 2 && data[0] == 0xff) { waitingMarker_ = false; sentMs_ = nowMs; }
     if (!ready_) return;
     if (model_->kind == Kind::BowflexT216) {

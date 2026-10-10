@@ -93,6 +93,10 @@ ANT+ paths remain outside this BLE-only batch.
   Other ADB/Wi-Fi/OCR iFit paths are likewise outside the BLE-only scope.
 - ANT+ FE-C hardware is excluded; FE-C packets transported by a native BLE
   service are eligible and do not require ANT+ hardware.
+- No distinct VeloCore proprietary BLE class/parser is present in the pinned
+  upstream discovery/build inventory. VeloCore models using the existing
+  Schwinn advertisement/Indoor Bike Data layout remain read-only through
+  `schwinn-ic4`; other models require verified BLE evidence, not a guessed port.
 
 A proposed batch 2 from the remaining upstream catalogue is
 Domyos treadmills/rowers/ellipticals (`domyostreadmill`, `domyosrower`,
@@ -114,6 +118,17 @@ PlatformIO build could not download the `espressif32` platform
 (`HTTPClientError`, before compilation). A firmware flash/RAM delta must be
 measured from a completed build; host object sizes are not ESP32 size measurements.
 Host tests use upstream byte layouts and literal commands, not hardware captures.
+The iFit initialization deadline is 33 seconds with 35 seconds of startup grace;
+the longest audited transcript is 71 writes (28.4 seconds nominal). Treadmill
+handshakes request 90 seconds; the adapter caps any protocol grace at 120 seconds.
+Neither startup grace nor subscription success fabricates telemetry.
+
+Schwinn 170 opts into bounded GATT notification discovery (at most eight
+subscriptions). Its init write is restricted to the two upstream characteristic
+UUIDs `5ec4e520-9804-11e3-b4b9-0002a5d5c51b` and
+`1717b3c0-9803-11e3-90e1-0002a5d5c51b`; the discovered endpoint is passed to the
+pure-C++ protocol before connection initialization. No arbitrary GATT write
+endpoint is selected and no control capability is exposed.
 
 WalkingPad override IDs preserve both cipher and UUID layout across reconnect:
 `walkingpad-r2` is classic cipher with standard service; alternate `wp2-c0-*`

@@ -420,6 +420,12 @@ void testRegistry() {
                              "BOWFLEX T216", "SCHWINN 170/270", "XT385", "F80", "R1 PRO", "KS-X21"}) {
         assert(detected(advert(name, {0x1826})) == "ftms");
     }
+    auto proprietaryIfit = advert("I_EB123", {0x1826});
+    proprietaryIfit.services.push_back(ble::Uuid::fromString("00001533-1412-efde-1523-785feabcd123"));
+    assert(detected(proprietaryIfit) == "ifit-bike");
+    auto proprietaryBowflex = advert("BOWFLEX T216", {0x1826});
+    proprietaryBowflex.services.push_back(ble::Uuid::fromString("edff9e80-cad7-11e5-ab63-0002a5d5c51b"));
+    assert(detected(proprietaryBowflex) == "bowflex-t216");
 
     for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
         const auto& info = protocols::protocolAt(index);

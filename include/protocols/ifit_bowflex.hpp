@@ -45,13 +45,15 @@ public:
     explicit IfitBowflexSource(ifit_bowflex::Kind kind);
     explicit IfitBowflexSource(const ifit_bowflex::Model& model);
     // Schwinn170 upstream enumerates every service/characteristic dynamically.
-    // Supply the discovered notify/indicate plan and write endpoint when the
-    // firmware does not expose the standard Nautilus characteristic set.
+    // The normal plan discovers notifications and the permitted upstream
+    // write UUIDs. This constructor also permits a pre-discovered plan.
     IfitBowflexSource(const ifit_bowflex::Model& model, const ble::ConnectPlan& plan,
                      const ble::Uuid& writeService, const ble::Uuid& writeCharacteristic);
     const char* id() const override;
     ble::ConnectPlan plan() const override;
+    std::uint32_t startupTimeoutMs() const override { return 35000; }
     bool onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) override;
+    void onWriteEndpoint(const ble::Uuid& service, const ble::Uuid& characteristic) override;
     void onNotify(std::size_t index, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) override;
     void onWriteFailed(std::uint32_t nowMs) override;
     void tick(std::uint32_t nowMs) override;
@@ -65,6 +67,7 @@ private:
     bool sendGroup(const std::vector<ble::Bytes>& frames);
     bool named(const char* name) const;
     const ifit_bowflex::Model* model_;
+    bool manualProfile_ = false;
     std::vector<ble::Bytes> init_, poll_;
     std::size_t step_ = 0, pollStep_ = 0;
     std::uint32_t sentMs_ = 0, connectedMs_ = 0, cadenceMs_ = 0;
@@ -73,6 +76,7 @@ private:
     bool waitingMarker_ = false;
     ble::ConnectPlan customPlan_;
     ble::Uuid writeService_, writeCharacteristic_;
+    std::uint32_t subscribedMask_ = 0;
 };
 
 }  // namespace protocols

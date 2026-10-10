@@ -77,6 +77,7 @@ void testAllProfiles() {
         assert(findModel(model.name) == &model);
         if (model.kind == Kind::Schwinn170) continue;
         IfitBowflexSource source(model);
+        assert(source.startupTimeoutMs() >= frames(model.init).size()*400U+2000U);
         const auto now = initialize(source,model,0xfffff000U);
         const auto poll = frames(model.poll);
         for (std::size_t j = 0; j < poll.size(); ++j) {
@@ -216,6 +217,14 @@ void testBowflexSchwinn() {
 
     IfitBowflexSource unknown(Kind::Schwinn170);
     assert(!unknown.onConnected(1,0));
+    const auto discoveredPlan = unknown.plan();
+    assert(discoveredPlan.discoverNotifications);
+    unknown.onWriteEndpoint(ble::Uuid::from16(0xff00),discoveredPlan.discoveryWriteCharacteristics[0]);
+    assert(unknown.onConnected(1,0));
+    drain(unknown); unknown.tick(400);
+    assert(unknown.initialized());
+    unknown.reset();
+    assert(!unknown.onConnected(1,0));
     ble::ConnectPlan plan;
     plan.subscribe(ble::Uuid::from16(0xff00),ble::Uuid::from16(0xff01));
     const auto& model = *findModel("schwinn-170");
@@ -233,15 +242,30 @@ void testBowflexSchwinn() {
 }
 void testMatchers() {
     const char* names[] = {"I_EB123","I_TL123","i_fs1","i_el1","I_VE1","BOWFLEX T216","SCHWINN 170/270 abc"};
-    for (std::size_t i = 0; i < descriptorCount(); ++i) {
+    for (std::size_t i = 0; i < 7; ++i) {
         const auto& desc = descriptorAt(i);
         ble::Advertisement ad; ad.name = names[i];
         assert(desc.matches(ad) && desc.priority == 85 && !desc.advertisementOnly);
         assert(std::strlen(desc.id) <= 16);
         auto source = desc.create();
         assert(std::strcmp(source->id(),desc.id) == 0);
+        ad.services.push_back(ble::Uuid::from16(0x1826));
+        assert(!desc.matches(ad));
+        if (i < 5) {
+            ad.services.push_back(kIfitService);
+            assert(desc.matches(ad));
+        }
+        ad.services.clear();
         for (const char* excluded : {"Peloton","DFC","VeloCore","NordicTrack WiFi","ProForm","I_RW123"}) {
             ad.name = excluded; assert(!desc.matches(ad));
+        }
+        assert(descriptorCount() == 7+modelCount());
+        for (std::size_t i = 7; i < descriptorCount(); ++i) {
+            const auto& desc = descriptorAt(i);
+            ble::Advertisement ad; ad.name = "I_EB123";
+            assert(!desc.matches(ad) && desc.priority == 0 && std::strlen(desc.id) <= 16);
+            assert(std::strcmp(desc.create()->id(),desc.id) == 0);
+            assert(std::strcmp(desc.label,modelAt(i-7).name) == 0);
         }
     }
 }
