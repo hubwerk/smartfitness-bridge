@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <set>
 
 using namespace smartfitness;
 using namespace smartfitness::protocols;
@@ -261,13 +262,18 @@ void testMatchers() {
         }
     }
     assert(descriptorCount() == 7+modelCount());
+    std::set<std::string> ids;
     for (std::size_t i = 7; i < descriptorCount(); ++i) {
         const auto& desc = descriptorAt(i);
         ble::Advertisement ad; ad.name = "I_EB123";
-        assert(!desc.matches(ad) && desc.priority == 0 && std::strlen(desc.id) <= 16);
+        assert(!desc.matches(ad) && (desc.priority == 0 || desc.priority == 86) && std::strlen(desc.id) <= 16);
+        assert(ids.insert(desc.id).second);
         assert(std::strcmp(desc.create()->id(),desc.id) == 0);
         assert(std::strcmp(desc.label,modelAt(i-7).name) == 0);
     }
+    ble::Advertisement alt; alt.name = "BOWFLEX T6";
+    alt.services.push_back(ble::Uuid::fromString("15b7bf49-1693-481e-b877-69d33ce6bafa"));
+    assert(descriptorAt(7+92).matches(alt) && descriptorAt(7+92).priority == 86);
 }
 void testNoInterleavedControl() {
     IfitBowflexSource source(Kind::Bike);

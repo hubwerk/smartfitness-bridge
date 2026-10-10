@@ -424,6 +424,17 @@ const ProtocolInfo descriptors[] = {
 };
 constexpr std::size_t kManualProfiles = 97;
 bool manualMatch(const ble::Advertisement&) { return false; }
+template<std::size_t index> bool modelMatch(const ble::Advertisement& a) {
+    if constexpr (index >= 91 && index <= 95) {
+        if (!prefix(upper(a.name),"BOWFLEX T")) return false;
+        constexpr const char* services[] = {
+            "b1216c2e-464e-4c46-b2b4-0b5c8eb23dae", "15b7bf49-1693-481e-b877-69d33ce6bafa",
+            "b5c78780-cad7-11e5-b9f8-0002a5d5c51b", "ebbe6870-d00a-4bf4-bb79-63b35bf4c6b5",
+            "edff9e80-cad7-11e5-ab63-0002a5d5c51b"};
+        return (index != 95 || prefix(upper(a.name),"BOWFLEX T128")) && a.hasService(uuid(services[index-91]));
+    }
+    return manualMatch(a);
+}
 template<std::size_t index> std::unique_ptr<SourceProtocol> createModel() {
     return std::unique_ptr<SourceProtocol>(new IfitBowflexSource(ifit_bowflex::modelAt(index)));
 }
@@ -431,18 +442,23 @@ template<std::size_t... indices>
 std::array<std::unique_ptr<SourceProtocol>(*)(), sizeof...(indices)> modelFactories(std::index_sequence<indices...>) {
     return {{createModel<indices>...}};
 }
+template<std::size_t... indices>
+std::array<bool(*)(const ble::Advertisement&), sizeof...(indices)> modelMatchers(std::index_sequence<indices...>) {
+    return {{modelMatch<indices>...}};
+}
 struct ManualDescriptors {
     std::array<std::string,kManualProfiles> ids;
     std::array<ProtocolInfo,kManualProfiles> entries{};
     ManualDescriptors() {
         const auto factories = modelFactories(std::make_index_sequence<kManualProfiles>{});
+        const auto matchers = modelMatchers(std::make_index_sequence<kManualProfiles>{});
         for (std::size_t i = 0; i < kManualProfiles; ++i) {
             // Stable pinned-table ordinal, not a truncated ambiguous model name.
             ids[i] = "ifit-model-" + std::to_string(i+1);
             const auto& model = ifit_bowflex::modelAt(i);
             const bool controls = model.kind == Kind::Bike || model.kind == Kind::Treadmill ||
                                   model.kind == Kind::Elliptical || model.kind == Kind::EllipticalTrainer;
-            entries[i] = {ids[i].c_str(),model.name,0,manualMatch,factories[i],controls,false};
+            entries[i] = {ids[i].c_str(),model.name,(i >= 91 && i <= 95) ? 86 : 0,matchers[i],factories[i],controls,false};
         }
     }
 };

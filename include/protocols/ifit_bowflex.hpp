@@ -54,7 +54,7 @@ public:
                      const ble::Uuid& writeService, const ble::Uuid& writeCharacteristic);
     const char* id() const override;
     ble::ConnectPlan plan() const override;
-    std::uint32_t startupTimeoutMs() const override { return 95000; }
+    std::uint32_t startupTimeoutMs() const override { return 35000; }
     bool onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) override;
     void onWriteEndpoint(const ble::Uuid& service, const ble::Uuid& characteristic) override;
     void onNotify(std::size_t index, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) override;
