@@ -27,18 +27,49 @@ passed both host tests and firmware build; the badge above tracks CI.
 
 Target: **ESP32-S3 DevKitC-1 N16R8**, 16 MB flash, 8 MB PSRAM, Arduino framework,
 `qio_opi` memory mode and `default_16MB.csv` partitions. Use the board's flashing
-connection; select its port with PlatformIO's `--upload-port` if needed.
-From the repository root:
+connection.
+
+**Prerequisites:** Python 3.8+, Git, and PlatformIO Core (`pip install -U
+platformio`), or the VS Code **PlatformIO IDE** extension, which bundles Core
+(run the commands in its terminal). On Windows, a USB-UART driver (CP210x /
+CH34x) is needed only when using the board's UART port.
+
+### Build
 
 ```sh
+git clone https://github.com/manuelh83/smartfitness-bridge.git
+cd smartfitness-bridge
 pio run -e esp32s3dev
+```
+
+- The first build downloads the toolchain, Arduino core, and pinned libraries; allow a few minutes.
+- `scripts/embed_web_assets.py` runs automatically before compiling; no separate step is needed.
+- Output files are in `.pio/build/esp32s3dev/`: `firmware.bin`, `bootloader.bin`, and `partitions.bin`.
+
+### Flash and monitor
+
+```sh
 pio run -e esp32s3dev -t upload
 pio device monitor -b 115200
 ```
 
+- The DevKitC-1 has two USB ports; Serial output uses the native USB port labelled **USB** (`ARDUINO_USB_CDC_ON_BOOT=1`).
+- If upload does not start, hold **BOOT**, press **RST**, release BOOT, and retry.
+- Select ports with `--upload-port` / `--port`, e.g. `COM5` or `/dev/ttyACM0`.
+
 Serial is **115200 baud** (USB CDC enabled); it prints boot/configuration and Wi-Fi
-information. If automatic upload fails, use the board's BOOT/RESET procedure.
+information.
 ANT+ needs external hardware; see [hardware decisions](docs/hardware-decisions.md).
+
+**Optional host tests:** `make host-tests` (requires `make` and `g++` with C++17; on
+Windows, use WSL).
+
+**Troubleshooting:** `platform = espressif32` is unpinned, while NimBLE-Arduino
+1.4.3 requires Arduino core 2.0.x. If the build fails with NimBLE/`esp_` errors,
+pin a 6.x `espressif32` platform version that ships Arduino core 2.0.17 (check the
+[Dependency compatibility](#dependency-compatibility) section and platform release
+notes for the exact version), then run `pio run -t clean` and rebuild with
+`pio run -e esp32s3dev`.
 
 ## Architecture
 
