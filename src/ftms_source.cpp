@@ -155,7 +155,10 @@ void FtmsSource::handleResponse(const std::uint8_t* data, std::size_t length) {
         if (controlState_ != ControlState::Requesting) return;
         if (response.result == ftms::ResultCode::Success) {
             controlState_ = ControlState::Granted;
-            if (profile_ != MachineProfile::Treadmill) sendControl(ftms::encodeStartOrResume());
+            const bool confirmedBike = options_.bikeDataOnly || dataSubscribedMask_ == (1U << SubBike) ||
+                                       (advertisedProfileValid_ && advertisedProfile_ == MachineProfile::IndoorBike);
+            if (profile_ == MachineProfile::IndoorBike && confirmedBike)
+                sendControl(ftms::encodeStartOrResume());
         } else {
             controlState_ = ControlState::Denied;
             setError(std::string("FTMS Request Control refused: ") + resultName(response.result));

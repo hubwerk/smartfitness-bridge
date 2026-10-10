@@ -468,8 +468,18 @@ void testProtocolProfiles() {
                              MachineProfile::CrossTrainer;
         expected.emplace("ifit-model-" + std::to_string(ordinal), profile);
     }
-    for (std::size_t index = 0; index < protocols::treadmills::descriptorCount(); ++index)
-        expected.emplace(protocols::treadmills::descriptorAt(index).id, MachineProfile::Treadmill);
+    for (const char* id : {
+             "horizon-tm", "horizon-paragon", "spirit-treadmill", "spirit-xt485", "spirit-xt800",
+             "sole-treadmill", "sole-f63", "sole-f65", "sole-tt8", "walkingpad-r1", "walkingpad-flat",
+             "walkingpad-re", "walkingpad-g1", "walkingpad-g1b", "walkingpad-r2",
+             "wp2-c0-s2c2", "wp2-c0-s1c1",
+             "wp2-c2-s0", "wp2-c2-s2c2", "wp2-c2-s1c1",
+             "wp2-c3-s0", "wp2-c3-s2c2", "wp2-c3-s1c1",
+             "wp2-c4-s0", "wp2-c4-s2c2", "wp2-c4-s1c1",
+             "wp2-c5-s0", "wp2-c5-s2c2", "wp2-c5-s1c1",
+             "wp2-c6-s0", "wp2-c6-s2c2", "wp2-c6-s1c1",
+             "wp2-c7-s0", "wp2-c7-s2c2", "wp2-c7-s1c1"})
+        expected.emplace(id, MachineProfile::Treadmill);
     assert(expected.size() == protocols::protocolCount());
     for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
         const auto& info = protocols::protocolAt(index);
@@ -537,6 +547,44 @@ void testFtmsProfiles() {
     schwinn->onAdvertisement(advertisement, 100);
     assert(schwinn->onConnected(1, 100));
     assert(schwinn->profile() == MachineProfile::IndoorBike);
+}
+
+void testFtmsControlDoesNotStartTreadmill() {
+    using Source = protocols::FtmsSource;
+    const Bytes feature{0, 0, 0, 0, 0x0c, 0, 0, 0};
+    const Bytes granted{0x80, 0, 1};
+    for (std::size_t index = Source::SubBike; index <= Source::SubRower; ++index) {
+        Source source;
+        source.onRead(Source::ReadFeature, feature.data(), feature.size());
+        assert(source.onConnected((1U << index) | (1U << Source::SubControlPoint), 100));
+        ble::GattWrite write;
+        assert(source.pendingWrites() == 1 && source.takeWrite(write));
+        assert(write.payload() == ftms::encodeRequestControl());
+        assert(!source.takeWrite(write));
+        source.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 200);
+        assert(source.controlState() == Source::ControlState::Granted);
+        if (index == Source::SubBike)
+            assert(source.takeWrite(write) && write.payload() == ftms::encodeStartOrResume());
+        assert(source.pendingWrites() == 0 && !source.takeWrite(write));
+    }
+    // Advertising selects treadmill even if the device subscribes every data UUID.
+    Source source;
+    ble::Advertisement advertisement;
+    advertisement.ftmsServiceData = {1, 1, 0};
+    source.onAdvertisement(advertisement, 100);
+    source.onRead(Source::ReadFeature, feature.data(), feature.size());
+    assert(source.onConnected(0x1f, 100));
+    ble::GattWrite write;
+    assert(source.takeWrite(write) && write.payload() == ftms::encodeRequestControl());
+    source.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 200);
+    assert(source.profile() == MachineProfile::Treadmill && !source.takeWrite(write));
+    // The bike compatibility default is not proof that an ambiguous machine is a bike.
+    source.reset();
+    source.onRead(Source::ReadFeature, feature.data(), feature.size());
+    assert(source.onConnected(0x1f, 300));
+    assert(source.takeWrite(write) && write.payload() == ftms::encodeRequestControl());
+    source.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 400);
+    assert(!source.takeWrite(write));
 }
 
 struct Harness {
@@ -1211,6 +1259,7 @@ void runBleInputTests() {
     testRegistry();
     testProtocolProfiles();
     testFtmsProfiles();
+    testFtmsControlDoesNotStartTreadmill();
     testAdapterProfiles();
     testFtmsDistanceTelemetry();
     testScanDedupAndExclusion();

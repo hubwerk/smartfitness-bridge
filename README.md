@@ -190,7 +190,8 @@ the saved BLE source again. `save` persists that input toggle.
 - If a connected device delivers no data for 5 s, its telemetry is marked stale and invalidated (outputs stop reporting the metrics). If no data arrives for 20 s, the link is dropped and reconnected.
 - Stale treadmill telemetry also disables treadmill controls until fresh data
   restores readiness. The FTMS input handshake never automatically sends
-  Start/Resume to a treadmill.
+  Start/Resume to a treadmill, cross-trainer or rower; the existing bike
+  initialization behavior is unchanged.
 - The peer currently connected to the FTMS output is never offered in scan results and never connected to as an input.
 
 ## Supported devices and new protocols
