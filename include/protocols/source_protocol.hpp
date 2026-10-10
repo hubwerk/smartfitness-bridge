@@ -40,11 +40,15 @@ public:
     // device is unusable (lastError() explains why).
     virtual bool onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) = 0;
     virtual void onRead(std::size_t index, const std::uint8_t* data, std::size_t length);
+    virtual void onWriteEndpoint(const ble::Uuid&, const ble::Uuid&) {}
     virtual void onNotify(std::size_t index, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) = 0;
     virtual void onAdvertisement(const ble::Advertisement& advertisement, std::uint32_t nowMs);
     virtual void onWriteFailed(std::uint32_t nowMs);
     // Periodic work: polls, init sequences and retries.
     virtual void tick(std::uint32_t nowMs);
+    // Some vendor handshakes take longer than the normal no-data timeout.
+    // Zero keeps the adapter default; this is a bounded startup grace only.
+    virtual std::uint32_t startupTimeoutMs() const { return 0; }
     // Translate a request already validated by BridgeCore into writes.
     virtual bool control(const ControlRequest& request, std::uint32_t nowMs);
     virtual TrainerCapabilities capabilities() const = 0;

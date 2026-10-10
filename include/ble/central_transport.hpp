@@ -25,6 +25,7 @@ enum class CentralEventType : std::uint8_t {
     Disconnected,   // link lost or closed
     Notification,   // index = subscription index
     ReadResult,     // index = read index (delivered before Connected)
+    WriteEndpoint,  // discovered service + characteristic UUID (32 bytes)
     WriteFailed,
     ScanComplete
 };

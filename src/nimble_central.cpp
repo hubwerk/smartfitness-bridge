@@ -299,9 +299,38 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
     }
     std::uint32_t mask = 0;
     const std::uint32_t session = cmd.session;
-    for (std::uint8_t index = 0; index < cmd.plan.subscriptionCount; ++index) {
+    ble::ConnectPlan plan = cmd.plan;
+    if (plan.discoverNotifications) {
+        plan.subscriptionCount = 0;
+        bool writeFound = false;
+        const auto* services = client->getServices(true);
+        if (services) for (auto* service : *services) {
+            if (cancelled(session)) { doDisconnect(); return; }
+            ble::Uuid serviceUuid;
+            if (!ble::Uuid::parse(service->getUUID().toString(), serviceUuid)) continue;
+            const auto* characteristics = service->getCharacteristics(true);
+            if (!characteristics) continue;
+            for (auto* characteristic : *characteristics) {
+                if (cancelled(session)) { doDisconnect(); return; }
+                ble::Uuid characteristicUuid;
+                if (!ble::Uuid::parse(characteristic->getUUID().toString(), characteristicUuid)) continue;
+                if (characteristic->canNotify() || characteristic->canIndicate())
+                    plan.subscribe(serviceUuid, characteristicUuid, !characteristic->canNotify());
+                bool allowed = false;
+                for (const auto& uuid : plan.discoveryWriteCharacteristics)
+                    allowed = allowed || (!uuid.isZero() && uuid == characteristicUuid);
+                if (!writeFound && allowed && (characteristic->canWrite() || characteristic->canWriteNoResponse())) {
+                    ble::Bytes endpoint(serviceUuid.bytes.begin(), serviceUuid.bytes.end());
+                    endpoint.insert(endpoint.end(), characteristicUuid.bytes.begin(), characteristicUuid.bytes.end());
+                    pushEvent(ble::CentralEventType::WriteEndpoint, session, 0, 0, endpoint.data(), endpoint.size());
+                    writeFound = true;
+                }
+            }
+        }
+    }
+    for (std::uint8_t index = 0; index < plan.subscriptionCount; ++index) {
         if (cancelled(cmd.session)) { doDisconnect(); return; }
-        const auto& subscription = cmd.plan.subscriptions[index];
+        const auto& subscription = plan.subscriptions[index];
         NimBLERemoteCharacteristic* characteristic =
             findCharacteristic(client, subscription.service, subscription.characteristic);
         if (!characteristic) continue;

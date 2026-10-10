@@ -170,6 +170,9 @@ To add a protocol:
    `plan()` declares reads/subscriptions, `onRead()`/`onNotify()` decode bytes,
    `control()`/`tick()` queue writes drained by `takeWrite()`; advertisement-only
    inputs use `onAdvertisement()`.
+   Long handshakes can request bounded `startupTimeoutMs()` grace. Dynamic GATT
+   discovery is opt-in through `ConnectPlan`; explicitly allowlist write UUIDs
+   and receive the resolved endpoint through `onWriteEndpoint()`.
 2. Add an id (`[a-z0-9_-]`, at most 16 characters), matcher, factory, and priority
    to `kProtocols` in `src/protocols/registry.cpp`. Highest matching priority wins;
    avoid broad vendor matches stealing unrelated devices from standard protocols.

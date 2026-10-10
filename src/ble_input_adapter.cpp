@@ -186,8 +186,13 @@ void BleInputAdapter::loop() {
         case LinkState::Ready:
             protocol_->tick(now);
             if (protocol_->failed()) scheduleReconnect(protocol_->lastError());
-            else if (!protocol_->hasData() && now - stateSinceMs_ > timing_.noDataReconnectMs)
-                scheduleReconnect("no data from device");
+            else if (!protocol_->hasData()) {
+                const std::uint32_t grace = protocol_->startupTimeoutMs();
+                const std::uint32_t boundedGrace = grace > 120000U ? 120000U : grace;
+                const std::uint32_t timeout = boundedGrace > timing_.noDataReconnectMs
+                    ? boundedGrace : timing_.noDataReconnectMs;
+                if (now - stateSinceMs_ > timeout) scheduleReconnect("no data from device");
+            }
             break;
         case LinkState::Backoff:
             if (reached(now, nextAttemptMs_)) startConnection();
@@ -215,6 +220,16 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
     switch (event.type) {
         case ble::CentralEventType::ReadResult:
             if (linkActive) protocol_->onRead(event.index, event.data.data(), event.length);
+            break;
+        case ble::CentralEventType::WriteEndpoint:
+            if (linkActive && event.length == 32) {
+                ble::Uuid service, characteristic;
+                for (std::size_t index = 0; index < service.bytes.size(); ++index) {
+                    service.bytes[index] = event.data[index];
+                    characteristic.bytes[index] = event.data[index + 16];
+                }
+                protocol_->onWriteEndpoint(service, characteristic);
+            }
             break;
         case ble::CentralEventType::Connected:
             if (state_ != LinkState::Connecting) break;
