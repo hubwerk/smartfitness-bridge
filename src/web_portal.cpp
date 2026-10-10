@@ -11,12 +11,16 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 #include "generated/web_assets.h"
+#include "config_store.h"
+#include "web_request.h"
 
 namespace {
 constexpr std::uint16_t kDnsPort = 53;
 constexpr std::uint32_t kPolicyIntervalMs = 1000;
+constexpr const char* kBodyAllocationFailed = "sf-body-allocation-failed";
 
 void sendJson(AsyncWebServerRequest* request, int status, const std::string& body) {
     AsyncWebServerResponse* response = request->beginResponse(status, "application/json", body.c_str());
@@ -24,22 +28,28 @@ void sendJson(AsyncWebServerRequest* request, int status, const std::string& bod
     request->send(response);
 }
 
-// Collects a small POST body into request->_tempObject (freed by the library).
+// The library frees _tempObject, so metadata and bytes share one calloc allocation.
 void collectBody(AsyncWebServerRequest* request, std::uint8_t* data, std::size_t length, std::size_t index,
                  std::size_t total) {
-    if (total > ApiExchange::kMaxBodySize) return;  // rejected with 413 in the request handler
-    if (index == 0) {
-        request->_tempObject = std::malloc(total + 1);
-        if (!request->_tempObject) return;
+    if (total > ApiExchange::kMaxBodySize || request->hasHeader("Transfer-Encoding") ||
+        request->getAttribute(kBodyAllocationFailed, false)) return;
+    if (!request->_tempObject) {
+        if (index != 0) return;
+        void* memory = std::calloc(sizeof(web::BodyReceipt) + total + 1, 1);
+        if (!memory) {
+            request->setAttribute(kBodyAllocationFailed, true);
+            return;
+        }
+        request->_tempObject = new (memory) web::BodyReceipt{total, 0, false};
     }
-    if (!request->_tempObject || index + length > total) return;
-    std::memcpy(static_cast<char*>(request->_tempObject) + index, data, length);
-    if (index + length == total) static_cast<char*>(request->_tempObject)[total] = '\0';
+    auto* receipt = static_cast<web::BodyReceipt*>(request->_tempObject);
+    receipt->append(reinterpret_cast<char*>(receipt + 1), data, length, index, total);
 }
 
 std::string bodyOf(AsyncWebServerRequest* request) {
     if (!request->_tempObject) return std::string();
-    return std::string(static_cast<const char*>(request->_tempObject));
+    const auto* receipt = static_cast<const web::BodyReceipt*>(request->_tempObject);
+    return std::string(reinterpret_cast<const char*>(receipt + 1), receipt->received);
 }
 }  // namespace
 
@@ -49,6 +59,14 @@ struct WebPortal::Impl {
     DNSServer dns;
     bool dnsRunning = false;
     bool mdnsRunning = false;
+    bool scanPending = false;
+    bool configPending = false;
+
+    bool broadcast(const std::string& message) {
+        if (!web::canBroadcast(socket.count(), socket.availableForWriteAll())) return false;
+        socket.textAll(message.c_str());
+        return true;
+    }
 };
 
 WebPortal::WebPortal(WebUi& ui, ApiExchange& api) : ui_(ui), api_(api) {}
@@ -100,8 +118,25 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
         server.on(
             AsyncURIMatcher::exact((std::string("/api/") + name).c_str()), HTTP_POST,
             [this, name](AsyncWebServerRequest* request) {
+                const bool hasOrigin = request->hasHeader("Origin");
+                const std::string origin = hasOrigin ? request->getHeader("Origin")->value().c_str() : "";
+                const int policy = web::postRequestStatus(request->contentType().c_str(), hasOrigin, origin,
+                    WiFi.localIP().toString().c_str(), WiFi.softAPIP().toString().c_str(),
+                    request->hasHeader("Transfer-Encoding"));
+                if (policy != 200) {
+                    sendJson(request, policy, policy == 415 ? "{\"error\":\"Content-Type must be application/json\"}" :
+                        policy == 403 ? "{\"error\":\"foreign origin\"}" : "{\"error\":\"chunked bodies not supported\"}");
+                    return;
+                }
                 if (request->contentLength() > ApiExchange::kMaxBodySize) {
                     sendJson(request, 413, "{\"error\":\"request body too large\"}");
+                    return;
+                }
+                const int bodyStatus = web::bodyStatus(static_cast<const web::BodyReceipt*>(request->_tempObject),
+                    request->contentLength(), request->getAttribute(kBodyAllocationFailed, false));
+                if (bodyStatus != 200) {
+                    sendJson(request, bodyStatus, bodyStatus == 500 ? "{\"error\":\"body allocation failed\"}" :
+                        "{\"error\":\"incomplete or invalid body\"}");
                     return;
                 }
                 const ApiResponse response = api_.submit(name, bodyOf(request));
@@ -114,6 +149,11 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
                                  std::uint8_t*, std::size_t) {
         // Clients only listen; requests go through the REST API.
         if (type == WS_EVT_CONNECT) client->text(api_.snapshot(ApiExchange::Snapshot::Status).c_str());
+    });
+    impl_->socket.setFilter([](AsyncWebServerRequest* request) {
+        return !request->hasHeader("Origin") ||
+            web::trustedOrigin(request->getHeader("Origin")->value().c_str(), WiFi.localIP().toString().c_str(),
+                               WiFi.softAPIP().toString().c_str());
     });
     server.addHandler(&impl_->socket);
 
@@ -146,13 +186,19 @@ void WebPortal::applyMode(WifiMode mode) {
     const bool wantSta = mode == WifiMode::Sta || mode == WifiMode::ApSta;
     WiFi.mode(wantAp && wantSta ? WIFI_AP_STA : wantAp ? WIFI_AP : WIFI_STA);
     if (wantAp) {
-        WiFi.softAP(apSsid_.c_str(), apPassword_.c_str());
+        if (!WiFi.softAP(apSsid_.c_str(), apPassword_.c_str())) {
+            Serial.println("[WiFi] access point start failed; retrying with default password");
+            apPassword_ = BridgeConfig{}.apPassword;
+            if (!WiFi.softAP(apSsid_.c_str(), apPassword_.c_str()))
+                Serial.println("[WiFi] access point retry failed");
+        }
         if (impl_ && !impl_->dnsRunning) {
             impl_->dns.setErrorReplyCode(DNSReplyCode::NoError);
             impl_->dnsRunning = impl_->dns.start(kDnsPort, "*", WiFi.softAPIP());
         }
         Serial.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at http://%s/\n", apSsid_.c_str(),
-                      apPassword_.c_str(), WiFi.softAPIP().toString().c_str());
+                      apPassword_ == BridgeConfig{}.apPassword ? apPassword_.c_str() : "(custom)",
+                      WiFi.softAPIP().toString().c_str());
     } else if (impl_ && impl_->dnsRunning) {
         impl_->dns.stop();
         impl_->dnsRunning = false;
@@ -188,29 +234,32 @@ void WebPortal::publish(std::uint32_t now) {
         ui_.setNetworkStatus(networkStatus());
         const std::string status = ui_.statusJson();
         api_.publish(ApiExchange::Snapshot::Status, status);
-        if (impl_->socket.count() > 0 && impl_->socket.availableForWriteAll()) impl_->socket.textAll(status.c_str());
+        impl_->broadcast(status);
     }
     if (now - lastScanMs_ >= kScanIntervalMs) {
         lastScanMs_ = now;
         std::string scan = ui_.scanResultsJson();
         if (scan != lastScanJson_) {
             api_.publish(ApiExchange::Snapshot::Scan, scan);
-            if (impl_->socket.count() > 0) impl_->socket.textAll(scan.c_str());
             lastScanJson_ = std::move(scan);
+            impl_->scanPending = true;
         }
         std::string config = ui_.configJson();
         if (config != lastConfigJson_) {
             api_.publish(ApiExchange::Snapshot::Config, config);
             lastConfigJson_ = std::move(config);
+            impl_->configPending = true;
         }
     }
+    if (impl_->scanPending && impl_->broadcast(lastScanJson_)) impl_->scanPending = false;
+    if (impl_->configPending && impl_->broadcast(lastConfigJson_)) impl_->configPending = false;
 }
 
 void WebPortal::loop() {
     if (!started_) return;
     const std::uint32_t now = millis();
     for (const std::string& message : api_.process(ui_)) {
-        if (impl_->socket.count() > 0) impl_->socket.textAll(message.c_str());
+        impl_->broadcast(message);  // Results remain available through GET /api/result if congested.
         lastStatusMs_ = now - kStatusIntervalMs;  // push the effect right away
         lastScanMs_ = now - kScanIntervalMs;
     }

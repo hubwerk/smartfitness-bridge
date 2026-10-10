@@ -122,6 +122,10 @@ std::string WebUi::status() const {
             text += " paired=" + ble_->pairedDevice().address.toString() + "/" + ble_->pairedDevice().adapterId;
         if (ble_->stale()) text += " stale=1";
         if (!ble_->lastError().empty()) text += " error=\"" + ble_->lastError() + "\"";
+        text += " dropped(scans=" + std::to_string(ble_->droppedScanReports()) +
+                ",events=" + std::to_string(ble_->droppedEvents()) +
+                ",notifications=" + std::to_string(ble_->droppedNotifications()) +
+                ",commands=" + std::to_string(ble_->droppedCommands()) + ")";
     }
     return text;
 }
@@ -151,7 +155,7 @@ CommandResult WebUi::pair(const Command& command) {
     if (!config_.pairSource(toSource(device.address), device.name, device.adapterId))
         return fail("pairing not persisted (storage write failed)");
     applyConfig();
-    bridge_.scanAndConnect();
+    if (!ble_->scanAndConnect()) return fail("paired, but connection request rejected: " + ble_->lastError());
     bridge_.loop();
     const std::string label = device.name.empty() ? device.address.toString() : device.name + " (" + device.address.toString() + ")";
     return ok("paired " + label + " as " + device.adapterId + "; connecting");
@@ -189,7 +193,7 @@ CommandResult WebUi::execute(const Command& command) {
         }
         case CommandType::ScanStop:
             if (!ble_) return fail("BLE input not available");
-            ble_->stopScan();
+            if (!ble_->stopScan()) return fail("scan stop rejected: " + ble_->lastError());
             return ok("scan stopped");
         case CommandType::ScanResults: {
             if (!ble_) return fail("BLE input not available");
@@ -212,12 +216,14 @@ CommandResult WebUi::execute(const Command& command) {
             if (!config_.config().pairedSource.valid) return fail("no paired device; scan and pair first");
             config_.config().ftms.input = true;
             applyConfig();
-            bridge_.scanAndConnect();
+            if (!ble_->scanAndConnect()) return fail("connection request rejected: " + ble_->lastError());
             bridge_.loop();
             return ok("connecting; " + status());
         case CommandType::Disconnect:
         case CommandType::Unpair: {
+            const bool accepted = !bleSelected() || ble_->requestDisconnect();
             bridge_.disconnect();
+            if (!accepted) return fail("disconnect request rejected: " + ble_->lastError());
             const bool persisted = command.type != CommandType::Unpair || config_.unpair();
             if (command.type == CommandType::Unpair) applyConfig();
             bridge_.loop();
@@ -276,8 +282,8 @@ CommandResult WebUi::execute(const Command& command) {
             config_.config().wifiPassword.clear();
             return ok("wifi cleared (access point only); save and restart to apply");
         case CommandType::ApPassword:
-            if (!ConfigStore::isValidPassword(command.text, false))
-                return fail("access point password must be 8-63 printable characters");
+            if (!ConfigStore::isValidApPassword(command.text))
+                return fail("access point password must be 8-63 printable ASCII characters");
             config_.config().apPassword = command.text;
             return ok("access point password set; save and restart to apply");
         case CommandType::Restart:
@@ -332,6 +338,11 @@ std::string WebUi::statusJson() const {
         input["reconnectAttempts"] = ble_->reconnectAttempts();
         input["nextAttemptMs"] = ble_->nextAttemptInMs();
         input["autoConnect"] = ble_->autoConnect();
+        JsonObject dropped = input["dropped"].to<JsonObject>();
+        dropped["scans"] = ble_->droppedScanReports();
+        dropped["events"] = ble_->droppedEvents();
+        dropped["notifications"] = ble_->droppedNotifications();
+        dropped["commands"] = ble_->droppedCommands();
     }
     const auto& config = config_.config();
     if (config.pairedSource.valid) {

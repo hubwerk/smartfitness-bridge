@@ -112,8 +112,17 @@ Everything that runs on the Arduino `loop()` – the core, the adapters' protoco
 **Security warning:** change the shared default password before normal use.
 The HTTP API has **no authentication or TLS**; anyone on the AP/home network can
 control, pair, erase settings, or restart the bridge. Do not port-forward it or
-use an untrusted network. Passwords are never returned by API snapshots/results,
-but the AP password **is printed on Serial** and credentials are stored in NVS.
+use an untrusted network. POST requests require `Content-Type: application/json`,
+even with no body. A supplied `Origin` must be `http://smartfitness.local`, the
+current STA IP, or the SoftAP IP (optional `:80`); foreign/null origins are rejected.
+No CORS access is enabled. This blocks browser CSRF, **not** clients already on
+your network; there is no API token. WebSocket upgrades also reject foreign origins.
+Passwords are never returned by API snapshots/results. Serial prints only the
+factory-default AP password; custom passwords are shown as `(custom)`, and the
+home Wi-Fi password is never logged. Credentials are stored in NVS.
+AP passwords must be 8–63 printable ASCII characters. Invalid stored AP passwords
+fall back to the default while preserving other valid settings; a failed SoftAP
+start is logged and retried with the default. Change that default before normal use.
 Wi-Fi/AP edits (including factory reset) require a restart to change the running network.
 
 ## Pairing walkthrough
@@ -219,6 +228,10 @@ The Serial monitor (115200 baud, newline-terminated) accepts the same commands a
 | `save`, `load`, `factory-reset`, `restart` | Persistence and reboot |
 
 `status` includes `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control.
+It also includes `dropped(scans=…,events=…,notifications=…,commands=…)` for BLE
+transport queue overflow. These cumulative counters are available as
+`input.dropped` in `/api/status`; scan-result-list overflow remains the separate
+`dropped` field in `/api/scan/results`.
 Lines are newline-terminated, limited to 96 characters, and case-sensitive.
 Use literal `on` or `off`, not `on/off`. Settings are RAM edits until `save`,
 except pairing/unpairing, which persist their own changes immediately.
@@ -234,7 +247,10 @@ The single-page app (`web/index.html`, plain HTML/JS/CSS, gzipped into flash at 
 ## REST / WebSocket API
 
 HTTP runs on port 80. POST bodies are JSON objects (max. **1024 bytes**, nesting
-limit 2, unknown keys rejected); an empty body is treated as `{}`.
+limit 2, unknown keys rejected); an empty body is treated as `{}`. All POSTs
+require `Content-Type: application/json` (an optional charset parameter is allowed)
+and a trusted Origin if supplied, including bodyless endpoints. Chunked transfer
+encoding, incomplete bodies and embedded NUL characters are rejected.
 The HTTP handlers never touch the core: a syntactically valid request is queued
 for the main loop and answered with **`202 {"id":n}`**. This is not command success:
 execution/validation can subsequently fail. Multi-setting requests execute in a
@@ -255,7 +271,7 @@ fixed order and stop at the first failure, **without rollback**.
 | GET | `/api/result?id=1` | – | Poll queued command result; see below |
 | GET | `/` | – | Gzipped HTML/JS/CSS app (`200`, not JSON) |
 | GET | `/generate_204`, `/hotspot-detect.html`, `/connecttest.txt`, `/ncsi.txt` | – | Captive-portal `302` redirect to AP IP |
-| WS | `/ws` | – | Server sends `status`, `scan`, `result`; client messages ignored |
+| WS | `/ws` | – | Server sends `status`, `scan`, `config`, `result`; client messages ignored |
 
 Config types: `ftmsName`, SSID, and passwords are strings; toggles and `save`
 are booleans. `wifiSsid:""` clears SSID/password. `wifiPassword` requires
@@ -300,7 +316,10 @@ evict older entries. Poll promptly. Missing/unknown/evicted ids return **404**:
 |---|---|
 | 202 | Accepted job `{"id":1}`, or pending result above |
 | 400 | Parse/type/value/unknown-field error, e.g. `{"error":"expected a JSON object"}` |
+| 403 | POST Origin is not a trusted device origin |
 | 413 | `{"error":"request body too large"}` |
+| 415 | Missing/non-JSON POST Content-Type |
+| 500 | Body allocation failed; command is not submitted |
 | 503 | Eight-job queue full: `{"error":"busy; try again"}` |
 | 404 | Unknown route `{"error":"not found"}` or unknown result id |
 
@@ -318,7 +337,8 @@ or `null` when invalid. Example disconnected snapshot:
   "telemetry":{"power":null,"cadence":null,"speed":null,"heartRate":null,"incline":null,"distance":null},
   "deviceName":"","trainer":false,"canControl":false,"controls":[],"target":null,
   "input":{"source":"simulation","bleAvailable":true,"link":"idle","protocol":"","stale":false,
-    "scanning":false,"error":"","reconnectAttempts":0,"nextAttemptMs":0,"autoConnect":false,"paired":null},
+    "scanning":false,"error":"","reconnectAttempts":0,"nextAttemptMs":0,"autoConnect":false,"paired":null,
+    "dropped":{"scans":0,"events":0,"notifications":0,"commands":0}},
   "ftmsOutput":{"enabled":true,"name":"SmartFitness Bridge","advertising":true,"client":false,"control":false},
   "ant":true,"unsaved":false,
   "network":{"mode":"ap","ssid":"SmartFitness-XXXX","ip":"192.168.4.1","hostname":"smartfitness.local","stations":1}
@@ -360,11 +380,14 @@ States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 
 Connect to `ws://smartfitness.local/ws` (or the IP). An initial `status` snapshot
 is sent on connection; subsequent `status` messages are sent at most every 250 ms
-when clients can accept writes. `scan` is sent on change, checked every 1000 ms
+when clients can accept writes. `scan` and password-free `config` are sent on change, checked every 1000 ms
 (a completed API job also triggers an immediate snapshot refresh).
 `result` is sent when a queued job finishes. These use the JSON shapes above.
-`config` is a GET snapshot, **not a broadcast message** in the current firmware;
-refresh `/api/config` after changes. Early GET/WS snapshots can be `{}` before
+All broadcasts check client count and write availability to avoid flooding slow
+clients. Unsent scan/config changes are retained (latest snapshot) for a later loop;
+command results remain retrievable through `/api/result` even if not broadcast.
+GET snapshots are updated independently of WebSocket congestion.
+Early GET/WS snapshots can be `{}` before
 the main loop first publishes them. The socket is server-to-client only.
 
 ## Persistent configuration
@@ -465,7 +488,7 @@ Normalized units: speed in km/h, cadence in rpm, power in watts, heart rate in b
 | Source selection | One source, not sensor aggregation; Keiser is advertisement-only |
 | FTMS clients | **One**; advertising stops while connected |
 | Scan results | 24 deduplicated entries |
-| Central queues | 24 scan reports, 32 events, 8 worker operations |
+| Central queues | 24 scan reports; 32 events (lifecycle events can evict notifications); 8 worker operations |
 | Protocol write outbox | 16 pending GATT writes |
 | FTMS Control Point queue | 8 writes, 20 bytes per write; full queue drops a write |
 | API | 8 jobs; up to 2 processed/loop; 16 cached results; body ≤ 1024 bytes |
@@ -476,7 +499,20 @@ NimBLE host callbacks/central worker and AsyncTCP handlers hand off through
 bounded queues/locked caches; the bridge and codecs run cooperatively in the
 main loop (5 ms delay). Central connect/discovery work uses a worker task with
 a 6144-byte stack pinned to core 1. Queue overflow is not a delivery guarantee;
-watch scan `dropped` and input `error` and poll results promptly.
+watch scan `dropped`, `input.dropped` and input `error` and poll results promptly.
+Lifecycle events can evict queued notifications, so notification saturation
+cannot hide a disconnect; existing read/connection event ordering is preserved.
+Stop/disconnect requests flag pending connection work
+for cancellation even if the command queue is full; rejected queue submissions
+are counted and reported instead of silently succeeding.
+`scan-stop` during connection setup cancels that attempt and automatic reconnect;
+stopping an ordinary scan does not disconnect a ready device. Queued scan starts
+are invalidated by a later stop.
+NimBLE 1.4.3 still performs synchronous connection and GATT operations in the
+worker. The connect timeout is 5 s (NimBLE's wait can add roughly 1 s); cancellation
+is checked between discovery/read/subscribe steps. Individual GATT calls retain
+NimBLE's own timeout limits, so stopping is not guaranteed to be immediate.
+An established link can be disconnected to release pending GATT operations.
 
 Wi-Fi modem sleep is deliberately **enabled** (`WiFi.setSleep(true)`) for
 BLE/Wi-Fi coexistence on one radio; do not disable it as a latency workaround.
@@ -506,8 +542,15 @@ Host tests use GNU Make and g++, compile C++17 with
 `-Wall -Wextra -Werror -pthread`, and run `/tmp/smartfitness-core-test`.
 They cover core gating/disconnects, FTMS codec/control flow, config round trips,
 v1 migration/CRC/validation/write avoidance, BLE registry/codecs/reconnect/stale
-handling, console/API validation, queues and Wi-Fi policy. They do not run the
+handling, console/API validation, POST origin/content-type checks, fragmented-body
+validation/allocation-error decisions, AP-password fallback, lifecycle priority
+and queue rejection, and Wi-Fi policy. They do not run the
 real NimBLE/AsyncTCP/Wi-Fi transports. There is no separate documentation linter.
+Hardware verification is still required for rapid A→B switching and cancellation
+during BLE connection/discovery, full-queue command handling on FreeRTOS,
+fragmented HTTP requests/heap exhaustion, slow/multiple WebSocket clients, and
+SoftAP failure/fallback with simultaneous BLE/Wi-Fi activity. Host regressions
+verify the state machines and pure validation helpers, not radio/transport timing.
 
 PlatformIO runs `scripts/embed_web_assets.py` before building: it converts
 `web/index.html` into deterministic gzip bytes in `include/generated/web_assets.h`,

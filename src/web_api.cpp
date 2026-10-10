@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <cstdio>
+#include <cstring>
 
 #include "web_ui.h"
 
@@ -33,7 +34,12 @@ bool optionalText(JsonObjectConst object, const char* key, std::string& out, boo
         error = std::string(key) + " must be a string";
         return false;
     }
-    out = value.as<const char*>();
+    const JsonString text = value.as<JsonString>();
+    if (std::memchr(text.c_str(), '\0', text.size())) {
+        error = std::string(key) + " must not contain NUL";
+        return false;
+    }
+    out.assign(text.c_str(), text.size());
     if (out.size() > kMaxTextField) {
         error = std::string(key) + " too long";
         return false;
@@ -241,6 +247,10 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
         }
         if (!optionalText(object, "apPassword", text, present, error)) return false;
         if (present) {
+            if (!ConfigStore::isValidApPassword(text)) {
+                error = "apPassword must be 8-63 printable ASCII characters";
+                return false;
+            }
             Command command = simple(CommandType::ApPassword);
             command.text = text;
             commands.push_back(command);

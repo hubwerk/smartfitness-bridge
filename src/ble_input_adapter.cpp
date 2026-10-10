@@ -43,21 +43,31 @@ bool BleInputAdapter::scanAndConnect() {
     autoConnect_ = true;
     backoffMs_ = 0;
     attempts_ = 0;
-    closeLink();
-    startConnection();
-    return isConnected();
+    const bool closed = closeLink();
+    state_ = LinkState::Idle;
+    if (!closed) {
+        maybeEmit(true);
+        return false;
+    }
+    return startConnection();
 }
 
 void BleInputAdapter::disconnect() {
+    requestDisconnect();
+}
+
+bool BleInputAdapter::requestDisconnect() {
     autoConnect_ = false;
-    closeLink();
+    const bool accepted = closeLink();
     state_ = LinkState::Idle;
     backoffMs_ = 0;
     maybeEmit(true);
+    return accepted;
 }
 
 void BleInputAdapter::setPairedDevice(const PairedDevice& device) {
-    const bool changed = device.address != paired_.address || device.adapterId != paired_.adapterId;
+    const bool changed = device.address != paired_.address || device.adapterId != paired_.adapterId ||
+                         device.valid != paired_.valid;
     if (changed && state_ != LinkState::Idle) {
         closeLink();
         state_ = LinkState::Idle;
@@ -78,49 +88,59 @@ bool BleInputAdapter::ensureProtocol() {
     return protocol_ != nullptr;
 }
 
-void BleInputAdapter::startConnection() {
+bool BleInputAdapter::startConnection() {
     const std::uint32_t now = clock_();
     if (!paired_.valid) {
         lastError_ = "no paired device";
         state_ = LinkState::Idle;
-        return;
+        return false;
     }
     if (isExcluded(paired_.address)) {
         lastError_ = "refusing to connect to the bridge itself or its FTMS client";
         state_ = LinkState::Idle;
-        return;
+        return false;
     }
     if (!ensureProtocol()) {
         lastError_ = "unknown adapter '" + paired_.adapterId + "'";
         state_ = LinkState::Idle;
-        return;
+        return false;
     }
     protocol_->reset();
     ++attempts_;
     stateSinceMs_ = now;
     if (protocol_->advertisementOnly()) {
         state_ = LinkState::Listening;
-        transport_.startScan(0, true);
-        return;
+        if (!transport_.startScan(0, true)) {
+            state_ = LinkState::Idle;
+            scheduleReconnect("listening scan request rejected");
+            return false;
+        }
+        return true;
     }
-    if (userScan_) stopScan();
-    if (transport_.scanning()) transport_.stopScan();
+    if ((userScan_ && !stopScan()) || (transport_.scanning() && !transport_.stopScan())) {
+        scheduleReconnect("stop scan request rejected");
+        return false;
+    }
     ++session_;
     if (!transport_.connect(session_, paired_.address, protocol_->plan())) {
         scheduleReconnect("connect request rejected");
-        return;
+        return false;
     }
     state_ = LinkState::Connecting;
+    return true;
 }
 
-void BleInputAdapter::closeLink() {
+bool BleInputAdapter::closeLink() {
+    bool accepted = true;
     if (state_ == LinkState::Connecting || state_ == LinkState::Ready) {
-        transport_.disconnect(session_);
-        ++session_;  // ignore late events from the closed session
+        accepted = transport_.disconnect(session_);
+        // Idle/Backoff ignore this session; the next attempt gets a new ID.
     }
-    if (state_ == LinkState::Listening && !userScan_) transport_.stopScan();
+    if (state_ == LinkState::Listening && !userScan_) accepted = transport_.stopScan() && accepted;
     if (protocol_) protocol_->reset();
     targetPower_ = 0.0F;
+    if (!accepted) lastError_ = "disconnect/stop request rejected";
+    return accepted;
 }
 
 void BleInputAdapter::scheduleReconnect(const std::string& reason) {
@@ -148,6 +168,13 @@ void BleInputAdapter::loop() {
     while (transport_.pollScan(report)) handleScanReport(report);
     ble::CentralEvent event;
     while (transport_.pollEvent(event)) handleEvent(event);
+    const std::uint32_t lifecycleDrops = transport_.droppedLifecycleEvents();
+    if (lifecycleDrops != observedLifecycleDrops_) {
+        observedLifecycleDrops_ = lifecycleDrops;
+        lastError_ = "BLE lifecycle event overflow";
+        if (state_ == LinkState::Connecting || state_ == LinkState::Ready) scheduleReconnect(lastError_);
+        if (!transport_.scanning()) userScan_ = false;
+    }
 
     const std::uint32_t now = clock_();
     if (userScan_ && reached(now, scanUntilMs_)) stopScan();
@@ -167,7 +194,8 @@ void BleInputAdapter::loop() {
             break;
         case LinkState::Listening:
             protocol_->tick(now);
-            if (!transport_.scanning()) transport_.startScan(0, true);
+            if (!transport_.scanning() && !transport_.startScan(0, true))
+                scheduleReconnect("listening scan request rejected");
             break;
         case LinkState::Idle: break;
     }
@@ -178,8 +206,8 @@ void BleInputAdapter::loop() {
 void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
     const std::uint32_t now = clock_();
     if (event.type == ble::CentralEventType::ScanComplete) {
-        userScan_ = false;
-        if (state_ == LinkState::Listening) transport_.startScan(0, true);
+        // A stop's completion can remain queued while a new scan is requested.
+        if (!transport_.scanning()) userScan_ = false;
         return;
     }
     if (event.session != session_ || !protocol_) return;
@@ -211,7 +239,10 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
             if (linkActive) protocol_->onNotify(event.index, event.data.data(), event.length, now);
             break;
         case ble::CentralEventType::WriteFailed:
-            if (linkActive) protocol_->onWriteFailed(now);
+            if (linkActive) {
+                protocol_->onWriteFailed(now);
+                lastError_ = protocol_->lastError();
+            }
             break;
         case ble::CentralEventType::ScanComplete: break;
     }
@@ -237,10 +268,15 @@ bool BleInputAdapter::startScan(std::uint32_t durationMs) {
     return true;
 }
 
-void BleInputAdapter::stopScan() {
-    if (!userScan_) return;
+bool BleInputAdapter::stopScan() {
+    if (state_ == LinkState::Connecting) return requestDisconnect();
+    if (!userScan_) return true;
+    if (state_ != LinkState::Listening && !transport_.stopScan()) {
+        lastError_ = "stop scan request rejected";
+        return false;
+    }
     userScan_ = false;
-    if (state_ != LinkState::Listening) transport_.stopScan();
+    return true;
 }
 
 const ScanResult* BleInputAdapter::findResult(const ble::BleAddress& address) const {
@@ -299,12 +335,18 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     if (const auto* info = protocols::detectProtocol(advertisement)) entry->detectedAdapter = info->id;
 }
 
-void BleInputAdapter::flushWrites() {
-    if (!protocol_ || state_ != LinkState::Ready) return;
+bool BleInputAdapter::flushWrites() {
+    if (!protocol_ || state_ != LinkState::Ready) return true;
+    bool accepted = true;
     ble::GattWrite write;
     while (protocol_->takeWrite(write)) {
-        if (!transport_.write(session_, write)) protocol_->onWriteFailed(clock_());
+        if (!transport_.write(session_, write)) {
+            protocol_->onWriteFailed(clock_());
+            lastError_ = "write request rejected";
+            accepted = false;
+        }
     }
+    return accepted;
 }
 
 bool BleInputAdapter::isConnected() const {
@@ -355,8 +397,8 @@ FitnessTelemetry BleInputAdapter::telemetry() const {
 bool BleInputAdapter::apply(const ControlRequest& request) {
     if (state_ != LinkState::Ready || !protocol_) return false;
     if (!protocol_->control(request, clock_())) return false;
+    if (!flushWrites()) return false;
     if (request.control == Control::Power) targetPower_ = request.value;
-    flushWrites();
     maybeEmit(true);
     return true;
 }

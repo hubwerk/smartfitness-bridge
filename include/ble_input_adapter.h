@@ -57,10 +57,11 @@ public:
     // BtDeviceAdapter
     void begin() override;
     void loop() override;
-    // Connects to the paired device (asynchronous); false when none is paired.
+    // True when an asynchronous connect/listen request was accepted.
     bool scanAndConnect() override;
     // User disconnect: closes the link and stops automatic reconnects.
     void disconnect() override;
+    bool requestDisconnect();
     bool isConnected() const override;
     bool trainerDetected() const override;
     FitnessTelemetry telemetry() const override;
@@ -77,11 +78,16 @@ public:
 
     // Scanning (results are deduplicated by address).
     bool startScan(std::uint32_t durationMs = kDefaultScanMs);
-    void stopScan();
+    bool stopScan();
     bool scanning() const { return userScan_; }
     const std::vector<ScanResult>& scanResults() const { return results_; }
     const ScanResult* findResult(const smartfitness::ble::BleAddress& address) const;
     std::uint32_t droppedScanResults() const { return droppedResults_; }
+    std::uint32_t droppedScanReports() const { return transport_.droppedScanReports(); }
+    std::uint32_t droppedEvents() const { return transport_.droppedEvents(); }
+    std::uint32_t droppedNotifications() const { return transport_.droppedNotifications(); }
+    std::uint32_t droppedLifecycleEvents() const { return transport_.droppedLifecycleEvents(); }
+    std::uint32_t droppedCommands() const { return transport_.droppedCommands(); }
 
     // Address of the client currently connected to the FTMS output; it is
     // never connected to or listed (the bridge must not loop onto itself).
@@ -98,12 +104,12 @@ public:
     const smartfitness::protocols::SourceProtocol* protocol() const { return protocol_.get(); }
 
 private:
-    void startConnection();
+    bool startConnection();
     void scheduleReconnect(const std::string& reason);
-    void closeLink();
+    bool closeLink();
     void handleEvent(const smartfitness::ble::CentralEvent& event);
     void handleScanReport(const smartfitness::ble::ScanReport& report);
-    void flushWrites();
+    bool flushWrites();
     void maybeEmit(bool force);
     bool ensureProtocol();
 
@@ -124,6 +130,7 @@ private:
     std::uint32_t scanUntilMs_ = 0;
     std::vector<ScanResult> results_;
     std::uint32_t droppedResults_ = 0;
+    std::uint32_t observedLifecycleDrops_ = 0;
     smartfitness::ble::BleAddress excludedPeer_;
     bool excludedPeerValid_ = false;
     float targetPower_ = 0.0F;

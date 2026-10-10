@@ -161,7 +161,7 @@ std::uint32_t FtmsOutput::now() const {
 }
 
 void FtmsOutput::handleConnectionChanges() {
-    connected_ = connections_.load() > 0;
+    connected_ = enabled() && connections_.load() > 0;
     const std::uint32_t generation = generation_.load();
     if (generation != seenGeneration_) {
         // Every connect or disconnect starts a new session: control must be requested again.

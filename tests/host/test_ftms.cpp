@@ -262,6 +262,12 @@ void testFtmsOutputControlFlow() {
     assert(ftms.requestControl({Control::Power, 100}) == ControlResult::NoAdapter);
     bridge.loop();
     assert(!ftms.advertising());
+    // A connection/write callback may arrive before the asynchronous disconnect.
+    ftms.notifyClientConnected();
+    assert(ftms.enqueueControlPoint(request.data(), request.size()));
+    bridge.loop();
+    assert(!ftms.clientConnected() && !ftms.controlGranted() && !ftms.advertising());
+    ftms.notifyClientDisconnected();
     ftms.setEnabled(true);
     bridge.loop();
     assert(ftms.advertising() && !ftms.clientConnected());

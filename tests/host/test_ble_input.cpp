@@ -12,6 +12,7 @@
 
 #include "ant_output.h"
 #include "ble/bounded_queue.hpp"
+#include "ble/connection_session.hpp"
 #include "ble_input_adapter.h"
 #include "bridge/bridge_core.hpp"
 #include "fake_central.hpp"
@@ -477,6 +478,12 @@ void testScanDedupAndExclusion() {
     h.central.pushEvent(ble::CentralEventType::ScanComplete);
     h.advance(1);
     assert(!h.adapter.scanning());
+    // An old completion queued before a new scan must not stop the new scan.
+    h.central.pushEvent(ble::CentralEventType::ScanComplete);
+    assert(h.adapter.startScan());
+    h.advance(1);
+    assert(h.adapter.scanning());
+    assert(h.adapter.stopScan());
 
     // Never connect to the bridge itself or the FTMS output's client.
     h.pair("00:00:00:00:00:02", "ftms");
@@ -493,7 +500,7 @@ void testFtmsLifecycle() {
     assert(!h.adapter.scanAndConnect() && h.adapter.lastError() == "no paired device");
     h.pair("aa:00:00:00:00:01", "ftms", "KICKR");
     h.adapter.startScan();
-    assert(!h.adapter.scanAndConnect());
+    assert(h.adapter.scanAndConnect());
     assert(!h.adapter.scanning() && !h.central.scanning());  // scanning stops before connecting
     assert(h.central.connects.size() == 1 && h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     const auto& plan = h.central.connects[0].plan;
@@ -575,7 +582,7 @@ void testFtmsLifecycle() {
     ble::CentralEvent late;
     late.type = ble::CentralEventType::Connected;
     late.session = session;
-    h.central.events.push_back(late);
+    h.central.events.push(late);
     h.advance(1);
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     // Successful connection resets the backoff.
@@ -648,6 +655,190 @@ void testProtocolFailureAndControlDenied() {
     auto schwinn = protocols::createProtocol("schwinn-ic4");
     assert(schwinn->plan().subscriptionCount == 1 && schwinn->plan().readCount == 0);
     assert(schwinn->onConnected(1, 0) && !schwinn->isTrainer() && schwinn->pendingWrites() == 0);
+}
+
+void testSessionReplacementAndCancellation() {
+    ble::PendingConnection pendingLink;
+    pendingLink.start(1);
+    pendingLink.start(2);
+    pendingLink.complete(1);  // an old worker must not clear the new request
+    assert(pendingLink.active() == 2 && pendingLink.cancel() == 2);
+    assert(pendingLink.active() == 0);
+    pendingLink.start(3);
+    pendingLink.complete(3);  // Ready links are not cancelled by scan stop
+    assert(pendingLink.cancel() == 0);
+
+    FakeCentral transport;
+    const auto peer = address("aa:00:00:00:00:01");
+    assert(transport.connect(1, peer, {}));
+    transport.acceptStop = false;
+    assert(!transport.stopScan());  // cancellation survives queue rejection
+    assert(transport.pendingConnection.active() == 0);
+    assert(transport.cancelledConnects.back() == 1 && transport.droppedCommands() == 1);
+    ble::CentralEvent cancelled;
+    assert(transport.pollEvent(cancelled) && cancelled.type == ble::CentralEventType::ConnectFailed);
+    assert(cancelled.session == 1);
+    transport.acceptStop = true;
+    assert(transport.connect(2, peer, {}));
+    transport.pushEvent(ble::CentralEventType::Connected, 1);
+    assert(transport.stopScan() && transport.cancelledConnects.size() == 1);
+
+    Harness h;
+    ble::ConnectionSession link;
+    h.pair("aa:00:00:00:00:01", "hrs", "A");
+    assert(h.adapter.scanAndConnect());
+    assert(h.central.lastSession() == 1);
+    link.connected(1);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(1);
+    assert(h.adapter.isConnected());
+
+    // GAP releases A now, but its event is delayed until after B connects.
+    const std::uint32_t oldSession = link.disconnected();
+    h.pair("aa:00:00:00:00:02", "hrs", "B");
+    assert(h.adapter.scanAndConnect());
+    assert(h.central.lastSession() == 2);
+    link.connected(2);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    ble::CentralEvent stale;
+    stale.type = ble::CentralEventType::Disconnected;
+    stale.session = oldSession;
+    assert(h.central.events.push(stale));
+    h.advance(1);
+    assert(h.adapter.isConnected() && h.adapter.telemetry().deviceName == "B");
+    assert(link.active() == 2 && h.adapter.lastError().empty());
+
+    assert(h.adapter.requestDisconnect());
+    assert(h.adapter.scanAndConnect());  // pending connection, not connected
+    const std::uint32_t pending = h.central.lastSession();
+    assert(h.adapter.requestDisconnect());
+    assert(h.central.disconnects.back() == pending);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(60000);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
+    assert(!h.adapter.isConnected() && !h.adapter.autoConnect());
+    assert(h.adapter.scanAndConnect());
+    const std::uint32_t stopped = h.central.lastSession();
+    assert(h.adapter.stopScan());
+    assert(h.central.disconnects.back() == stopped);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(1);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
+    assert(!h.adapter.autoConnect());
+
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(1);
+    assert(h.adapter.isConnected());
+    const std::size_t disconnects = h.central.disconnects.size();
+    assert(h.adapter.startScan() && h.adapter.stopScan());
+    assert(h.adapter.isConnected() && h.central.disconnects.size() == disconnects);
+    assert(h.adapter.requestDisconnect());
+    assert(h.adapter.scanAndConnect());
+    h.central.acceptDisconnect = false;
+    assert(!h.adapter.stopScan());
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
+    assert(h.adapter.lastError() == "disconnect/stop request rejected");
+}
+
+void testLifecycleQueueOverflow() {
+    ble::CentralEventQueue<4> queue;
+    ble::CentralEvent notification;
+    notification.type = ble::CentralEventType::Notification;
+    for (int i = 0; i < 4; ++i) assert(queue.push(notification));
+    assert(!queue.push(notification));
+    ble::CentralEvent read;
+    read.type = ble::CentralEventType::ReadResult;
+    ble::CentralEvent connected;
+    connected.type = ble::CentralEventType::Connected;
+    ble::CentralEvent disconnected;
+    disconnected.type = ble::CentralEventType::Disconnected;
+    ble::CentralEvent complete;
+    complete.type = ble::CentralEventType::ScanComplete;
+    assert(queue.push(read) && queue.push(connected) && queue.push(disconnected) && queue.push(complete));
+    assert(queue.dropped() == 5 && queue.droppedNotifications() == 5);
+    ble::CentralEvent event;
+    assert(queue.pop(event) && event.type == ble::CentralEventType::ReadResult);
+    assert(queue.pop(event) && event.type == ble::CentralEventType::Connected);
+    assert(queue.pop(event) && event.type == ble::CentralEventType::Disconnected);
+    assert(queue.pop(event) && event.type == ble::CentralEventType::ScanComplete);
+    assert(!queue.pop(event));
+    for (int i = 0; i < 4; ++i) assert(queue.push(read));
+    assert(!queue.push(disconnected));
+    assert(queue.droppedLifecycleEvents() == 1 && queue.droppedNotifications() == 5);
+
+    Harness h;
+    h.pair("aa:00:00:00:00:03", "hrs");
+    assert(h.adapter.scanAndConnect());
+    for (int i = 0; i < 40; ++i) h.central.pushEvent(ble::CentralEventType::Notification);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(1);
+    assert(h.adapter.isConnected());
+    assert(h.adapter.droppedEvents() == 9 && h.adapter.droppedNotifications() == 9);
+    for (int i = 0; i < 40; ++i) h.central.pushEvent(ble::CentralEventType::Notification);
+    h.central.pushEvent(ble::CentralEventType::Disconnected);
+    h.advance(1);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+    assert(h.adapter.lastError() == "link lost" && h.adapter.droppedEvents() == 18);
+
+    h.advance(1000);
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.advance(1);
+    assert(h.adapter.isConnected());
+    // Even an all-critical overflow is observable and forces resynchronization.
+    for (int i = 0; i < 32; ++i) h.central.pushEvent(ble::CentralEventType::ReadResult);
+    h.central.pushEvent(ble::CentralEventType::Disconnected);
+    h.advance(1);
+    assert(h.adapter.droppedLifecycleEvents() == 1);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+    assert(h.adapter.lastError() == "BLE lifecycle event overflow");
+}
+
+void testTransportRejectionPropagation() {
+    Harness h;
+    h.central.scanDrops = 7;
+    assert(h.adapter.droppedScanReports() == 7);
+    h.central.acceptScan = false;
+    assert(!h.adapter.startScan() && !h.adapter.scanning());
+    h.pair("aa:00:00:00:00:04", "keiser-m3i");
+    assert(!h.adapter.scanAndConnect());
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+    assert(h.adapter.lastError() == "listening scan request rejected");
+
+    h.adapter.requestDisconnect();
+    h.pair("aa:00:00:00:00:05", "hrs");
+    h.central.acceptConnect = false;
+    assert(!h.adapter.scanAndConnect());
+    assert(h.adapter.lastError() == "connect request rejected");
+    h.central.acceptConnect = true;
+    h.central.acceptScan = true;
+    assert(h.adapter.startScan());
+    h.central.acceptStop = false;
+    assert(!h.adapter.stopScan() && h.adapter.scanning());
+    assert(!h.adapter.scanAndConnect());
+    assert(h.adapter.lastError() == "stop scan request rejected");
+    h.central.acceptStop = true;
+    assert(h.adapter.stopScan());
+    assert(h.adapter.scanAndConnect());
+    h.central.acceptDisconnect = false;
+    assert(!h.adapter.requestDisconnect());
+    assert(h.adapter.lastError() == "disconnect/stop request rejected");
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
+    assert(h.adapter.droppedCommands() == 6);
+
+    Harness trainer;
+    trainer.pair("aa:00:00:00:00:06", "ftms");
+    assert(trainer.adapter.scanAndConnect());
+    trainer.central.pushEvent(ble::CentralEventType::ReadResult, 0, 0,
+                             {0x02, 0x44, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00});
+    trainer.central.pushEvent(ble::CentralEventType::Connected, 0x11);
+    trainer.central.pushEvent(ble::CentralEventType::Notification, 0, 4, {0x80, 0x00, 0x01});
+    trainer.advance(1);
+    trainer.central.acceptWrite = false;
+    assert(!trainer.adapter.apply({Control::Power, 200}));
+    assert(trainer.adapter.lastError() == "write request rejected");
+    assert(trainer.adapter.telemetry().targetPower == 0);
+    assert(trainer.adapter.droppedCommands() == 1);
 }
 
 void testAdvertisementOnlyDevice() {
@@ -746,6 +937,9 @@ void runBleInputTests() {
     testScanDedupAndExclusion();
     testFtmsLifecycle();
     testProtocolFailureAndControlDenied();
+    testSessionReplacementAndCancellation();
+    testLifecycleQueueOverflow();
+    testTransportRejectionPropagation();
     testAdvertisementOnlyDevice();
     testCoreIntegration();
 }

@@ -31,7 +31,7 @@ struct BridgeConfig {
     std::string pairedAdapterId;  // protocol id of the paired source (e.g. "ftms", "echelon")
     std::string wifiSsid;         // empty: SoftAP only
     std::string wifiPassword;     // empty (open network) or 8..63 characters
-    std::string apPassword = "smartfitness";  // SoftAP WPA2 password, 8..63 characters
+    std::string apPassword = "smartfitness";  // SoftAP WPA2 password, 8..63 printable ASCII characters
 
     bool operator==(const BridgeConfig& other) const {
         return pairedDeviceName == other.pairedDeviceName && antEnabled == other.antEnabled &&
@@ -90,8 +90,10 @@ public:
     static bool isValidSsid(const std::string& ssid);
     // WPA2 passphrase: 8..63 printable ASCII characters; allowEmpty permits an open network.
     static bool isValidPassword(const std::string& password, bool allowEmpty);
+    static bool isValidApPassword(const std::string& password);
     static bool isValid(const BridgeConfig& config);
     static std::vector<std::uint8_t> serialize(const BridgeConfig& config);
+    // Invalid AP passphrases in otherwise valid records fall back to the default.
     static bool deserialize(const std::vector<std::uint8_t>& data, BridgeConfig& config);
 
 private:

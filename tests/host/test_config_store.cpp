@@ -4,6 +4,7 @@
 #include "ftms_output.h"
 #include "config_backend.h"
 #include "config_store.h"
+#include "bridge_commands.h"
 #include "web_ui.h"
 
 #include <cassert>
@@ -113,6 +114,66 @@ void testV2Limits() {
     store.config().apPassword = "longenough";
     store.config().wifiPassword = "1234567";
     assert(store.save() == ConfigSaveResult::Invalid);
+}
+
+void testApPasswordValidationAndFallback() {
+    const std::vector<std::string> invalid{
+        "", "1234567", std::string(64, 'x'), "password\n", "password\t",
+        std::string("password\0", 9), "password\x7f", "password\x80"};
+    for (const auto& password : invalid) {
+        assert(!ConfigStore::isValidApPassword(password));
+        Command command;
+        std::string error;
+        assert(!parseConsoleCommand("ap-pass " + password, command, error));
+        assert(error == "access point password must be 8-63 printable ASCII characters");
+
+        BridgeConfig original = customConfig();
+        original.apPassword = password;
+        const auto record = ConfigStore::serialize(original);
+        BridgeConfig expected = customConfig();
+        expected.apPassword = BridgeConfig{}.apPassword;
+        BridgeConfig decoded;
+        assert(ConfigStore::deserialize(record, decoded) && decoded == expected);
+        MemoryConfigBackend backend;
+        backend.setRecord(record);
+        ConfigStore store(backend);
+        assert(store.begin() == ConfigLoadResult::Loaded);
+        assert(store.config() == expected && !store.hasUnsavedChanges());
+        assert(backend.writes() == 0);  // load does not wear flash
+        assert(store.save() == ConfigSaveResult::Written);
+        assert(store.save() == ConfigSaveResult::Unchanged);
+        ConfigStore rebooted(backend);
+        assert(rebooted.begin() == ConfigLoadResult::Loaded && rebooted.config() == expected);
+
+        store.config().apPassword = password;
+        assert(store.save() == ConfigSaveResult::Invalid);
+        assert(backend.writes() == 1);
+    }
+    for (const auto& password : {std::string(8, ' '), std::string(63, '~'), std::string("with spaces!")}) {
+        assert(ConfigStore::isValidApPassword(password));
+        Command command;
+        std::string error;
+        assert(parseConsoleCommand("ap-pass " + password, command, error));
+        assert(command.type == CommandType::ApPassword && command.text == password);
+    }
+    // Password recovery never bypasses CRC or validation of unrelated fields.
+    BridgeConfig bad = customConfig();
+    bad.apPassword.clear();
+    bad.wifiPassword = "short";
+    BridgeConfig decoded;
+    assert(!ConfigStore::deserialize(ConfigStore::serialize(bad), decoded));
+    bad.wifiPassword = customConfig().wifiPassword;
+    auto corrupt = ConfigStore::serialize(bad);
+    corrupt[3] ^= 1;
+    assert(!ConfigStore::deserialize(corrupt, decoded));
+}
+
+void testNonFiniteScanDurations() {
+    for (const char* value : {"nan", "inf", "-inf", "1e100"}) {
+        Command command;
+        std::string error;
+        assert(!parseConsoleCommand(std::string("scan ") + value, command, error));
+    }
 }
 
 void testRoundTripAcrossInstances() {
@@ -261,6 +322,26 @@ void testUnpairPersistence() {
     assert(rebooted.config().ftmsName == "Garage Bike");
 }
 
+void testFailedFactoryReset() {
+    class FailingEraseBackend : public ConfigBackend {
+    public:
+        MemoryConfigBackend memory;
+        bool read(std::vector<std::uint8_t>& data) override { return memory.read(data); }
+        bool write(const std::vector<std::uint8_t>& data) override { return memory.write(data); }
+        bool erase() override { return false; }
+    } backend;
+    ConfigStore store(backend);
+    store.begin();
+    store.config() = customConfig();
+    assert(store.save() == ConfigSaveResult::Written);
+    store.config().antEnabled = true;
+    assert(!store.factoryReset());
+    assert(store.config() == BridgeConfig{} && store.hasUnsavedChanges());
+    assert(store.save() == ConfigSaveResult::Written);
+    ConfigStore rebooted(backend);
+    assert(rebooted.begin() == ConfigLoadResult::Loaded && rebooted.config() == BridgeConfig{});
+}
+
 void testFactoryReset() {
     MemoryConfigBackend backend;
     ConfigStore store(backend);
@@ -345,7 +426,10 @@ void runConfigStoreTests() {
     testValidation();
     testMigrationFromV1();
     testV2Limits();
+    testApPasswordValidationAndFallback();
+    testNonFiniteScanDurations();
     testUnpairPersistence();
     testFactoryReset();
+    testFailedFactoryReset();
     testConsolePersistence();
 }
