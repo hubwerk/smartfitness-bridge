@@ -22,6 +22,7 @@
 #include "hmi_strings.h"
 #include "hmi_ui.h"
 #include "lvgl.h"
+#include "scroll_arc.h"
 
 using namespace smartfitness;
 using namespace hmi;
@@ -105,6 +106,55 @@ void hold() {
     pump(700);
     g_encoder.pressed = false;
     pump(120);
+}
+
+void checkScrollbar() {
+    lv_obj_t* screen = lv_obj_create(nullptr);
+    lv_obj_t* list = lv_obj_create(screen);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_size(list, 174, 100);
+    lv_obj_t* child = lv_obj_create(list);
+    lv_obj_set_pos(child, 0, 0);
+    lv_obj_set_size(child, 150, 50);
+    lcars::scrollbar(list);
+    lv_obj_t* arc = lv_obj_get_child(screen, 1);
+    assert(lv_obj_get_scrollbar_mode(list) == LV_SCROLLBAR_MODE_OFF);
+    assert(lv_obj_has_flag(arc, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_set_height(child, 400);
+    lv_obj_update_layout(list);
+    assert(!lv_obj_has_flag(arc, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_arc_get_angle_end(arc) == 205);
+    lv_obj_scroll_to_y(list, 150, LV_ANIM_OFF);
+    assert(lv_arc_get_angle_start(arc) == 174);
+    lv_obj_scroll_to_y(list, 300, LV_ANIM_OFF);
+    assert(lv_arc_get_angle_start(arc) == 155);
+    lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+    lv_obj_set_height(child, 50);
+    lv_obj_update_layout(list);
+    assert(lv_obj_has_flag(arc, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_delete(list);  // removes its sibling arc too
+    assert(lv_obj_get_child_count(screen) == 0);
+    lv_obj_delete(screen);
+
+    screen = lv_obj_create(nullptr);
+    auto* roller = lv_roller_create(screen);
+    lv_roller_set_options(roller, "ONE\nTWO\nTHREE\nFOUR\nFIVE\nSIX", LV_ROLLER_MODE_NORMAL);
+    lv_roller_set_visible_row_count(roller, 2);
+    lcars::scrollbar(roller);
+    arc = lv_obj_get_child(screen, 1);
+    assert(!lv_obj_has_flag(arc, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_arc_get_angle_end(arc) == 205);
+    lv_roller_set_selected(roller, 5, LV_ANIM_OFF);
+    lv_obj_update_layout(roller);
+    assert(lv_arc_get_angle_start(arc) == 155);
+    lv_obj_delete(screen);
+    std::printf("curved scrollbar visibility, scrolling, resizing, roller and lifecycle passed\n");
+}
+
+lv_obj_t* currentList() {
+    lv_obj_t* focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    assert(focused && lv_obj_check_type(focused, &lv_button_class));
+    return lv_obj_get_parent(focused);
 }
 
 // --- PNG ----------------------------------------------------------------------
@@ -195,12 +245,34 @@ void writePng(const std::string& path) {
 
 std::string g_outDir = "screenshots";
 
-void shot(const char* name) {
+void shot(const char* name, bool checkFocus = true) {
     pump(400);  // let animations (scroll on focus) settle
+    bool hasScrollbar = false;
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(lv_screen_active()); ++i) {
+        auto* child = lv_obj_get_child(lv_screen_active(), static_cast<int>(i));
+        if (lv_obj_check_type(child, &lv_arc_class) && lv_arc_get_bg_angle_start(child) == 155) {
+            hasScrollbar = true;
+        }
+    }
+    if (g_ui.current() == Screen::Dashboard) assert(!hasScrollbar);
+    if (g_ui.current() == Screen::Confirm) {
+        assert(hasScrollbar);
+        for (std::uint32_t i = 0; i < lv_obj_get_child_count(lv_screen_active()); ++i) {
+            auto* child = lv_obj_get_child(lv_screen_active(), static_cast<int>(i));
+            if (lv_obj_check_type(child, &lv_arc_class)) {
+                if (lv_arc_get_bg_angle_start(child) == 225) {
+                    assert(lv_color_to_u32(lv_obj_get_style_arc_color(child, LV_PART_MAIN)) ==
+                           lv_color_to_u32(lv_color_hex(lcars::Alert)));
+                } else {
+                    assert(lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN));
+                }
+            }
+        }
+    }
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(nullptr);
     lv_obj_t* focused = lv_group_get_focused(lv_indev_get_group(g_knob));
-    if (focused && lv_obj_check_type(focused, &lv_button_class)) {
+    if (checkFocus && focused && lv_obj_check_type(focused, &lv_button_class)) {
         assert(lv_obj_get_height(focused) >= 36);
         lv_area_t area{};
         lv_obj_get_coords(focused, &area);
@@ -386,6 +458,7 @@ int main(int argc, char** argv) {
     pump(100);
 
     checkLcars();
+    checkScrollbar();
     knobWalkthrough();
 
     g_ui.setStatus(bikeStatus());
@@ -445,6 +518,31 @@ int main(int argc, char** argv) {
     for (auto& metric : disconnected.telemetry) metric.valid = false;
     g_ui.setStatus(disconnected);
     shot("20-error-disconnected");
+    g_ui.setStatus(treadmillStatus());
+    g_ui.navigate(Screen::Devices);
+    pump(400);
+    auto* list = currentList();
+    lv_anim_delete(list, nullptr);
+    lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+    shot("21-devices-scroll-top");
+    const int range = lv_obj_get_scroll_top(list) + lv_obj_get_scroll_bottom(list);
+    assert(range > 0);
+    // No off-screen focus rectangle in the swipe-position screenshots.
+    lv_obj_remove_state(lv_group_get_focused(lv_indev_get_group(g_knob)), LV_STATE_FOCUSED);
+    lv_obj_scroll_to_y(list, range / 2, LV_ANIM_OFF);
+    shot("22-devices-scroll-middle", false);
+    lv_obj_scroll_to_y(list, range, LV_ANIM_OFF);
+    shot("23-devices-scroll-bottom", false);
+    auto longScan = scanView();
+    longScan.devices[0].name = "A VERY LONG FITNESS DEVICE NAME THAT MUST WRAP WITHOUT CLIPPING";
+    g_ui.setScan(longScan);
+    g_ui.openDevice(0);
+    pump(400);
+    list = currentList();
+    auto* name = lv_obj_get_child(list, 0);
+    assert(std::string(lv_label_get_text(name)) == longScan.devices[0].name);
+    assert(lv_obj_get_width(name) <= lv_obj_get_content_width(list));
+    assert(lv_obj_get_height(name) > lv_font_get_line_height(&sf_antonio_16));
     std::printf("hmi simulator done\n");
     return 0;
 }

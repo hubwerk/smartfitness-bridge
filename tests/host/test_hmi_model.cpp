@@ -14,6 +14,7 @@
 #include "ftms_output.h"
 #include "hmi_model.h"
 #include "hmi_strings.h"
+#include "scroll_arc.h"
 
 using namespace smartfitness;
 using namespace hmi;
@@ -21,6 +22,25 @@ using namespace hmi;
 namespace {
 
 bool near(float a, float b) { return std::fabs(a - b) < 1e-4F; }
+
+void testScrollArc() {
+    assert(!scrollArc(0, 100, 0).visible);
+    assert(!scrollArc(100, 100, 0).visible);
+    assert(!scrollArc(200, 0, 0).visible);
+    assert(!scrollArc(-1, 100, 0).visible);
+    const auto top = scrollArc(400, 100, 0);
+    const auto middle = scrollArc(400, 100, 150);
+    const auto bottom = scrollArc(400, 100, 300);
+    assert(top.visible && top.start == 193 && top.end == 205);
+    assert(middle.start == 174 && middle.end == 186);
+    assert(bottom.start == 155 && bottom.end == 167);
+    assert(scrollArc(400, 100, -100).start == top.start);
+    assert(scrollArc(400, 100, 900).end == bottom.end);
+    const auto longList = scrollArc(INT32_MAX, 100, INT32_MAX);
+    assert(longList.visible && longList.start == 155 && longList.end == 163);
+    const auto almostFits = scrollArc(101, 100, 1);
+    assert(almostFits.end - almostFits.start == 49);
+}
 
 void testStrings() {
     for (std::uint16_t index = 0; index < static_cast<std::uint16_t>(Str::Count); ++index) {
@@ -266,6 +286,7 @@ void testHmiCommandsOnController() {
 }  // namespace
 
 void runHmiModelTests() {
+    testScrollArc();
     testStrings();
     testMetrics();
     testTargetEditor();

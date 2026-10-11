@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "scroll_arc.h"
 #include "src/themes/lv_theme_private.h"
 
 namespace hmi::lcars {
@@ -47,6 +48,57 @@ void bar(lv_obj_t* parent, int x, int y, int width, int height, std::uint32_t co
     lv_obj_set_style_radius(object, radius, 0);
 }
 
+lv_obj_t* arc(lv_obj_t* parent, int size, int width, std::uint32_t color, int start, int end) {
+    lv_obj_t* object = lv_arc_create(parent);
+    lv_obj_remove_style_all(object);
+    lv_obj_remove_flag(object, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_set_size(object, size, size);
+    lv_obj_center(object);
+    lv_arc_set_bg_angles(object, start, end);
+    lv_obj_set_style_arc_width(object, width, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(object, lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(object, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(object, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    return object;
+}
+
+void updateScrollbar(lv_event_t* event) {
+    auto* container = lv_event_get_current_target_obj(event);
+    auto* object = static_cast<lv_obj_t*>(lv_event_get_user_data(event));
+    const auto code = lv_event_get_code(event);
+    if (code == LV_EVENT_DELETE) {
+        lv_obj_delete(object);
+        return;
+    }
+    if (code != LV_EVENT_SCROLL && code != LV_EVENT_SCROLL_END && code != LV_EVENT_SIZE_CHANGED &&
+        code != LV_EVENT_LAYOUT_CHANGED && code != LV_EVENT_CHILD_CHANGED && code != LV_EVENT_VALUE_CHANGED)
+        return;
+
+    const int viewport = lv_obj_get_content_height(container);
+    int offset = lv_obj_get_scroll_top(container);
+    int content = viewport + offset + lv_obj_get_scroll_bottom(container);
+    if (lv_obj_check_type(container, &lv_roller_class)) {
+        // Rollers move their label rather than scrolling the container.
+        const auto* font = lv_obj_get_style_text_font(container, LV_PART_MAIN);
+        const int line = lv_font_get_line_height(font);
+        const int step = line + lv_obj_get_style_text_line_space(container, LV_PART_MAIN);
+        const int count = static_cast<int>(lv_roller_get_option_count(container));
+        content = count * step;
+        const int range = std::max(0, content - viewport);
+        const int labelOffset = viewport / 2 - line / 2 - lv_obj_get_y(lv_obj_get_child(container, 0));
+        offset = count > 1 && step > 0
+                     ? static_cast<int>(static_cast<std::int64_t>(labelOffset) * range / ((count - 1) * step))
+                     : 0;
+    }
+    const auto thumb = scrollArc(content, viewport, offset);
+    if (!thumb.visible) {
+        lv_obj_add_flag(object, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_arc_set_angles(object, thumb.start, thumb.end);
+        lv_obj_remove_flag(object, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 }  // namespace
 
 void init(lv_display_t* display) {
@@ -86,26 +138,38 @@ void pill(lv_obj_t* object, std::uint32_t color) {
     lv_obj_set_style_opa(object, LV_OPA_50, LV_STATE_DISABLED);
 }
 
-void frame(lv_obj_t* screen, const std::string& title, bool alert) {
+lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert) {
     const auto color = alert ? Alert : Orange;
-    // A swept elbow with a small inner cutout, entirely inside the circular safe area.
-    bar(screen, 33, 34, 174, 22, color, 11);
-    bar(screen, 33, 34, 20, 72, color, 10);
-    bar(screen, 45, 56, 162, 50, Black, 6);
-    bar(screen, 33, 110, 8, 28, Peach, 4);
-    bar(screen, 33, 142, 8, 28, Lavender, 4);
-    bar(screen, 57, 210, 126, 4, color, 2);
-    bar(screen, 67, 217, 38, 3, Violet, 1);
-    bar(screen, 109, 217, 64, 3, Peach, 1);
+    lv_obj_t* header = arc(screen, 232, 12, color, 225, 315);
+    bar(screen, 48, 57, 144, 3, Peach, 1);
 
     lv_obj_t* label = lv_label_create(screen);
-    lv_obj_set_width(label, 144);
+    lv_obj_set_width(label, 158);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_label_set_text(label, uppercase(title).c_str());
     lv_obj_set_style_text_font(label, &sf_antonio_20, 0);
-    lv_obj_set_style_text_color(label, lv_color_black(), 0);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(label, 54, 34);
+    lv_obj_set_style_text_color(label, lv_color_hex(Peach), 0);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(label, 41, 33);
+    label = lv_label_create(screen);
+    lv_label_set_text(label, "02-338");
+    lv_obj_set_style_text_color(label, lv_color_hex(Lavender), 0);
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 15);
+    return header;
+}
+
+void scrollbar(lv_obj_t* container) {
+    lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_t* object = arc(lv_obj_get_parent(container), 232, 4, Lavender, 155, 205);
+    lv_obj_set_style_arc_opa(object, LV_OPA_40, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(object, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(object, lv_color_hex(Orange), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(object, true, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(object, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_add_flag(object, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(container, updateScrollbar, LV_EVENT_ALL, object);
+    lv_obj_update_layout(container);
+    lv_obj_send_event(container, LV_EVENT_LAYOUT_CHANGED, nullptr);
 }
 
 Gauge gauge(lv_obj_t* parent) {

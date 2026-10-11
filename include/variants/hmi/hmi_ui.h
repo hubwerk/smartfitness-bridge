@@ -115,7 +115,9 @@ private:
     lv_group_t* group_ = nullptr;
     lv_indev_t* encoder_ = nullptr;
     lv_obj_t* root_ = nullptr;
+    lv_obj_t* header_ = nullptr;
     lv_obj_t* toast_ = nullptr;
+    bool toastAlert_ = false;
     lv_timer_t* toastTimer_ = nullptr;
     HmiActions actions_;
     HmiSettings settings_;
