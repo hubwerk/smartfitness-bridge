@@ -129,7 +129,7 @@ example code.
 
 Drivers: LovyanGFX 1.2.7 (GC9A01, DMA flush), a small CST816D reader, and an
 interrupt-driven quadrature decoder (4 quarter-steps per detent) read by the LVGL encoder input. LVGL 9.2.2 runs on the main
-loop with two partial 240×40 RGB565 draw buffers (internal DMA RAM, PSRAM fallback).
+loop with one partial 240×40 RGB565 draw buffer (internal DMA RAM, PSRAM fallback).
 
 ### Navigation
 

@@ -190,8 +190,9 @@ WS2812 LEDs. The firmware must stay on Arduino core 2.0.x because NimBLE-Arduino
   accumulated detents through an encoder input device (knob-only operation via
   LVGL groups). Button = press, long press = back.
 - **LVGL 9.2.2:** current 9.x release that works with core 2.0.17 and LovyanGFX;
-  the same version drives the headless host simulator. Partial rendering with two
-  240×40 RGB565 buffers in internal DMA-capable RAM (PSRAM fallback); built-in
+  the same version drives the headless host simulator. Partial rendering with one
+  240×40 RGB565 buffer in internal DMA-capable RAM (PSRAM fallback; the flush
+  waits for DMA, so a second buffer would not help); built-in
   Montserrat fonts.
 - **LED ring:** Adafruit NeoPixel 1.12.3, optional (`SF_HMI_LED_RING` build flag
   and a runtime setting) for connection/control status.

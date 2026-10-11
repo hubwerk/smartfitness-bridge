@@ -75,7 +75,7 @@ CrowPanelHal* g_hal = nullptr;
 Adafruit_NeoPixel ring(board::kLedCount, board::kLedRing, NEO_GRB + NEO_KHZ800);
 #endif
 
-// Partial render buffers: 40 lines each, double buffered, in internal
+// Partial render buffer: 40 lines, in internal
 // DMA-capable RAM (PSRAM fallback).
 constexpr std::size_t kBufferLines = 40;
 constexpr std::size_t kBufferBytes = board::kWidth * kBufferLines * 2;
@@ -198,8 +198,8 @@ bool CrowPanelHal::begin() {
 #endif
 
     lv_tick_set_cb(tick);
+    // One partial buffer: the flush waits for DMA, so a second buffer would not overlap.
     void* first = allocBuffer();
-    void* second = allocBuffer();
     if (!first) {
         Serial.println("[HMI] no memory for the LVGL draw buffer");
         return false;
@@ -207,7 +207,7 @@ bool CrowPanelHal::begin() {
     display_ = lv_display_create(board::kWidth, board::kHeight);
     lv_display_set_color_format(display_, LV_COLOR_FORMAT_RGB565);
     lv_display_set_flush_cb(display_, flush);
-    lv_display_set_buffers(display_, first, second, kBufferBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_buffers(display_, first, nullptr, kBufferBytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
 
     encoder_ = lv_indev_create();
     lv_indev_set_type(encoder_, LV_INDEV_TYPE_ENCODER);

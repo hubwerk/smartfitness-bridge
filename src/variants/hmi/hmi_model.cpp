@@ -162,8 +162,14 @@ const char* profileLabel(MachineProfile profile) {
 }
 
 const char* ftmsProfileLabel(FtmsOutputProfile profile) {
-    if (profile == FtmsOutputProfile::Auto) return "Auto";
-    return profileLabel(static_cast<MachineProfile>(static_cast<std::uint8_t>(profile) - 1));
+    switch (profile) {
+        case FtmsOutputProfile::IndoorBike: return profileLabel(MachineProfile::IndoorBike);
+        case FtmsOutputProfile::Treadmill: return profileLabel(MachineProfile::Treadmill);
+        case FtmsOutputProfile::CrossTrainer: return profileLabel(MachineProfile::CrossTrainer);
+        case FtmsOutputProfile::Rower: return profileLabel(MachineProfile::Rower);
+        case FtmsOutputProfile::Auto:
+        default: return "Auto";
+    }
 }
 
 std::string inputLabel(const StatusView& status) {

@@ -23,11 +23,19 @@ hmi::HmiSettings settings;
 hmi::RefreshTimer statusTimer(hmi::kStatusRefreshMs);
 hmi::RefreshTimer scanTimer(hmi::kScanRefreshMs);
 bool ready = false;
+// Brightness/timeout/LED changes are written to NVS once the user stops
+// changing them, not on every step.
+constexpr std::uint32_t kSettingsSaveDelayMs = 2000;
+bool settingsDirty = false;
+std::uint32_t settingsChangedAt = 0;
 
 void applySettings(const hmi::HmiSettings& next) {
+    if (next != settings) {
+        settingsDirty = true;
+        settingsChangedAt = millis();
+    }
     settings = next;
     hal.setBrightness(settings.brightness);
-    hmi::CrowPanelHal::saveSettings(settings);
 }
 
 }  // namespace
@@ -72,6 +80,7 @@ void loop(BridgeController& controller) {
         if (command.type == CommandType::FactoryReset && result.ok) {
             hmi::CrowPanelHal::clearSettings();
             applySettings(hmi::HmiSettings{});
+            settingsDirty = false;
             ui.setSettings(settings);
         }
         ui.setConfig(controller.configView());
@@ -81,6 +90,10 @@ void loop(BridgeController& controller) {
     }
 
     const std::uint32_t now = millis();
+    if (settingsDirty && now - settingsChangedAt >= kSettingsSaveDelayMs) {
+        settingsDirty = false;
+        hmi::CrowPanelHal::saveSettings(settings);
+    }
     if (statusTimer.due(now)) {
         const auto status = controller.statusView();
         ui.setStatus(status);
