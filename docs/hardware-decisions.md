@@ -221,8 +221,18 @@ without affecting the common core, API contract or physical trainer behavior.
   red alerts, stop and destructive controls. Focus has a white outline.
 - Adapt the frame to the round 240×240 panel with circular segmented gauges,
   safe-area lists, scroll-on-focus pill rows and condensed central readouts.
+  The HMI frame is now a header-only top arc with rounded endcaps, numeric
+  code and peach separator, never an elbow/sidebar or bottom frame. Widen
+  lists by 18 px while retaining round-safe focused targets. A reusable
+  left-edge curved scrollbar (4 px dim lavender track, 6 px orange thumb)
+  appears only for overflowing lists and adapter/model rollers; visible
+  fraction/offset determine its length/position, with an 8° minimum thumb.
+  Scroll, focus, roller and layout changes update it; straight LVGL scrollbars
+  are disabled. Red-alert state affects only the header arc, not the gauge
+  or scrollbar; existing stop/destructive action colours remain.
   Retain the knob/touch paths, speed confirmation and double factory-reset
-  confirmation. Web gets a desktop sidebar and responsive phone pill row.
+  confirmation. Web intentionally keeps its elbow, desktop sidebar and
+  responsive phone pill row unchanged.
 - Use **Antonio Regular**, **SIL OFL 1.1**, with committed source, licence and
   regeneration tooling. HMI text fonts contain Latin-1 at 16/20 px; the 48 px
   font contains digits/punctuation only to avoid wasting flash. Keep the LVGL

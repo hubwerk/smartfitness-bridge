@@ -29,7 +29,8 @@ using Gauge = std::array<lv_obj_t*, GaugeSegments>;
 
 void init(lv_display_t* display);
 std::string uppercase(std::string text);
-void frame(lv_obj_t* screen, const std::string& title, bool alert);
+lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert);
+void scrollbar(lv_obj_t* container);
 void pill(lv_obj_t* object, std::uint32_t color = Lavender);
 Gauge gauge(lv_obj_t* parent);
 void setGauge(const Gauge& segments, float ratio, bool alert = false);
