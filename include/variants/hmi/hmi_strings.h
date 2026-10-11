@@ -35,6 +35,7 @@ enum class Str : std::uint16_t {
     NoTarget,
     Target,
     HintDashboard,
+    HintBack,
     // Metrics
     MetricPower,
     MetricCadence,
@@ -61,6 +62,7 @@ enum class Str : std::uint16_t {
     PairAs,
     ChooseAdapter,
     Detected,
+    Adapter,
     Unknown,
     BleUnavailable,
     ConfirmUnpairTitle,
@@ -70,6 +72,7 @@ enum class Str : std::uint16_t {
     Apply,
     HintAdjust,
     Unsupported,
+    StopBelt,
     ConfirmSpeedTitle,
     ConfirmSpeedText,
     ConfirmStopText,

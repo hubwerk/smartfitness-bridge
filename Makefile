@@ -19,9 +19,17 @@ HMI_TESTS = tests/host/test_hmi_model.cpp
 CORE_TEST_BINARY = /tmp/smartfitness-core-only-test
 HOST_TEST_BINARY = /tmp/smartfitness-core-test
 
-.PHONY: host-tests host-tests-core host-tests-all hmi-sim hmi-screenshots
+.PHONY: host-tests host-tests-core host-tests-all variant-guard hmi-sim hmi-screenshots
 
-host-tests: host-tests-core host-tests-all
+host-tests: host-tests-core host-tests-all variant-guard
+
+# include/variant.h must accept exactly one of SF_VARIANT_WEB / SF_VARIANT_HMI.
+variant-guard:
+	@echo '#include "variant.h"' | $(CXX) $(CXXFLAGS) -DSF_VARIANT_WEB -Iinclude -x c++ -fsyntax-only -
+	@echo '#include "variant.h"' | $(CXX) $(CXXFLAGS) -DSF_VARIANT_HMI -Iinclude -x c++ -fsyntax-only -
+	@! echo '#include "variant.h"' | $(CXX) $(CXXFLAGS) -Iinclude -x c++ -fsyntax-only - 2>/dev/null
+	@! echo '#include "variant.h"' | $(CXX) $(CXXFLAGS) -DSF_VARIANT_WEB -DSF_VARIANT_HMI -Iinclude -x c++ -fsyntax-only - 2>/dev/null
+	@echo "variant guard passed"
 
 # Core only: only include/core on the include path and no variant source, so
 # this proves the core compiles and links without web or HMI code.
