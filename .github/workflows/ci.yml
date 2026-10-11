@@ -19,6 +19,10 @@ jobs:
 
   firmware:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [esp32s3dev, crowpanel128]
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: actions/setup-python@v5.6.0
@@ -29,10 +33,35 @@ jobs:
           path: |
             ~/.platformio
             ~/.cache/pip
-          key: ${{ runner.os }}-platformio-6.2.0-python-3.12-${{ hashFiles('platformio.ini') }}
+          key: ${{ runner.os }}-platformio-6.2.0-python-3.12-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
           restore-keys: |
+            ${{ runner.os }}-platformio-6.2.0-python-3.12-${{ matrix.env }}-
             ${{ runner.os }}-platformio-6.2.0-python-3.12-
       - name: Install PlatformIO
         run: python -m pip install platformio==6.2.0
       - name: Build firmware
-        run: pio run -e esp32s3dev
+        run: pio run -e ${{ matrix.env }}
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: firmware-${{ matrix.env }}
+          path: |
+            .pio/build/${{ matrix.env }}/firmware.bin
+            .pio/build/${{ matrix.env }}/bootloader.bin
+            .pio/build/${{ matrix.env }}/partitions.bin
+          if-no-files-found: error
+
+  hmi-simulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Fetch LVGL v9.2.2
+        run: git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git .cache/lvgl
+      - name: Render HMI screenshots (knob-only walkthrough included)
+        run: make -j"$(nproc)" hmi-screenshots LVGL_DIR=.cache/lvgl SCREENSHOT_DIR=screenshots
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: hmi-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
