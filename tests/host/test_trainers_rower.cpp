@@ -118,6 +118,7 @@ void testTacxAndSensors() {
     assert(source.lastDataMs() == last);
     source.tick(4100);
     assert(source.sample().cadence.value == 0);
+    assert(!source.sample().cadence.valid);
     source.onWriteFailed(4200);
     assert(source.failed() && !source.isTrainer() && !source.control({Control::Power, 100}, 0));
     source.reset();
@@ -216,9 +217,10 @@ void testPm5() {
     assert(!source.sample().heartRate.valid);
     status[9] = 0;
     notify(source, 0, status, 1400);
-    assert(source.sample().power.value == 0 && source.sample().speed.value == 0 && source.sample().cadence.value == 0);
+    // A stopped-machine status has no measured power/speed/cadence fields.
+    assert(source.sample().power.value == 250 && near(source.sample().speed.value, 3.6F) && source.sample().cadence.value == 24);
     notify(source, 2, power, 1500);
-    assert(source.sample().power.value == 0);
+    assert(source.sample().power.value == 250);
     const auto last = source.lastDataMs();
     notify(source, 1, {0, 0}, 1600);
     source.onNotify(0, nullptr, 20, 1600);
@@ -252,6 +254,9 @@ void testPm5() {
         assert(source.lastDataMs() == 1200);
     }
     assert(source.capabilities().supports(Metric::Power) && source.capabilities().controls == 0);
+    notify(source, 3, multiplexPower, 4201);
+    assert(source.sample().power.valid && !source.sample().cadence.valid && !source.sample().heartRate.valid);
+    assert(!source.sample().resistance.valid && !source.sample().speed.valid);
 }
 }
 

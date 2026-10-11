@@ -70,6 +70,7 @@ struct StatusView {
     std::string version;
     RuntimeState state = RuntimeState::Disconnected;
     std::array<MetricView, static_cast<std::size_t>(Metric::Count)> telemetry{};
+    FitnessMetrics metrics;
     std::string deviceName;
     bool trainer = false;
     bool canControl = false;

@@ -64,6 +64,8 @@ void testMetrics() {
     assert(formatMetric(sample, Metric::Power) == "--");
     sample = {true, 181.6F};
     assert(formatMetric(sample, Metric::Power) == "182");
+    sample = {true, 0.0F};
+    assert(formatMetric(sample, Metric::Power) == "0");
     assert(std::string(metricFormat(Metric::Speed).unit) == "km/h");
 
     MetricCycler cycler;
@@ -137,6 +139,10 @@ void testStatusTexts() {
     assert(std::string(profileLabel(MachineProfile::Treadmill)) == "Treadmill");
     assert(std::string(ftmsProfileLabel(FtmsOutputProfile::Auto)) == "Auto");
     assert(std::string(ftmsProfileLabel(FtmsOutputProfile::Rower)) == "Rower");
+    assert(std::string(ftmsProfileLabel(FtmsOutputProfile::StepClimber)) == "Step climber");
+    assert(std::string(ftmsProfileLabel(FtmsOutputProfile::StairClimber)) == "Stair climber");
+    assert(dashboardMetrics(MachineProfile::StepClimber).front() == Metric::Power);
+    assert(dashboardMetrics(MachineProfile::StairClimber).front() == Metric::Power);
 
     FtmsOutputView ftms;
     assert(ftmsLabel(ftms) == "FTMS off");
@@ -183,7 +189,9 @@ void testSettings() {
     assert(!deserialize(serialize(settings), untouched) && untouched == HmiSettings{});
 
     assert(nextFtmsProfile(FtmsOutputProfile::Auto) == FtmsOutputProfile::IndoorBike);
-    assert(nextFtmsProfile(FtmsOutputProfile::Rower) == FtmsOutputProfile::Auto);
+    assert(nextFtmsProfile(FtmsOutputProfile::Rower) == FtmsOutputProfile::StepClimber);
+    assert(nextFtmsProfile(FtmsOutputProfile::StepClimber) == FtmsOutputProfile::StairClimber);
+    assert(nextFtmsProfile(FtmsOutputProfile::StairClimber) == FtmsOutputProfile::Auto);
     assert(ftmsNamePresets().front() == FtmsOutput::kDefaultName);
     for (const auto& name : ftmsNamePresets())
         assert(!name.empty() && name.size() <= FtmsOutput::kMaxNameLength && ConfigStore::isValidFtmsName(name));

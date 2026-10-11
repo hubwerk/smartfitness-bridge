@@ -145,6 +145,7 @@ bool BleInputAdapter::closeLink() {
     if (state_ == LinkState::Listening && !userScan_) accepted = transport_.stopScan() && accepted;
     if (protocol_) protocol_->reset();
     targetPower_ = 0.0F;
+    targetPowerValid_ = false;
     if (!accepted) lastError_ = "disconnect/stop request rejected";
     return accepted;
 }
@@ -183,6 +184,7 @@ void BleInputAdapter::loop() {
     }
 
     const std::uint32_t now = clock_();
+    bool fieldsExpired = false;
     if (userScan_ && reached(now, scanUntilMs_)) stopScan();
 
     switch (state_) {
@@ -190,6 +192,7 @@ void BleInputAdapter::loop() {
             if (now - stateSinceMs_ > timing_.connectTimeoutMs) scheduleReconnect("connect timeout");
             break;
         case LinkState::Ready:
+            fieldsExpired = protocol_->expireSamples(now, timing_.staleMs);
             protocol_->tick(now);
             if (protocol_->failed()) scheduleReconnect(protocol_->lastError());
             else if (!protocol_->hasData()) {
@@ -204,6 +207,7 @@ void BleInputAdapter::loop() {
             if (reached(now, nextAttemptMs_)) startConnection();
             break;
         case LinkState::Listening:
+            fieldsExpired = protocol_->expireSamples(now, timing_.staleMs);
             protocol_->tick(now);
             if (!transport_.scanning() && !transport_.startScan(0, true))
                 scheduleReconnect("listening scan request rejected");
@@ -211,7 +215,7 @@ void BleInputAdapter::loop() {
         case LinkState::Idle: break;
     }
     flushWrites();
-    maybeEmit(false);
+    maybeEmit(fieldsExpired);
 }
 
 void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
@@ -413,18 +417,26 @@ FitnessTelemetry BleInputAdapter::telemetry() const {
     telemetry.deviceName = paired_.name.empty() ? paired_.address.toString() : paired_.name;
     telemetry.deviceType = protocolId();
     if (!telemetry.connected) return telemetry;
-    const auto& sample = protocol_->sample();
+    const auto sample = protocol_->freshSample(clock_(), timing_.staleMs);
+    telemetry.metrics = sample;
     telemetry.speed = valueOf(sample.speed);
     telemetry.cadence = valueOf(sample.cadence);
     telemetry.power = valueOf(sample.power);
     telemetry.heartRate = valueOf(sample.heartRate);
     telemetry.incline = valueOf(sample.incline);
     telemetry.resistance = valueOf(sample.resistance);
+    telemetry.speedValid = sample.speed.valid;
+    telemetry.cadenceValid = sample.cadence.valid;
+    telemetry.powerValid = sample.power.valid;
+    telemetry.heartRateValid = sample.heartRate.valid;
+    telemetry.inclineValid = sample.incline.valid;
+    telemetry.resistanceValid = sample.resistance.valid;
     telemetry.targetPower = targetPower_;
+    telemetry.targetPowerValid = targetPowerValid_;
     telemetry.distance = valueOf(sample.distance);
-    telemetry.distanceValid = sample.distance.valid && !stale();
+    telemetry.distanceValid = sample.distance.valid;
     telemetry.elapsed = valueOf(sample.elapsed);
-    telemetry.elapsedValid = sample.elapsed.valid && !stale();
+    telemetry.elapsedValid = sample.elapsed.valid;
     return telemetry;
 }
 
@@ -433,7 +445,10 @@ bool BleInputAdapter::apply(const ControlRequest& request) {
     if (profile() == MachineProfile::Treadmill && stale()) return false;
     if (!protocol_->control(request, clock_())) return false;
     if (!flushWrites()) return false;
-    if (request.control == Control::Power) targetPower_ = request.value;
+    if (request.control == Control::Power) {
+        targetPower_ = request.value;
+        targetPowerValid_ = true;
+    }
     maybeEmit(true);
     return true;
 }

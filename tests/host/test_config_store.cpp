@@ -139,16 +139,24 @@ void testMigrationFromV2() {
 }
 
 void testOutputProfilePersistence() {
+    static_assert(static_cast<std::uint8_t>(FtmsOutputProfile::Auto) == 0);
+    static_assert(static_cast<std::uint8_t>(FtmsOutputProfile::IndoorBike) == 1);
+    static_assert(static_cast<std::uint8_t>(FtmsOutputProfile::Treadmill) == 2);
+    static_assert(static_cast<std::uint8_t>(FtmsOutputProfile::CrossTrainer) == 3);
+    static_assert(static_cast<std::uint8_t>(FtmsOutputProfile::Rower) == 4);
     assert(BridgeConfig{}.ftmsOutputProfile == FtmsOutputProfile::Auto);
     for (const auto profile : {FtmsOutputProfile::Auto, FtmsOutputProfile::IndoorBike,
                                FtmsOutputProfile::Treadmill, FtmsOutputProfile::CrossTrainer,
-                               FtmsOutputProfile::Rower}) {
+                               FtmsOutputProfile::Rower, FtmsOutputProfile::StepClimber,
+                               FtmsOutputProfile::StairClimber}) {
         MemoryConfigBackend backend;
         ConfigStore store(backend);
         store.begin();
         store.config() = customConfig();
         store.config().ftmsOutputProfile = profile;
         assert(store.save() == ConfigSaveResult::Written);
+        const auto record = ConfigStore::serialize(store.config());
+        assert(record[2] == 3);  // The appended enum values retain the v3 record layout.
         ConfigStore rebooted(backend);
         assert(rebooted.begin() == ConfigLoadResult::Loaded);
         assert(rebooted.config() == store.config());

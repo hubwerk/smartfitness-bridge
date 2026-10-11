@@ -99,29 +99,45 @@ ble::ConnectPlan TrainerSensorSource::sensorPlan() {
 }
 bool TrainerSensorSource::sensorNotify(std::size_t index, const std::uint8_t* data, std::size_t length,
                                        std::uint32_t nowMs) {
+    expireSamples(nowMs, 3000);
+    SourceSample record;
     if (index == 0) {
         sensors::CyclingPowerMeasurement value;
         if (!sensors::decodeCyclingPower(data, length, value)) return false;
-        sample_.power = {static_cast<float>(value.power), true};
-        if (value.crank.present && !cscCadence_) sample_.cadence = {crank_.update(value.crank, nowMs), true};
-        if (value.wheel.present && !cscSpeed_) sample_.speed = {sensors::wheelSpeedKmh(powerWheel_.update(value.wheel, nowMs)), true};
+        record.power = {static_cast<float>(value.power), true};
+        if (!cscCadence_) {
+            sample_.cadence = {};
+            if (value.crank.present) {
+                record.cadence = {crank_.update(value.crank, nowMs), crankKnown_};
+                crankKnown_ = true;
+            }
+        }
+        if (!cscSpeed_) {
+            sample_.speed = {};
+            if (value.wheel.present) {
+                record.speed = {sensors::wheelSpeedKmh(powerWheel_.update(value.wheel, nowMs)), powerWheelKnown_};
+                powerWheelKnown_ = true;
+            }
+        }
     } else if (index == 1) {
         sensors::CscMeasurement value;
         if (!sensors::decodeCsc(data, length, value)) return false;
         if (value.crank.present) {
             cscCadence_ = true;
-            sample_.cadence = {crank_.update(value.crank, nowMs), true};
+            record.cadence = {crank_.update(value.crank, nowMs), crankKnown_};
+            crankKnown_ = true;
         }
         if (value.wheel.present) {
             cscSpeed_ = true;
-            sample_.speed = {sensors::wheelSpeedKmh(cscWheel_.update(value.wheel, nowMs)), true};
+            record.speed = {sensors::wheelSpeedKmh(cscWheel_.update(value.wheel, nowMs)), cscWheelKnown_};
+            cscWheelKnown_ = true;
         }
     } else if (index == 2) {
         std::uint16_t value;
         if (!sensors::decodeHeartRate(data, length, value)) return false;
-        sample_.heartRate = {static_cast<float>(value), true};
+        record.heartRate = {static_cast<float>(value), true};
     } else return false;
-    touch(nowMs);
+    commitFragment(record, nowMs, static_cast<std::uint8_t>(index));
     return true;
 }
 void TrainerSensorSource::reset() {
@@ -130,10 +146,10 @@ void TrainerSensorSource::reset() {
     cscWheel_.reset();
     powerWheel_.reset();
     cscCadence_ = cscSpeed_ = false;
+    crankKnown_ = cscWheelKnown_ = powerWheelKnown_ = false;
 }
 void TrainerSensorSource::tick(std::uint32_t nowMs) {
-    if (sample_.cadence.valid) sample_.cadence.value = crank_.current(nowMs);
-    if (sample_.speed.valid) sample_.speed.value = sensors::wheelSpeedKmh(cscSpeed_ ? cscWheel_.current(nowMs) : powerWheel_.current(nowMs));
+    expireSamples(nowMs, 3000);
 }
 
 ble::ConnectPlan TacxFecSource::plan() const {
@@ -288,23 +304,21 @@ void Concept2Pm5Source::onNotify(std::size_t index, const std::uint8_t* data, st
         const std::size_t minimum = index == 0 ? 10 : index == 1 ? 7 : 9;
         if (length < minimum) return;
     }
+    expireSamples(nowMs, 3000);
+    SourceSample record;
     if (page == 0x31) {
         active_ = data[9] != 0;
-        if (multiplex && length >= 19) sample_.resistance = {static_cast<float>(data[18]), true};
-        if (!active_) {
-            sample_.speed = {0, true};
-            sample_.cadence = {0, true};
-            sample_.power = {0, true};
-        }
+        sample_.resistance = {};
+        if (multiplex && length >= 19) record.resistance = {static_cast<float>(data[18]), true};
     } else if (page == 0x32) {
-        sample_.speed = {active_ ? u16(data + 3) * 0.0036F : 0, true};
-        sample_.cadence = {active_ ? static_cast<float>(data[5]) : 0, true};
-        if (data[6] != 0xff) sample_.heartRate = {static_cast<float>(data[6]), true};
-        else sample_.heartRate.valid = false;
+        record.speed = {u16(data + 3) * 0.0036F, true};
+        record.cadence = {static_cast<float>(data[5]), true};
+        sample_.heartRate = {};
+        if (data[6] != 0xff) record.heartRate = {static_cast<float>(data[6]), true};
     } else {
-        sample_.power = {active_ ? static_cast<float>(u16(data + 3)) : 0, true};
+        record.power = {static_cast<float>(u16(data + 3)), true};
     }
-    touch(nowMs);
+    commitFragment(record, nowMs, page == 0x31 ? 0 : page == 0x32 ? 1 : 2);
 }
 TrainerCapabilities Concept2Pm5Source::capabilities() const { return caps(observedMetrics(), false, false, false, false); }
 void Concept2Pm5Source::reset() { SourceProtocol::reset(); multiplex_ = false; active_ = true; }

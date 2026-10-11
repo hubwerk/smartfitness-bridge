@@ -19,16 +19,7 @@
 namespace smartfitness {
 namespace protocols {
 
-struct SourceSample {
-    MetricSample elapsed;     // s
-    MetricSample speed;       // km/h
-    MetricSample cadence;     // rpm
-    MetricSample power;       // W
-    MetricSample heartRate;   // bpm
-    MetricSample incline;     // %
-    MetricSample resistance;  // device level as reported by the machine
-    MetricSample distance;    // total metres reported by the machine
-};
+using SourceSample = FitnessMetrics;
 
 class SourceProtocol {
 public:
@@ -62,6 +53,8 @@ public:
     virtual void reset();
 
     const SourceSample& sample() const { return sample_; }
+    SourceSample freshSample(std::uint32_t nowMs, std::uint32_t lifetimeMs) const;
+    bool expireSamples(std::uint32_t nowMs, std::uint32_t lifetimeMs);
     bool hasData() const { return hasData_; }
     std::uint32_t lastDataMs() const { return lastDataMs_; }
     bool takeWrite(ble::GattWrite& out);
@@ -78,6 +71,8 @@ protected:
                     bool withResponse = true);
     // Record that a fresh sample arrived; also accumulates observed metrics.
     void touch(std::uint32_t nowMs);
+    void commitSample(const SourceSample& record, std::uint32_t nowMs, bool replace = true);
+    void commitFragment(const SourceSample& record, std::uint32_t nowMs, std::uint8_t group);
     void clearSample();
     std::uint32_t observedMetrics() const { return observedMetrics_; }
     void setError(const std::string& error) { lastError_ = error; }
@@ -95,6 +90,8 @@ private:
     std::uint32_t observedMetrics_ = 0;
     bool hasData_ = false;
     bool failed_ = false;
+    std::vector<std::uint32_t> fieldTimes_;
+    std::vector<std::uint8_t> fieldOwners_;
 };
 
 // Maps a 0..100 % resistance request onto an integer device level.

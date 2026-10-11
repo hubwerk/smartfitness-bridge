@@ -39,17 +39,21 @@ public:
     const ftms::SupportedRange& resistanceRange() const { return resistanceRange_; }
 
     // Subscription and read indices used by plan().
-    enum Subscription : std::uint8_t { SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubCount };
+    enum Subscription : std::uint8_t {
+        SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint,
+        SubStepClimber, SubStairClimber, SubCount
+    };
     enum Read : std::uint8_t { ReadFeature, ReadResistanceRange, ReadInclinationRange, ReadPowerRange, ReadCount };
 
     static constexpr std::uint32_t kControlTimeoutMs = 3000;
     static constexpr std::uint8_t kControlAttempts = 3;
+    static constexpr std::uint32_t kRecordLifetimeMs = 1000;
 
 private:
     void requestControl(std::uint32_t nowMs);
     void handleResponse(const std::uint8_t* data, std::size_t length);
     bool sendControl(const ftms::Bytes& payload);
-    void apply(const ftms::MachineData& data, std::uint32_t nowMs);
+    void apply(const ftms::MachineData& data, bool moreData, std::uint32_t nowMs);
     float clampTo(const ftms::SupportedRange& range, float value) const;
 
     Options options_;
@@ -67,6 +71,9 @@ private:
     ControlState controlState_ = ControlState::Unavailable;
     std::uint32_t controlRequestedMs_ = 0;
     std::uint8_t controlAttempts_ = 0;
+    ftms::MachineData record_;
+    bool recordPending_ = false;
+    std::uint32_t recordStartedMs_ = 0;
 };
 
 }  // namespace protocols

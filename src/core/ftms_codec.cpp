@@ -37,90 +37,72 @@ bool usable(const MetricSample& sample) { return sample.valid && std::isfinite(s
 IndoorBikeData indoorBikeDataFrom(const TrainerState& state) {
     IndoorBikeData data;
     if (!state.connected) return data;
-    data.speed = state.sample(Metric::Speed);
-    data.cadence = state.sample(Metric::Cadence);
-    data.power = state.sample(Metric::Power);
-    data.heartRate = state.sample(Metric::HeartRate);
+    data = state.metrics;
+    if (state.sample(Metric::Speed).valid) data.speed = state.sample(Metric::Speed);
+    if (state.sample(Metric::Cadence).valid) data.cadence = state.sample(Metric::Cadence);
+    if (state.sample(Metric::Power).valid) data.power = state.sample(Metric::Power);
+    if (state.sample(Metric::HeartRate).valid) data.heartRate = state.sample(Metric::HeartRate);
     return data;
 }
 
 Bytes encodeIndoorBikeData(const IndoorBikeData& data) {
-    std::uint16_t flags = 0;
-    if (!usable(data.speed)) flags |= kBikeFlagMoreData;
-    if (usable(data.cadence)) flags |= kBikeFlagCadence;
-    if (usable(data.power)) flags |= kBikeFlagPower;
-    if (usable(data.heartRate)) flags |= kBikeFlagHeartRate;
-
-    Bytes out;
-    putUint16(out, flags);
-    // Field order follows the FTMS Indoor Bike Data definition.
-    if (usable(data.speed)) putUint16(out, static_cast<std::uint16_t>(scaled(data.speed.value, 100.0F, 0, 0xFFFF)));
-    if (usable(data.cadence)) putUint16(out, static_cast<std::uint16_t>(scaled(data.cadence.value, 2.0F, 0, 0xFFFF)));
-    if (usable(data.power)) putSint16(out, static_cast<std::int16_t>(scaled(data.power.value, 1.0F, -32768, 32767)));
-    if (usable(data.heartRate)) out.push_back(static_cast<std::uint8_t>(scaled(data.heartRate.value, 1.0F, 0, 0xFF)));
-    return out;
+    return encodeMachineData(MachineProfile::IndoorBike, data);
 }
 
 TreadmillData treadmillDataFrom(const TrainerState& state) {
     TreadmillData data;
     if (!state.connected) return data;
-    data.speed = state.sample(Metric::Speed);
-    data.incline = state.sample(Metric::Incline);
-    data.heartRate = state.sample(Metric::HeartRate);
-    data.distance = state.sample(Metric::Distance);
-    data.elapsed = state.sample(Metric::ElapsedTime);
+    data = state.metrics;
+    if (state.sample(Metric::Speed).valid) data.speed = state.sample(Metric::Speed);
+    if (state.sample(Metric::Incline).valid) data.incline = state.sample(Metric::Incline);
+    if (state.sample(Metric::HeartRate).valid) data.heartRate = state.sample(Metric::HeartRate);
+    if (state.sample(Metric::Distance).valid) data.distance = state.sample(Metric::Distance);
+    if (state.sample(Metric::ElapsedTime).valid) data.elapsed = state.sample(Metric::ElapsedTime);
     return data;
 }
 
 Bytes encodeTreadmillData(const TreadmillData& data) {
-    std::uint16_t flags = usable(data.speed) ? 0 : 1;
-    if (usable(data.distance)) flags |= 1U << 2;
-    if (usable(data.incline)) flags |= 1U << 3;
-    if (usable(data.heartRate)) flags |= 1U << 8;
-    if (usable(data.elapsed)) flags |= 1U << 10;
-    Bytes out;
-    putUint16(out, flags);
-    if (usable(data.speed)) putUint16(out, static_cast<std::uint16_t>(scaled(data.speed.value, 100, 0, 65535)));
-    if (usable(data.distance)) {
-        const auto distance = static_cast<std::uint32_t>(scaled(data.distance.value, 1, 0, 0xFFFFFF));
-        putUint16(out, static_cast<std::uint16_t>(distance));
-        out.push_back(static_cast<std::uint8_t>(distance >> 16));
-    }
-    if (usable(data.incline)) {
-        putSint16(out, static_cast<std::int16_t>(scaled(data.incline.value, 10, -32768, 32767)));
-        const float angle = std::atan(data.incline.value / 100.0F) * 180.0F / 3.14159265358979323846F;
-        putSint16(out, static_cast<std::int16_t>(scaled(angle, 10, -32768, 32767)));
-    }
-    if (usable(data.heartRate)) out.push_back(static_cast<std::uint8_t>(scaled(data.heartRate.value, 1, 0, 255)));
-    if (usable(data.elapsed)) putUint16(out, static_cast<std::uint16_t>(scaled(data.elapsed.value, 1, 0, 65535)));
-    return out;
+    return encodeMachineData(MachineProfile::Treadmill, data);
 }
 
 Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile profile) {
-    if (profile == MachineProfile::Treadmill) {
-        std::uint32_t features = 0;
-        if (capabilities.supports(Metric::Distance)) features |= 1U << 2;
-        if (capabilities.supports(Metric::Incline)) features |= kFeatureInclination;
-        if (capabilities.supports(Metric::HeartRate)) features |= kFeatureHeartRate;
-        if (capabilities.supports(Metric::ElapsedTime)) features |= 1U << 12;
-        std::uint32_t targets = 0;
-        if (capabilities.supports(Control::Speed)) targets |= kTargetSpeed;
-        if (capabilities.supports(Control::Incline)) targets |= kTargetInclination;
-        Bytes out;
-        putUint32(out, features);
-        putUint32(out, targets);
-        return out;
-    }
-    std::uint32_t features = 0;
-    if (capabilities.supports(Metric::Cadence)) features |= kFeatureCadence;
-    if (capabilities.supports(Metric::Incline)) features |= kFeatureInclination;
-    if (capabilities.supports(Metric::HeartRate)) features |= kFeatureHeartRate;
-    if (capabilities.supports(Metric::Power)) features |= kFeaturePower;
+    return encodeFeature(capabilities, profile, {});
+}
 
+Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile profile, const FitnessMetrics& data) {
+    const bool bike = profile == MachineProfile::IndoorBike;
+    const bool treadmill = profile == MachineProfile::Treadmill;
+    const bool cross = profile == MachineProfile::CrossTrainer;
+    const bool rower = profile == MachineProfile::Rower;
+    const bool climbing = profile == MachineProfile::StepClimber || profile == MachineProfile::StairClimber;
+    std::uint32_t features = 0;
+    if (!climbing && usable(data.averageSpeed) && !rower) features |= kFeatureAverageSpeed;
+    if ((bike || rower) && (capabilities.supports(Metric::Cadence) || usable(data.cadence) || usable(data.strokeRate)))
+        features |= kFeatureCadence;
+    if (!climbing && (capabilities.supports(Metric::Distance) || usable(data.distance))) features |= kFeatureDistance;
+    if ((bike || treadmill || cross) && (capabilities.supports(Metric::Incline) || usable(data.incline)))
+        features |= kFeatureInclination;
+    if (!bike && (usable(data.positiveElevationGain) || usable(data.negativeElevationGain))) features |= kFeatureElevationGain;
+    if ((treadmill || rower) && (usable(data.pace) || usable(data.averagePace))) features |= kFeaturePace;
+    if ((cross || climbing) && (capabilities.supports(Metric::Cadence) || usable(data.stepRate) || usable(data.stepCount)))
+        features |= kFeatureStepCount;
+    if ((bike || cross || rower) && usable(data.resistance)) features |= kFeatureResistanceLevel;
+    if ((cross || profile == MachineProfile::StairClimber) && usable(data.strideCount)) features |= kFeatureStrideCount;
+    if (usable(data.totalEnergy) && usable(data.energyPerHour) && usable(data.energyPerMinute)) features |= kFeatureExpendedEnergy;
+    if (capabilities.supports(Metric::HeartRate) || usable(data.heartRate)) features |= kFeatureHeartRate;
+    if (usable(data.metabolicEquivalent)) features |= kFeatureMetabolicEquivalent;
+    if (capabilities.supports(Metric::ElapsedTime) || usable(data.elapsed)) features |= kFeatureElapsedTime;
+    if (usable(data.remaining)) features |= kFeatureRemainingTime;
+    if ((bike || rower || cross) && (capabilities.supports(Metric::Power) || usable(data.power))) features |= kFeaturePower;
+    if (treadmill && usable(data.forceOnBelt) && usable(data.power)) features |= kFeaturePowerAndForce;
     std::uint32_t targets = 0;
-    if (capabilities.supports(Control::Incline)) targets |= kTargetInclination | kTargetIndoorBikeSimulation;
-    if (capabilities.supports(Control::Resistance)) targets |= kTargetResistance;
-    if (capabilities.supports(Control::Power)) targets |= kTargetPower;
+    if ((treadmill || cross) && capabilities.supports(Control::Speed)) targets |= kTargetSpeed;
+    if ((bike || treadmill || cross) && capabilities.supports(Control::Incline)) {
+        targets |= kTargetInclination;
+        if (bike) targets |= kTargetIndoorBikeSimulation;
+    }
+    if ((bike || rower || cross) && capabilities.supports(Control::Resistance)) targets |= kTargetResistance;
+    if ((bike || rower || cross) && capabilities.supports(Control::Power)) targets |= kTargetPower;
 
     Bytes out;
     putUint32(out, features);
@@ -165,8 +147,16 @@ Bytes encodeTrainingStatus(TrainingStatus status) {
 }
 
 Bytes encodeAdvertisingServiceData(MachineProfile profile) {
-    // Flags: machine available; type bit 0 treadmill or bit 5 indoor bike.
-    return {0x01, static_cast<std::uint8_t>(profile == MachineProfile::Treadmill ? 0x01 : 0x20), 0x00};
+    std::uint8_t type = 0;
+    switch (profile) {
+        case MachineProfile::Treadmill: type = 1U << 0; break;
+        case MachineProfile::CrossTrainer: type = 1U << 1; break;
+        case MachineProfile::StepClimber: type = 1U << 2; break;
+        case MachineProfile::StairClimber: type = 1U << 3; break;
+        case MachineProfile::Rower: type = 1U << 4; break;
+        case MachineProfile::IndoorBike: type = 1U << 5; break;
+    }
+    return {0x01, type, 0x00};
 }
 
 bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPointCommand& command, MachineProfile profile) {
@@ -181,7 +171,7 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
     };
     switch (static_cast<OpCode>(command.opcode)) {
         case OpCode::SetTargetSpeed:
-            if (profile != MachineProfile::Treadmill) break;
+            if (profile != MachineProfile::Treadmill && profile != MachineProfile::CrossTrainer) break;
             if (!expect(2)) break;
             command.request = {Control::Speed, static_cast<float>(
                 static_cast<std::uint16_t>(parameters[0] | (parameters[1] << 8))) / 100.0F};
@@ -198,6 +188,7 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
             expect(0);
             break;
         case OpCode::SetTargetInclination:
+            if (profile != MachineProfile::IndoorBike && profile != MachineProfile::Treadmill && profile != MachineProfile::CrossTrainer) break;
             if (!expect(2)) break;
             command.hasRequest = true;
             command.request = {Control::Incline, static_cast<float>(readSint16(parameters)) / 10.0F};
@@ -210,7 +201,7 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
             command.statusParameters.assign(parameters, parameters + 2);
             break;
         case OpCode::SetTargetResistance:
-            if (profile == MachineProfile::Treadmill) break;
+            if (profile != MachineProfile::IndoorBike && profile != MachineProfile::Rower && profile != MachineProfile::CrossTrainer) break;
             // FTMS 1.0 defines UINT8 (0.1); later clients may send SINT16 (0.1).
             if (parameterLength == 1) {
                 command.status = ResultCode::Success;
@@ -226,7 +217,7 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
             command.statusParameters.assign(parameters, parameters + parameterLength);
             break;
         case OpCode::SetTargetPower:
-            if (profile == MachineProfile::Treadmill) break;
+            if (profile != MachineProfile::IndoorBike && profile != MachineProfile::Rower && profile != MachineProfile::CrossTrainer) break;
             if (!expect(2)) break;
             command.hasRequest = true;
             command.request = {Control::Power, static_cast<float>(readSint16(parameters))};
@@ -241,7 +232,7 @@ bool decodeControlPoint(const std::uint8_t* data, std::size_t length, ControlPoi
             command.statusParameters.assign(parameters, parameters + 1);
             break;
         case OpCode::SetIndoorBikeSimulation:
-            if (profile == MachineProfile::Treadmill) break;
+            if (profile != MachineProfile::IndoorBike) break;
             // Wind speed (SINT16, 0.001 m/s), grade (SINT16, 0.01 %), Crr (UINT8), Cw (UINT8).
             if (!expect(6)) break;
             command.hasRequest = true;
@@ -325,103 +316,250 @@ private:
 
 MetricSample sample(float value) { return {value, true}; }
 
+struct Field {
+    MetricSample FitnessMetrics::* member;
+    std::size_t width;
+    float scale;
+    bool signedValue = false;
+};
+struct Group {
+    unsigned bit;
+    std::vector<Field> fields;
+};
+using Layout = std::vector<Group>;
+using M = FitnessMetrics;
+
+// FTMS 1.0 sections 4.4–4.9. A flag may describe multiple indivisible
+// fields; More Data (bit 0) inversely describes the first group.
+const Layout& layout(MachineProfile profile) {
+    static const Layout bike{
+        {0, {{&M::speed, 2, 100}}}, {1, {{&M::averageSpeed, 2, 100}}},
+        {2, {{&M::cadence, 2, 2}}}, {3, {{&M::averageCadence, 2, 2}}},
+        {4, {{&M::distance, 3, 1}}}, {5, {{&M::resistance, 2, 1, true}}},
+        {6, {{&M::power, 2, 1, true}}}, {7, {{&M::averagePower, 2, 1, true}}},
+        {8, {{&M::totalEnergy, 2, 1}, {&M::energyPerHour, 2, 1}, {&M::energyPerMinute, 1, 1}}},
+        {9, {{&M::heartRate, 1, 1}}}, {10, {{&M::metabolicEquivalent, 1, 10}}},
+        {11, {{&M::elapsed, 2, 1}}}, {12, {{&M::remaining, 2, 1}}}
+    };
+    static const Layout treadmill{
+        {0, {{&M::speed, 2, 100}}}, {1, {{&M::averageSpeed, 2, 100}}},
+        {2, {{&M::distance, 3, 1}}},
+        {3, {{&M::incline, 2, 10, true}, {&M::rampAngle, 2, 10, true}}},
+        {4, {{&M::positiveElevationGain, 2, 10}, {&M::negativeElevationGain, 2, 10}}},
+        {5, {{&M::pace, 1, 10}}}, {6, {{&M::averagePace, 1, 10}}},
+        {7, {{&M::totalEnergy, 2, 1}, {&M::energyPerHour, 2, 1}, {&M::energyPerMinute, 1, 1}}},
+        {8, {{&M::heartRate, 1, 1}}}, {9, {{&M::metabolicEquivalent, 1, 10}}},
+        {10, {{&M::elapsed, 2, 1}}}, {11, {{&M::remaining, 2, 1}}},
+        {12, {{&M::forceOnBelt, 2, 1, true}, {&M::power, 2, 1, true}}}
+    };
+    static const Layout cross{
+        {0, {{&M::speed, 2, 100}}}, {1, {{&M::averageSpeed, 2, 100}}},
+        {2, {{&M::distance, 3, 1}}},
+        {3, {{&M::stepRate, 2, 1}, {&M::averageStepRate, 2, 1}}},
+        {4, {{&M::strideCount, 2, 10}}},
+        {5, {{&M::positiveElevationGain, 2, 1}, {&M::negativeElevationGain, 2, 1}}},
+        {6, {{&M::incline, 2, 10, true}, {&M::rampAngle, 2, 10, true}}},
+        {7, {{&M::resistance, 2, 10, true}}},
+        {8, {{&M::power, 2, 1, true}}}, {9, {{&M::averagePower, 2, 1, true}}},
+        {10, {{&M::totalEnergy, 2, 1}, {&M::energyPerHour, 2, 1}, {&M::energyPerMinute, 1, 1}}},
+        {11, {{&M::heartRate, 1, 1}}}, {12, {{&M::metabolicEquivalent, 1, 10}}},
+        {13, {{&M::elapsed, 2, 1}}}, {14, {{&M::remaining, 2, 1}}}
+    };
+    static const Layout rower{
+        {0, {{&M::strokeRate, 1, 2}, {&M::strokeCount, 2, 1}}},
+        {1, {{&M::averageStrokeRate, 1, 2}}}, {2, {{&M::distance, 3, 1}}},
+        {3, {{&M::pace, 2, 1}}}, {4, {{&M::averagePace, 2, 1}}},
+        {5, {{&M::power, 2, 1, true}}}, {6, {{&M::averagePower, 2, 1, true}}},
+        {7, {{&M::resistance, 2, 1, true}}},
+        {8, {{&M::totalEnergy, 2, 1}, {&M::energyPerHour, 2, 1}, {&M::energyPerMinute, 1, 1}}},
+        {9, {{&M::heartRate, 1, 1}}}, {10, {{&M::metabolicEquivalent, 1, 10}}},
+        {11, {{&M::elapsed, 2, 1}}}, {12, {{&M::remaining, 2, 1}}}
+    };
+    static const Layout step{
+        {0, {{&M::floors, 2, 1}, {&M::stepCount, 2, 1}}},
+        {1, {{&M::stepRate, 2, 1}}}, {2, {{&M::averageStepRate, 2, 1}}},
+        {3, {{&M::positiveElevationGain, 2, 1}}},
+        {4, {{&M::totalEnergy, 2, 1}, {&M::energyPerHour, 2, 1}, {&M::energyPerMinute, 1, 1}}},
+        {5, {{&M::heartRate, 1, 1}}}, {6, {{&M::metabolicEquivalent, 1, 10}}},
+        {7, {{&M::elapsed, 2, 1}}}, {8, {{&M::remaining, 2, 1}}}
+    };
+    static const Layout stair{
+        {0, {{&M::floors, 2, 1}}}, {1, {{&M::stepRate, 2, 1}}},
+        {2, {{&M::averageStepRate, 2, 1}}}, {3, {{&M::positiveElevationGain, 2, 1}}},
+        {4, {{&M::strideCount, 2, 1}}},
+        {5, {{&M::totalEnergy, 2, 1}, {&M::energyPerHour, 2, 1}, {&M::energyPerMinute, 1, 1}}},
+        {6, {{&M::heartRate, 1, 1}}}, {7, {{&M::metabolicEquivalent, 1, 10}}},
+        {8, {{&M::elapsed, 2, 1}}}, {9, {{&M::remaining, 2, 1}}}
+    };
+    static const Layout none;
+    switch (profile) {
+        case MachineProfile::IndoorBike: return bike;
+        case MachineProfile::Treadmill: return treadmill;
+        case MachineProfile::CrossTrainer: return cross;
+        case MachineProfile::Rower: return rower;
+        case MachineProfile::StepClimber: return step;
+        case MachineProfile::StairClimber: return stair;
+    }
+    return none;
+}
+
+std::size_t flagWidth(MachineProfile profile) {
+    return profile == MachineProfile::CrossTrainer ? 3 : 2;
+}
+void putFlags(Bytes& packet, std::uint32_t flags) {
+    for (std::size_t i = 0; i < packet.size(); ++i)
+        packet[i] = static_cast<std::uint8_t>(flags >> (8 * i));
+}
+bool present(const Group& group, const FitnessMetrics& data) {
+    for (const auto& field : group.fields)
+        if (!usable(data.*(field.member))) return false;
+    return true;
+}
+Bytes encodeGroup(const Group& group, const FitnessMetrics& data) {
+    Bytes out;
+    for (const auto& field : group.fields) {
+        const long minimum = field.signedValue ? -32768 : 0;
+        const long maximum = field.signedValue ? 32767 : (1L << (8 * field.width)) - 1;
+        const auto raw = static_cast<std::uint32_t>(scaled((data.*(field.member)).value, field.scale, minimum, maximum));
+        for (std::size_t i = 0; i < field.width; ++i)
+            out.push_back(static_cast<std::uint8_t>(raw >> (8 * i)));
+    }
+    return out;
+}
+std::uint32_t directionFlags(MachineProfile profile, const FitnessMetrics& data) {
+    return profile == MachineProfile::CrossTrainer && usable(data.movementDirection) &&
+        data.movementDirection.value != 0 ? 1U << 15 : 0;
+}
+
 }  // namespace
 
+bool decodeMachineData(MachineProfile profile, const std::uint8_t* data, std::size_t length, MachineData& out) {
+    out = {};
+    const auto& fields = layout(profile);
+    if (fields.empty()) return false;
+    FieldReader reader(data, length);
+    const auto flags = reader.uint(flagWidth(profile));
+    MachineData decoded;
+    for (const auto& group : fields) {
+        const bool included = group.bit == 0 ? !(flags & 1U) : (flags & (1U << group.bit)) != 0;
+        if (!included) continue;
+        for (const auto& field : group.fields) {
+            const float raw = field.signedValue ? static_cast<float>(reader.sint16()) :
+                static_cast<float>(reader.uint(field.width));
+            decoded.*(field.member) = sample(raw / field.scale);
+        }
+    }
+    if (!reader.ok()) return false;
+    if (profile == MachineProfile::CrossTrainer)
+        decoded.movementDirection = sample((flags & (1U << 15)) ? 1.0F : 0.0F);
+    out = mapMachineData(decoded, profile, profile);
+    return true;
+}
+
+Bytes encodeMachineData(MachineProfile profile, const FitnessMetrics& data) {
+    if (layout(profile).empty()) return {};
+    Bytes out(flagWidth(profile), 0);
+    std::uint32_t flags = 1U | directionFlags(profile, data);
+    for (const auto& group : layout(profile)) {
+        if (!present(group, data)) continue;
+        flags = group.bit == 0 ? flags & ~1U : flags | (1U << group.bit);
+        const Bytes encoded = encodeGroup(group, data);
+        out.insert(out.end(), encoded.begin(), encoded.end());
+    }
+    Bytes header(flagWidth(profile));
+    putFlags(header, flags);
+    for (std::size_t i = 0; i < header.size(); ++i) out[i] = header[i];
+    return out;
+}
+
+std::vector<Bytes> splitMachineData(MachineProfile profile, const FitnessMetrics& data, std::size_t maxPayload) {
+    const auto width = flagWidth(profile);
+    if (layout(profile).empty() || maxPayload < width) return {};
+    std::vector<Bytes> packets;
+    Bytes packet(width, 0);
+    std::uint32_t flags = 1U | directionFlags(profile, data);
+    const auto flush = [&]() {
+        Bytes header(width);
+        putFlags(header, flags);
+        for (std::size_t i = 0; i < width; ++i) packet[i] = header[i];
+        packets.push_back(packet);
+        packet.assign(width, 0);
+        flags = 1U | directionFlags(profile, data);
+    };
+    // The mandatory group is emitted last: preceding fragments set More Data.
+    // Within every fragment optional groups retain their specification order.
+    for (const auto& group : layout(profile)) {
+        if (group.bit == 0 || !present(group, data)) continue;
+        const auto encoded = encodeGroup(group, data);
+        if (encoded.size() > maxPayload - width) return {};
+        if (encoded.size() > maxPayload - packet.size()) flush();
+        flags |= 1U << group.bit;
+        packet.insert(packet.end(), encoded.begin(), encoded.end());
+    }
+    const auto& mandatory = layout(profile).front();
+    if (present(mandatory, data)) {
+        const auto encoded = encodeGroup(mandatory, data);
+        if (encoded.size() > maxPayload - width) return {};
+        if (encoded.size() > maxPayload - packet.size()) flush();
+        flags &= ~1U;
+        // Mandatory fields precede optional fields, even in the final fragment.
+        packet.insert(packet.begin() + static_cast<Bytes::difference_type>(width), encoded.begin(), encoded.end());
+    }
+    if (packet.size() > width || packets.empty()) flush();
+    return packets;
+}
+
+FitnessMetrics mapMachineData(const FitnessMetrics& data, MachineProfile input, MachineProfile output) {
+    FitnessMetrics mapped = data;
+    const auto reciprocal = [](MetricSample& destination, const MetricSample& divisor) {
+        if (usable(destination) || !usable(divisor) || divisor.value <= 0) return;
+        const float value = 1800.0F / divisor.value;
+        if (std::isfinite(value)) destination = sample(value);
+    };
+    if (input == MachineProfile::Rower) {
+        reciprocal(mapped.speed, mapped.pace);
+        if (!usable(mapped.cadence) && usable(mapped.strokeRate)) mapped.cadence = mapped.strokeRate;
+    }
+    if (input == MachineProfile::CrossTrainer || input == MachineProfile::StepClimber || input == MachineProfile::StairClimber) {
+        if (!usable(mapped.cadence) && usable(mapped.stepRate)) mapped.cadence = mapped.stepRate;
+    }
+    // Pace units differ between rowers and treadmills; never copy them across.
+    if (input != output && (input == MachineProfile::Rower || output == MachineProfile::Rower)) {
+        mapped.pace = {};
+        mapped.averagePace = {};
+    }
+    if (output == MachineProfile::Rower) {
+        reciprocal(mapped.pace, mapped.speed);
+        if (!usable(mapped.strokeRate) && usable(mapped.cadence)) mapped.strokeRate = mapped.cadence;
+    }
+    if (output == MachineProfile::CrossTrainer || output == MachineProfile::StepClimber || output == MachineProfile::StairClimber) {
+        if (!usable(mapped.stepRate) && usable(mapped.cadence)) mapped.stepRate = mapped.cadence;
+    }
+    return mapped;
+}
+
 bool decodeIndoorBikeData(const std::uint8_t* data, std::size_t length, MachineData& out) {
-    out = {};
-    FieldReader reader(data, length);
-    const std::uint32_t flags = reader.uint(2);
-    if (!(flags & (1U << 0))) out.speed = sample(static_cast<float>(reader.uint(2)) / 100.0F);
-    if (flags & (1U << 1)) reader.skip(2);  // average speed
-    if (flags & (1U << 2)) out.cadence = sample(static_cast<float>(reader.uint(2)) / 2.0F);
-    if (flags & (1U << 3)) reader.skip(2);  // average cadence
-    if (flags & (1U << 4)) out.distance = sample(static_cast<float>(reader.uint(3)));
-    if (flags & (1U << 5)) out.resistance = sample(static_cast<float>(reader.sint16()));
-    if (flags & (1U << 6)) out.power = sample(static_cast<float>(reader.sint16()));
-    if (flags & (1U << 7)) reader.skip(2);  // average power
-    if (flags & (1U << 8)) reader.skip(5);  // total energy, per hour, per minute
-    if (flags & (1U << 9)) out.heartRate = sample(static_cast<float>(reader.uint(1)));
-    if (!reader.ok()) out = {};
-    return reader.ok();
+    return decodeMachineData(MachineProfile::IndoorBike, data, length, out);
 }
-
 bool decodeTreadmillData(const std::uint8_t* data, std::size_t length, MachineData& out) {
-    out = {};
-    FieldReader reader(data, length);
-    const std::uint32_t flags = reader.uint(2);
-    if (!(flags & (1U << 0))) out.speed = sample(static_cast<float>(reader.uint(2)) / 100.0F);
-    if (flags & (1U << 1)) reader.skip(2);  // average speed
-    if (flags & (1U << 2)) out.distance = sample(static_cast<float>(reader.uint(3)));
-    if (flags & (1U << 3)) {
-        out.incline = sample(static_cast<float>(reader.sint16()) / 10.0F);
-        reader.skip(2);  // ramp angle
-    }
-    if (flags & (1U << 4)) reader.skip(4);  // positive and negative elevation gain
-    if (flags & (1U << 5)) reader.skip(1);  // instantaneous pace
-    if (flags & (1U << 6)) reader.skip(1);  // average pace
-    if (flags & (1U << 7)) reader.skip(5);  // expended energy
-    if (flags & (1U << 8)) out.heartRate = sample(static_cast<float>(reader.uint(1)));
-    if (flags & (1U << 9)) reader.skip(1);   // metabolic equivalent
-    if (flags & (1U << 10)) out.elapsed = sample(static_cast<float>(reader.uint(2)));
-    if (flags & (1U << 11)) reader.skip(2);  // remaining time
-    if (flags & (1U << 12)) {
-        reader.skip(2);  // force on belt
-        out.power = sample(static_cast<float>(reader.sint16()));
-    }
-    if (!reader.ok()) out = {};
-    return reader.ok();
+    return decodeMachineData(MachineProfile::Treadmill, data, length, out);
 }
-
 bool decodeCrossTrainerData(const std::uint8_t* data, std::size_t length, MachineData& out) {
-    out = {};
-    FieldReader reader(data, length);
-    const std::uint32_t flags = reader.uint(3);
-    if (!(flags & (1U << 0))) out.speed = sample(static_cast<float>(reader.uint(2)) / 100.0F);
-    if (flags & (1U << 1)) reader.skip(2);  // average speed
-    if (flags & (1U << 2)) out.distance = sample(static_cast<float>(reader.uint(3)));
-    if (flags & (1U << 3)) {
-        out.cadence = sample(static_cast<float>(reader.uint(2)));  // steps per minute
-        reader.skip(2);                                            // average step rate
-    }
-    if (flags & (1U << 4)) reader.skip(2);  // stride count
-    if (flags & (1U << 5)) reader.skip(4);  // elevation gain
-    if (flags & (1U << 6)) {
-        out.incline = sample(static_cast<float>(reader.sint16()) / 10.0F);
-        reader.skip(2);  // ramp angle
-    }
-    if (flags & (1U << 7)) out.resistance = sample(static_cast<float>(reader.sint16()) / 10.0F);
-    if (flags & (1U << 8)) out.power = sample(static_cast<float>(reader.sint16()));
-    if (flags & (1U << 9)) reader.skip(2);   // average power
-    if (flags & (1U << 10)) reader.skip(5);  // expended energy
-    if (flags & (1U << 11)) out.heartRate = sample(static_cast<float>(reader.uint(1)));
-    if (!reader.ok()) out = {};
-    return reader.ok();
+    return decodeMachineData(MachineProfile::CrossTrainer, data, length, out);
 }
-
 bool decodeRowerData(const std::uint8_t* data, std::size_t length, MachineData& out) {
-    out = {};
-    FieldReader reader(data, length);
-    const std::uint32_t flags = reader.uint(2);
-    if (!(flags & (1U << 0))) {
-        out.cadence = sample(static_cast<float>(reader.uint(1)) / 2.0F);  // strokes per minute
-        reader.skip(2);                                                  // stroke count
-    }
-    if (flags & (1U << 1)) reader.skip(1);  // average stroke rate
-    if (flags & (1U << 2)) out.distance = sample(static_cast<float>(reader.uint(3)));
-    if (flags & (1U << 3)) {
-        // Pace in seconds per 500 m; 0 means not moving.
-        const std::uint32_t pace = reader.uint(2);
-        out.speed = sample(pace == 0 ? 0.0F : 1800.0F / static_cast<float>(pace));
-    }
-    if (flags & (1U << 4)) reader.skip(2);  // average pace
-    if (flags & (1U << 5)) out.power = sample(static_cast<float>(reader.sint16()));
-    if (flags & (1U << 6)) reader.skip(2);  // average power
-    if (flags & (1U << 7)) out.resistance = sample(static_cast<float>(reader.sint16()));
-    if (flags & (1U << 8)) reader.skip(5);  // expended energy
-    if (flags & (1U << 9)) out.heartRate = sample(static_cast<float>(reader.uint(1)));
-    if (!reader.ok()) out = {};
-    return reader.ok();
+    return decodeMachineData(MachineProfile::Rower, data, length, out);
 }
+bool decodeStepClimberData(const std::uint8_t* data, std::size_t length, MachineData& out) {
+    return decodeMachineData(MachineProfile::StepClimber, data, length, out);
+}
+bool decodeStairClimberData(const std::uint8_t* data, std::size_t length, MachineData& out) {
+    return decodeMachineData(MachineProfile::StairClimber, data, length, out);
+}
+Bytes encodeCrossTrainerData(const FitnessMetrics& data) { return encodeMachineData(MachineProfile::CrossTrainer, data); }
+Bytes encodeRowerData(const FitnessMetrics& data) { return encodeMachineData(MachineProfile::Rower, data); }
+Bytes encodeStepClimberData(const FitnessMetrics& data) { return encodeMachineData(MachineProfile::StepClimber, data); }
+Bytes encodeStairClimberData(const FitnessMetrics& data) { return encodeMachineData(MachineProfile::StairClimber, data); }
 
 bool decodeFeature(const std::uint8_t* data, std::size_t length, Features& out) {
     if (!data || length < 8) return false;

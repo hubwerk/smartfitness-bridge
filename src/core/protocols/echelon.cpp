@@ -128,6 +128,7 @@ bool EchelonSource::onConnected(std::uint32_t subscribedMask, std::uint32_t nowM
 }
 
 void EchelonSource::tick(std::uint32_t nowMs) {
+    SourceProtocol::tick(nowMs);
     if (!ready_ || nowMs - lastPollMs_ < echelon::kPollIntervalMs) return;
     lastPollMs_ = nowMs;
     queueWrite(echelon::kService, echelon::kWrite, echelon::pollFrame(counter_));
@@ -138,15 +139,20 @@ void EchelonSource::tick(std::uint32_t nowMs) {
 void EchelonSource::onNotify(std::size_t, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) {
     echelon::Frame frame;
     if (!echelon::decode(data, length, frame)) return;
+    expireSamples(nowMs, 3000);
+    SourceSample record;
     if (frame.kind == echelon::Frame::Kind::Resistance) {
         resistance_ = frame.resistance;
-        sample_.resistance = {static_cast<float>(resistance_), true};
+        record.resistance = {static_cast<float>(resistance_), true};
+        commitFragment(record, nowMs, 0);
         return;
     }
-    sample_.cadence = {frame.cadence, true};
-    sample_.speed = {echelon::speedFromCadence(frame.cadence), true};
-    sample_.power = {echelon::power(resistance_, frame.cadence), true};
-    touch(nowMs);
+    record.cadence = {frame.cadence, true};
+    record.speed = {echelon::speedFromCadence(frame.cadence), true};
+    if (sample_.resistance.valid)
+        record.power = {echelon::power(static_cast<int>(sample_.resistance.value), frame.cadence), true};
+    else sample_.power = {};
+    commitFragment(record, nowMs, 1);
 }
 
 bool EchelonSource::control(const ControlRequest& request, std::uint32_t) {

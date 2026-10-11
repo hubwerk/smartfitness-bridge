@@ -74,6 +74,8 @@ void testDefaultViews() {
     assert(!status.input.paired.valid && !status.input.scanning);
     assert(status.ftmsOutput.enabled && status.ftmsOutput.name == FtmsOutput::kDefaultName);
     assert(status.ftmsOutput.override == FtmsOutputProfile::Auto && !status.unsaved);
+    assert(rig.controller.status().find("speed=-km/h cadence=-rpm power=-W hr=-bpm") != std::string::npos);
+    assert(!status.metrics.power.valid && !status.metrics.strokeCount.valid);
 
     const ConfigView config = rig.controller.configView();
     assert(config.ftmsName == FtmsOutput::kDefaultName && config.ftmsOutput && !config.ftmsInput);
@@ -90,6 +92,8 @@ void testSimulationTelemetryAndTargets() {
     assert(!rig.controller.execute(control(Control::Power, 150.0F)).ok);
     const CommandResult sim = rig.controller.execute(make(CommandType::Simulate));
     assert(sim.ok && sim.message.find("simulation connected") == 0);
+    assert(!rig.controller.statusView().metric(Metric::Incline).valid);
+    assert(!rig.simulation.telemetry().targetPowerValid);
     const CommandResult applied = rig.controller.execute(control(Control::Power, 180.0F));
     assert(applied.ok && applied.message == "control: applied");
     const CommandResult rejected = rig.controller.execute(control(Control::Power, NAN));
@@ -101,6 +105,20 @@ void testSimulationTelemetryAndTargets() {
     assert(status.supports(Control::Power));
     assert(status.hasTarget && status.target.control == Control::Power && status.target.value == 180.0F);
     assert(!status.input.bleSelected && status.deviceName == rig.core.telemetry().deviceName);
+    assert(status.metrics.power.valid && status.metrics.power.value == 180.0F);
+    assert(!status.metrics.incline.valid && !status.metrics.resistance.valid);
+    assert(!status.metrics.distance.valid && !status.metrics.elapsed.valid);
+
+    assert(rig.controller.execute(control(Control::Speed, 0.0F)).ok);
+    assert(rig.controller.statusView().metric(Metric::Speed).valid);
+    assert(rig.controller.statusView().metric(Metric::Speed).value == 0.0F);
+    assert(rig.controller.status().find("speed=0.0km/h") != std::string::npos);
+    assert(!rig.controller.statusView().metric(Metric::Incline).valid);
+    assert(rig.controller.execute(control(Control::Incline, 0.0F)).ok);
+    assert(rig.controller.statusView().metric(Metric::Incline).valid);
+    assert(rig.controller.execute(control(Control::Resistance, 0.0F)).ok);
+    assert(rig.controller.statusView().metrics.resistance.valid);
+    assert(rig.controller.statusView().metrics.resistance.value == 0.0F);
 
     // A read-only simulation rejects control with the core reason.
     Command trainer = make(CommandType::Trainer);
@@ -109,6 +127,7 @@ void testSimulationTelemetryAndTargets() {
     const CommandResult notTrainer = rig.controller.execute(control(Control::Incline, 5.0F));
     assert(!notTrainer.ok && notTrainer.message == "control: not a trainer");
     assert(rig.controller.statusView().state == RuntimeState::Connected);
+    assert(!rig.simulation.telemetry().targetPowerValid);
 }
 
 void testScanAndPairViews() {

@@ -5,6 +5,7 @@
 #include "ble_input_adapter.h"
 #include "protocols/registry.hpp"
 #include <cstdio>
+#include <cmath>
 #include <utility>
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -50,6 +51,13 @@ const char* loadResultName(ConfigLoadResult result) {
 
 CommandResult ok(const std::string& message) { return {true, message}; }
 CommandResult fail(const std::string& message) { return {false, message}; }
+
+std::string metricText(const MetricSample& sample) {
+    if (!sample.valid || !std::isfinite(sample.value)) return "-";
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.1f", static_cast<double>(sample.value));
+    return buffer;
+}
 
 PairedSourceDevice toSource(const ble::BleAddress& address) {
     PairedSourceDevice source;
@@ -110,13 +118,17 @@ void BridgeController::begin() {
 
 std::string BridgeController::status() const {
     char buffer[320];
-    const auto& telemetry = bridge_.telemetry();
+    const auto& state = bridge_.trainerState();
+    const auto speed = metricText(state.sample(Metric::Speed));
+    const auto cadence = metricText(state.sample(Metric::Cadence));
+    const auto power = metricText(state.sample(Metric::Power));
+    const auto heartRate = metricText(state.sample(Metric::HeartRate));
     std::snprintf(buffer, sizeof(buffer),
-                  "state=%s speed=%.1fkm/h cadence=%.1frpm power=%.1fW hr=%.1fbpm "
+                  "state=%s speed=%skm/h cadence=%srpm power=%sW hr=%sbpm "
                   "target=%s ANT=%d FTMS(input=%d,output=%d) "
                   "ftms-out(advertising=%d,client=%d,control=%d) unsaved=%d",
-                  runtimeStateName(bridge_.state()), telemetry.speed, telemetry.cadence,
-                  telemetry.power, telemetry.heartRate, bridge_.hasControlTarget() ? "set" : "none",
+                  runtimeStateName(bridge_.state()), speed.c_str(), cadence.c_str(),
+                  power.c_str(), heartRate.c_str(), bridge_.hasControlTarget() ? "set" : "none",
                   config_.config().antEnabled, config_.config().ftms.input, config_.config().ftms.output,
                   ftms_.advertising(), ftms_.clientConnected(), ftms_.controlGranted(), config_.hasUnsavedChanges());
     std::string text = buffer;
@@ -176,7 +188,7 @@ CommandResult BridgeController::execute(const Command& command) {
                       "connect | disconnect | unpair | trainer on/off | "
                       "power W | speed km/h | incline % | resistance % | "
                       "ant on/off | ftms-input on/off | ftms-output on/off | ftms-name <name> | "
-                      "ftms-profile auto/bike/treadmill/cross-trainer/rower | "
+                      "ftms-profile auto/bike/treadmill/cross-trainer/rower/step-climber/stair-climber | "
                       "wifi <ssid> [password] | wifi-clear | ap-pass <password> | "
                       "save | load | factory-reset | restart");
         case CommandType::Status: return ok(status());
@@ -269,7 +281,7 @@ CommandResult BridgeController::execute(const Command& command) {
         case CommandType::FtmsProfile: {
             FtmsOutputProfile profile;
             if (!parseFtmsOutputProfile(command.text, profile))
-                return fail("profile must be auto, bike, treadmill, cross-trainer or rower");
+                return fail("profile must be auto, bike, treadmill, cross-trainer, rower, step-climber or stair-climber");
             config_.config().ftmsOutputProfile = profile;
             applyConfig();
             return ok(status());
@@ -320,6 +332,7 @@ StatusView BridgeController::statusView() const {
     view.version = SMARTFITNESS_VERSION;
     view.state = bridge_.state();
     const auto& state = bridge_.trainerState();
+    view.metrics = state.metrics;
     for (std::size_t index = 0; index < view.telemetry.size(); ++index) {
         const auto& sample = state.sample(static_cast<Metric>(index));
         view.telemetry[index].valid = sample.valid;

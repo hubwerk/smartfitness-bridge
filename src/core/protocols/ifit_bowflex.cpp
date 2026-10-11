@@ -561,6 +561,7 @@ void IfitBowflexSource::onWriteFailed(std::uint32_t) {
     fail("iFit/Bowflex GATT write failed; reconnect before retrying");
 }
 void IfitBowflexSource::tick(std::uint32_t nowMs) {
+    SourceProtocol::tick(nowMs);
     if (!connected_ || failed()) return;
     if (!ready_) {
         if (nowMs - connectedMs_ > 33000U) { fail("BLE initialization timed out"); return; }
@@ -580,8 +581,6 @@ void IfitBowflexSource::tick(std::uint32_t nowMs) {
         if (se7i(*model_) && step_ > 13 && (step_ - 13) % 3 == 0) waitingMarker_ = true;
         return;
     }
-    if (model_->kind == Kind::Schwinn170 && crankKnown_ && nowMs - cadenceMs_ >= 3000U)
-        sample_.cadence = {0,true};
     if (poll_.empty() || nowMs - sentMs_ < 200U || pendingWrites()) return;
     if (send(poll_[pollStep_])) {
         pollStep_ = (pollStep_ + 1) % poll_.size();
@@ -594,6 +593,11 @@ void IfitBowflexSource::onNotify(std::size_t index, const std::uint8_t* data, st
     if (!connected_ || failed() || !data || index >= ble::kMaxSubscriptions || !(subscribedMask_ & (1U << index))) return;
     if (waitingMarker_ && length >= 2 && data[0] == 0xff) { waitingMarker_ = false; sentMs_ = nowMs; }
     if (!ready_) return;
+    expireSamples(nowMs, 3000);
+    SourceSample sample_;
+    const bool partial = model_->kind == Kind::Schwinn170 || model_->kind == Kind::FreeStride ||
+                         model_->kind == Kind::Elliptical || model_->kind == Kind::EllipticalTrainer ||
+                         (model_->kind == Kind::Bike && (studio(*model_) || named("proform_bike_PFEVEX71316_1")));
     if (model_->kind == Kind::BowflexT216) {
         const bool shortFrame = named("bowflex-t8j");
         if ((!named("bowflex-btx116") && !shortFrame && index != 2) ||
@@ -603,7 +607,7 @@ void IfitBowflexSource::onNotify(std::size_t index, const std::uint8_t* data, st
         if (speed > 100) return;
         sample_.speed = {speed,true};
         if (!named("bowflex-t6")) sample_.incline = {static_cast<float>(data[shortFrame ? 6 : named("bowflex-t128") ? 7 : 4]),true};
-        touch(nowMs);
+        commitSample(sample_, nowMs);
         return;
     }
     if (model_->kind == Kind::Schwinn170) {
@@ -622,7 +626,7 @@ void IfitBowflexSource::onNotify(std::size_t index, const std::uint8_t* data, st
             sample_.speed = {le16(data + 3) / 100.0F,true};
             sample_.power = {le16(data + 6) / 100.0F,true};
         } else return;
-        touch(nowMs); return;
+        commitFragment(sample_, nowMs, length == 20 ? 0 : length == 17 ? 1 : 2); return;
     }
     if (length != 20) return;
     if (data[0] == 1 && data[1] == 0x12) {
@@ -639,15 +643,17 @@ void IfitBowflexSource::onNotify(std::size_t index, const std::uint8_t* data, st
                 if (data[4] != 0x46 && !(named("nordictrack_elliptical_s700") && data[4] == 0x5a && data[3] == 0)) return;
                 sample_.speed = {le16(data + 12) / 100.0F,true};
                 sample_.cadence = {static_cast<float>(data[2]),true};
-                if (named("nordictrack_elliptical_c7_5")) sample_.heartRate = {static_cast<float>(data[5]),data[5] != 0};
+                if (named("nordictrack_elliptical_c7_5")) sample_.heartRate = {static_cast<float>(data[5]),true};
             } else if (data[19] == 0x2c && !named("proform_hybrid_trainer_xt")) {
                 sample_.cadence = {static_cast<float>(data[2]),true};
             } else {
                 sample_.speed = {le16(data + 14) / 100.0F,true};
-                if (named("proform_hybrid_trainer_xt")) sample_.heartRate = {static_cast<float>(data[3]),data[3] != 0};
+                if (named("proform_hybrid_trainer_xt")) sample_.heartRate = {static_cast<float>(data[3]),true};
             }
         } else return;
-        touch(nowMs); return;
+        if (partial) commitFragment(sample_, nowMs, 1);
+        else commitSample(sample_, nowMs);
+        return;
     }
     if (data[0] != 0 || data[1] != 0x12 || data[2] != 1 || data[3] != 4 || data[4] != 2 ||
         std::all_of(data + 12,data + 20,[](std::uint8_t v) { return v == 255; })) return;
@@ -712,7 +718,8 @@ void IfitBowflexSource::onNotify(std::size_t index, const std::uint8_t* data, st
             if (resistance >= 0) sample_.resistance = {static_cast<float>(resistance),true};
         }
     } else return;
-    touch(nowMs);
+    if (partial) commitFragment(sample_, nowMs, 0);
+    else commitSample(sample_, nowMs);
 }
 
 TrainerCapabilities IfitBowflexSource::capabilities() const {

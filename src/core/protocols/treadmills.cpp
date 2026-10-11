@@ -410,6 +410,7 @@ void TreadmillSource::acknowledged() {
     if (step_ == steps_.size()) ready_ = true;
 }
 void TreadmillSource::tick(std::uint32_t now) {
+    SourceProtocol::tick(now);
     if (!connected_ || failed()) return;
     if (!receive_.empty() && now - receiveMs_ > 2000) receive_.clear();
     if (!ready_) {
@@ -558,7 +559,6 @@ void TreadmillSource::acceptFrame(const Bytes& b, std::uint32_t now) {
             speed = le16(b, 61) / 1000.0F * 1.60934F;
             incline = b[63] / 10.0F;
         } else if (b.size() == 29) speed = le16(b, 14) / 10.0F;
-        else if (b[4] == 3 && b[5] == 3 && le16(b, 6) == 1 && b[10] == 0) speed = 0;
     } else if (r1()) {
         if (b.size() != 20 || b[0] != 0xf8 || b[1] != 0xa2) return;
         speed = b[3] / 10.0F;
@@ -566,14 +566,15 @@ void TreadmillSource::acceptFrame(const Bytes& b, std::uint32_t now) {
     } else if (b.size() == 18) {
         speed = b[10] / 10.0F * (sole() ? 1.60934F : 1.0F);
         incline = b[11] / (spirit() ? 10.0F : 1.0F);
-        if (sole() && b[9] > 0 && b[9] <= 240) heart = b[9];
+        if (sole() && b[9] <= 240) heart = b[9];
     }
     if (speed < 0 || speed > (r1() || r2() ? 22.0F : 25.0F) ||
         (incline >= 0 && incline > 15)) return;
-    sample_.speed = {speed, true};
-    if (incline >= 0) sample_.incline = {incline, true};
-    if (heart >= 0) sample_.heartRate = {heart, true};
-    touch(now);
+    SourceSample record;
+    record.speed = {speed, true};
+    if (incline >= 0) record.incline = {incline, true};
+    if (heart >= 0) record.heartRate = {heart, true};
+    commitSample(record, now);
     // One hardware key press per fresh status, never a blind burst. Stop on
     // target crossing instead of reversing into oscillation.
     if (targetWaiting_ && now != targetMs_) targetWaiting_ = false;
@@ -583,7 +584,7 @@ void TreadmillSource::acceptText(const std::string& text, std::uint32_t now) {
     input.imbue(std::locale::classic());
     std::string key, value;
     if (!(input >> key) || key != "props") return;
-    MetricSample speed = sample_.speed, cadence = sample_.cadence;
+    SourceSample record;
     bool changed = false;
     while (input >> key) {
         if (!(input >> value) || key == "Error") return;
@@ -591,14 +592,12 @@ void TreadmillSource::acceptText(const std::string& text, std::uint32_t now) {
             float number;
             if (!finiteNumber(value, number) || number < 0 ||
                 number > (key == "CurrentSpeed" ? maximumSpeed() : 250.0F)) return;
-            (key == "CurrentSpeed" ? speed : cadence) = {number, true};
+            (key == "CurrentSpeed" ? record.speed : record.cadence) = {number, true};
             changed = true;
         }
     }
     if (!changed) return;
-    sample_.speed = speed;
-    sample_.cadence = cadence;
-    touch(now);
+    commitSample(record, now);
 }
 TrainerCapabilities TreadmillSource::capabilities() const {
     TrainerCapabilities out;

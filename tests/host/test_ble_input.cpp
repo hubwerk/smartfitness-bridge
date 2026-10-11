@@ -217,6 +217,19 @@ void testSensorCodecs() {
     assert(sensors::decodeHeartRate(hr16.data(), hr16.size(), bpm) && bpm == 300);
     assert(!sensors::decodeHeartRate(hr16.data(), 2, bpm));
     assert(!sensors::decodeHeartRate(nullptr, 0, bpm));
+
+    protocols::CyclingPowerSource source;
+    assert(source.onConnected(1, 0));
+    source.onNotify(0, first.data(), first.size(), 0);
+    assert(source.sample().power.valid && !source.sample().cadence.valid);
+    source.onNotify(0, second.data(), second.size(), 1000);
+    assert(source.sample().cadence.valid && source.sample().cadence.value == 60);
+    const Bytes powerOnly{0, 0, 0, 0};
+    source.onNotify(0, powerOnly.data(), powerOnly.size(), 1100);
+    assert(source.sample().power.valid && source.sample().power.value == 0);
+    assert(!source.sample().cadence.valid);
+    source.tick(4101);
+    assert(!source.sample().power.valid);
 }
 
 void testEchelon() {
@@ -266,6 +279,8 @@ void testEchelon() {
     source.onNotify(0, data.data(), data.size(), 20);
     assert(source.hasData() && near(source.sample().cadence.value, 85.0F) && near(source.sample().power.value, 64.85F));
     assert(near(source.sample().speed.value, 0.37497622F * 85.0F) && near(source.sample().resistance.value, 10.0F));
+    source.onNotify(0, data.data(), data.size(), 3011);
+    assert(source.sample().cadence.valid && !source.sample().resistance.valid && !source.sample().power.valid);
 }
 
 Bytes domyosStatus() {
@@ -331,6 +346,10 @@ void testDomyos() {
     source.onNotify(0, full.data(), full.size(), 900);
     assert(near(source.sample().power.value, protocols::domyos::power(5, 80.0F)));
     assert(near(source.sample().heartRate.value, 130.0F));
+    Bytes zeroHeart = full;
+    zeroHeart[18] = 0;
+    source.onNotify(0, zeroHeart.data(), zeroHeart.size(), 901);
+    assert(source.sample().heartRate.valid && source.sample().heartRate.value == 0);
     assert(source.control({Control::Resistance, 100.0F}, 900));
     assert(source.takeWrite(write) && write.payload()[10] == 15);
     assert(source.takeWrite(write) && write.length == 3);
@@ -364,6 +383,16 @@ void testYesoulAndKeiser() {
     assert(broadcast.systemId == 7 && near(broadcast.cadence, 85.0F) && near(broadcast.heartRate, 130.0F));
     assert(near(broadcast.power, 210.0F) && broadcast.seconds == 330 && near(broadcast.distanceKm, 10.0F));
     assert(broadcast.gear == 12);
+    protocols::KeiserM3iSource keiserSource;
+    ble::Advertisement report;
+    report.manufacturerData = keiser;
+    keiserSource.onAdvertisement(report, 0);
+    assert(keiserSource.sample().resistance.valid);
+    report.manufacturerData.resize(18);
+    report.manufacturerData[8] = report.manufacturerData[9] = 0;
+    keiserSource.onAdvertisement(report, 1);
+    assert(!keiserSource.sample().resistance.valid);
+    assert(keiserSource.sample().heartRate.valid && keiserSource.sample().heartRate.value == 0);
     Bytes miles = keiser;
     miles[17] = 0x00;  // 10.0 miles
     assert(protocols::keiser::parse(miles.data(), miles.size(), broadcast) && near(broadcast.distanceKm, 16.0934F));
@@ -500,16 +529,18 @@ void testProtocolProfiles() {
 
 void testFtmsProfiles() {
     using Source = protocols::FtmsSource;
-    const std::array<MachineProfile, 4> profiles{{MachineProfile::IndoorBike, MachineProfile::Treadmill,
-                                                MachineProfile::CrossTrainer, MachineProfile::Rower}};
-    const std::array<Bytes, 4> frames{{{0, 0, 0xC4, 9}, {0, 0, 0xB0, 4},
-                                      {0, 0, 0, 0xE8, 3}, {0, 0, 0x30, 0x10, 0}}};
-    const std::array<std::uint8_t, 4> typeBits{{0x20, 1, 2, 0x10}};
+    const std::array<MachineProfile, 6> profiles{{MachineProfile::IndoorBike, MachineProfile::Treadmill,
+        MachineProfile::CrossTrainer, MachineProfile::Rower, MachineProfile::StepClimber, MachineProfile::StairClimber}};
+    const std::array<std::size_t, 6> subscriptions{{Source::SubBike, Source::SubTreadmill, Source::SubCrossTrainer,
+        Source::SubRower, Source::SubStepClimber, Source::SubStairClimber}};
+    const std::array<Bytes, 6> frames{{{0, 0, 0xC4, 9}, {0, 0, 0xB0, 4},
+        {0, 0, 0, 0xE8, 3}, {0, 0, 0x30, 0x10, 0}, {0, 0, 1, 0, 2, 0}, {0, 0, 1, 0}}};
+    const std::array<std::uint8_t, 6> typeBits{{0x20, 1, 2, 0x10, 4, 8}};
     for (std::size_t index = 0; index < profiles.size(); ++index) {
         Source source;
-        assert(source.onConnected(1U << index, 100));
+        assert(source.onConnected(1U << subscriptions[index], 100));
         assert(source.profile() == profiles[index]);
-        source.onNotify(index, frames[index].data(), frames[index].size(), 200);
+        source.onNotify(subscriptions[index], frames[index].data(), frames[index].size(), 200);
         assert(source.profile() == profiles[index] && source.hasData());
         source.reset();
         assert(source.profile() == MachineProfile::IndoorBike && !source.sample().distance.valid);
@@ -517,17 +548,17 @@ void testFtmsProfiles() {
         advertisement.ftmsServiceData = {1, typeBits[index], 0};
         source.onAdvertisement(advertisement, 300);
         assert(source.profile() == profiles[index]);
-        assert(source.onConnected(0x1f, 300));  // Some machines expose every data characteristic.
+        assert(source.onConnected(0x7f, 300));  // Some machines expose every data characteristic.
         assert(source.profile() == profiles[index]);
         for (std::size_t other = 0; other < frames.size(); ++other) {
-            source.onNotify(other, frames[other].data(), frames[other].size(), 400);
+            source.onNotify(subscriptions[other], frames[other].data(), frames[other].size(), 400);
             assert(source.profile() == profiles[index]);
         }
     }
     Source source;
     ble::Advertisement advertisement;
     for (const Bytes& invalid : {Bytes{1, 1}, Bytes{0, 1, 0}, Bytes{1, 0, 0}, Bytes{1, 3, 0},
-                                 Bytes{1, 4, 0}}) {
+                                 Bytes{1, 0x40, 0}}) {
         advertisement.ftmsServiceData = invalid;
         source.onAdvertisement(advertisement, 100);
         assert(source.profile() == MachineProfile::IndoorBike);
@@ -579,6 +610,7 @@ void testFtmsControlDoesNotStartTreadmill() {
             assert(source.takeWrite(write) && write.payload() == ftms::encodeStartOrResume());
         assert(source.pendingWrites() == 0 && !source.takeWrite(write));
     }
+
     // Advertising selects treadmill even if the device subscribes every data UUID.
     Source source;
     ble::Advertisement advertisement;
@@ -597,6 +629,60 @@ void testFtmsControlDoesNotStartTreadmill() {
     assert(source.takeWrite(write) && write.payload() == ftms::encodeRequestControl());
     source.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 400);
     assert(!source.takeWrite(write));
+}
+
+void testFtmsRecordPresence() {
+    using Source = protocols::FtmsSource;
+    Source source;
+    assert(source.onConnected(1, 0));
+    const Bytes full{0x54, 0x02, 0xC4, 9, 0xA0, 0, 0x10, 0x27, 0, 150, 0, 120};
+    source.onNotify(Source::SubBike, full.data(), full.size(), 100);
+    assert(source.sample().power.valid && source.sample().distance.valid && source.sample().cadence.valid);
+    const Bytes more{0x41, 0x02, 0, 0, 0};
+    source.onNotify(Source::SubBike, more.data(), more.size(), 200);
+    assert(source.sample().power.valid && source.sample().power.value == 0);
+    assert(source.sample().heartRate.valid && source.sample().heartRate.value == 0);
+    const Bytes final{0, 0, 0, 0};
+    source.onNotify(Source::SubBike, final.data(), final.size(), 300);
+    assert(source.sample().speed.valid && source.sample().speed.value == 0);
+    assert(source.sample().power.valid && source.sample().power.value == 0);
+    assert(source.sample().heartRate.valid && source.sample().heartRate.value == 0);
+    assert(!source.sample().distance.valid && !source.sample().cadence.valid);
+    source.onNotify(Source::SubBike, final.data(), final.size(), 400);
+    assert(!source.sample().power.valid && !source.sample().heartRate.valid);
+    source.onNotify(Source::SubBike, more.data(), more.size(), 500);
+    source.onNotify(Source::SubBike, final.data(), final.size(), 500 + Source::kRecordLifetimeMs + 1);
+    assert(!source.sample().power.valid);
+    source.tick(5000);
+    assert(!source.sample().speed.valid);
+    source.reset();
+    assert(source.onConnected(1U << Source::SubRower, 0));
+    const Bytes rowerMore{0x05, 0, 1, 0, 0};
+    const Bytes rowerFinal{0x20, 0, 0, 0, 0, 0, 0};
+    source.onNotify(Source::SubRower, rowerMore.data(), rowerMore.size(), 10);
+    source.onNotify(Source::SubRower, rowerFinal.data(), rowerFinal.size(), 20);
+    assert(source.sample().strokeRate.valid && source.sample().strokeCount.valid);
+    assert(source.sample().strokeCount.value == 0 && source.sample().distance.valid);
+    source.onNotify(Source::SubRower, rowerFinal.data(), rowerFinal.size(), 30);
+    assert(!source.sample().distance.valid);
+
+    source.reset();
+    assert(source.onConnected(1, 0));
+    const Bytes hrOnly{0x01, 0x02, 0};
+    const Bytes powerOnly{0x41, 0, 0, 0};
+    source.onNotify(Source::SubBike, hrOnly.data(), hrOnly.size(), 10);
+    assert(source.hasData() && source.sample().heartRate.valid && source.sample().heartRate.value == 0);
+    assert(!source.sample().speed.valid && !source.sample().power.valid);
+    source.onNotify(Source::SubBike, powerOnly.data(), powerOnly.size(), 20);
+    assert(source.sample().heartRate.valid && source.sample().power.valid);
+    source.onNotify(Source::SubBike, hrOnly.data(), hrOnly.size(), 30);
+    assert(source.sample().heartRate.valid && !source.sample().power.valid);
+    source.onNotify(Source::SubBike, powerOnly.data(), powerOnly.size(), 40);
+    assert(source.sample().power.valid);
+    source.onNotify(Source::SubBike, hrOnly.data(), hrOnly.size(), 40 + Source::kRecordLifetimeMs + 1);
+    assert(source.sample().heartRate.valid && !source.sample().power.valid);
+    source.tick(5000);
+    assert(!source.sample().heartRate.valid);
 }
 
 struct Harness {
@@ -817,7 +903,9 @@ void testFtmsLifecycle() {
     assert(!h.adapter.scanning() && !h.central.scanning());  // scanning stops before connecting
     assert(h.central.connects.size() == 1 && h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     const auto& plan = h.central.connects[0].plan;
-    assert(plan.subscriptionCount == 5 && plan.subscriptions[4].indicate && plan.readCount == 4);
+    assert(plan.subscriptionCount == 7 && plan.subscriptions[4].indicate && plan.readCount == 4);
+    assert(plan.subscriptions[protocols::FtmsSource::SubStepClimber].characteristic == ble::Uuid::from16(0x2acf));
+    assert(plan.subscriptions[protocols::FtmsSource::SubStairClimber].characteristic == ble::Uuid::from16(0x2ad0));
     assert(!h.adapter.startScan());  // busy
 
     const Bytes feature{0x02, 0x44, 0x00, 0x00, 0x0E, 0x20, 0x00, 0x00};
@@ -1320,6 +1408,28 @@ void testDiscoveredVendorEndpoint() {
     assert(!h.adapter.trainerDetected());
 }
 
+void testAdapterFullMetricPresence() {
+    Harness h;
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    h.central.pushEvent(ble::CentralEventType::Connected, 1U << protocols::FtmsSource::SubRower);
+    h.adapter.loop();
+    h.advance(300);
+    h.central.pushEvent(ble::CentralEventType::Notification, 0, protocols::FtmsSource::SubRower,
+                        {0x20, 0x02, 0, 0, 0, 0, 0, 0});  // Stroke rate/count, power, HR all zero.
+    h.adapter.loop();
+    const auto value = h.adapter.telemetry();
+    assert(value.cadenceValid && value.powerValid && value.heartRateValid);
+    assert(value.cadence == 0 && value.power == 0 && value.heartRate == 0);
+    assert(!value.speedValid && !value.inclineValid && !value.resistanceValid && !value.targetPowerValid);
+    assert(value.metrics.strokeCount.valid && value.metrics.strokeCount.value == 0);
+    assert(value.metrics.strokeRate.valid);
+    h.advance(5001);
+    const auto stale = h.adapter.telemetry();
+    assert(!stale.cadenceValid && !stale.powerValid && !stale.heartRateValid);
+    assert(!stale.metrics.strokeCount.valid && !stale.metrics.strokeRate.valid);
+}
+
 }  // namespace
 
 void runBleInputTests() {
@@ -1334,6 +1444,7 @@ void runBleInputTests() {
     testProtocolProfiles();
     testFtmsProfiles();
     testFtmsControlDoesNotStartTreadmill();
+    testFtmsRecordPresence();
     testAdapterProfiles();
     testFtmsDistanceTelemetry();
     testFtmsElapsedTelemetry();
@@ -1349,4 +1460,5 @@ void runBleInputTests() {
     testVendorControlRouting();
     testVendorStartupGrace();
     testDiscoveredVendorEndpoint();
+    testAdapterFullMetricPresence();
 }

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include "fitness_metrics.h"
 #include "bridge/bridge_core.hpp"
 
 namespace smartfitness {
@@ -33,7 +34,17 @@ constexpr std::uint16_t kBikeFlagHeartRate = 1U << 9;
 // Fitness Machine Features field.
 constexpr std::uint32_t kFeatureCadence = 1U << 1;
 constexpr std::uint32_t kFeatureInclination = 1U << 3;
+constexpr std::uint32_t kFeatureAverageSpeed = 1U << 0;
+constexpr std::uint32_t kFeatureDistance = 1U << 2;
+constexpr std::uint32_t kFeatureElevationGain = 1U << 4;
+constexpr std::uint32_t kFeaturePace = 1U << 5;
+constexpr std::uint32_t kFeatureStepCount = 1U << 6;
+constexpr std::uint32_t kFeatureStrideCount = 1U << 8;
+constexpr std::uint32_t kFeatureExpendedEnergy = 1U << 9;
 constexpr std::uint32_t kFeatureHeartRate = 1U << 10;
+constexpr std::uint32_t kFeatureMetabolicEquivalent = 1U << 11;
+constexpr std::uint32_t kFeatureElapsedTime = 1U << 12;
+constexpr std::uint32_t kFeatureRemainingTime = 1U << 13;
 constexpr std::uint32_t kFeaturePower = 1U << 14;
 // Target Setting Features field.
 constexpr std::uint32_t kTargetInclination = 1U << 1;
@@ -79,20 +90,8 @@ enum class TrainingStatus : std::uint8_t {
     ManualMode = 0x0D
 };
 
-struct IndoorBikeData {
-    MetricSample speed;      // km/h
-    MetricSample cadence;    // rpm
-    MetricSample power;      // W
-    MetricSample heartRate;  // bpm
-};
-
-struct TreadmillData {
-    MetricSample speed;      // km/h
-    MetricSample incline;    // %, ramp angle derived from grade
-    MetricSample heartRate;  // bpm
-    MetricSample distance;   // m
-    MetricSample elapsed;    // seconds, only when supplied by the input
-};
+using IndoorBikeData = FitnessMetrics;
+using TreadmillData = FitnessMetrics;
 
 TreadmillData treadmillDataFrom(const TrainerState& state);
 Bytes encodeTreadmillData(const TreadmillData& data);
@@ -101,6 +100,7 @@ Bytes encodeTreadmillData(const TreadmillData& data);
 IndoorBikeData indoorBikeDataFrom(const TrainerState& state);
 Bytes encodeIndoorBikeData(const IndoorBikeData& data);
 Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile profile = MachineProfile::IndoorBike);
+Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile profile, const FitnessMetrics& data);
 Bytes encodeSupportedSpeedRange();
 Bytes encodeSupportedInclinationRange();
 Bytes encodeSupportedResistanceRange();
@@ -135,6 +135,8 @@ ResultCode resultCodeFor(ControlResult result);
 
 constexpr std::uint16_t kTreadmillDataUuid = 0x2ACD;
 constexpr std::uint16_t kCrossTrainerDataUuid = 0x2ACE;
+constexpr std::uint16_t kStepClimberDataUuid = 0x2ACF;
+constexpr std::uint16_t kStairClimberDataUuid = 0x2AD0;
 constexpr std::uint16_t kRowerDataUuid = 0x2AD1;
 
 // Additional Fitness Machine Features / Target Setting Features bits.
@@ -146,22 +148,26 @@ using MachineType = MachineProfile;
 
 // Normalized sample decoded from one data notification. Only fields whose
 // flag was present are marked valid.
-struct MachineData {
-    MetricSample speed;       // km/h
-    MetricSample cadence;     // rpm (steps/min for cross trainers, strokes/min for rowers)
-    MetricSample power;       // W
-    MetricSample heartRate;   // bpm
-    MetricSample incline;     // %
-    MetricSample resistance;  // device resistance level (unitless, as sent)
-    MetricSample distance;    // m
-    MetricSample elapsed;     // seconds
-};
+using MachineData = FitnessMetrics;
+
+bool decodeMachineData(MachineProfile profile, const std::uint8_t* data, std::size_t length, MachineData& out);
+Bytes encodeMachineData(MachineProfile profile, const FitnessMetrics& data);
+// Groups sharing a flag are atomic: incomplete groups are omitted. Returns no
+// packets if even one complete group cannot fit. maxPayload excludes ATT headers.
+std::vector<Bytes> splitMachineData(MachineProfile profile, const FitnessMetrics& data, std::size_t maxPayload);
+FitnessMetrics mapMachineData(const FitnessMetrics& data, MachineProfile inputProfile, MachineProfile outputProfile);
+Bytes encodeCrossTrainerData(const FitnessMetrics& data);
+Bytes encodeRowerData(const FitnessMetrics& data);
+Bytes encodeStepClimberData(const FitnessMetrics& data);
+Bytes encodeStairClimberData(const FitnessMetrics& data);
 
 // Return false when the payload is truncated for the flags it announces.
 bool decodeIndoorBikeData(const std::uint8_t* data, std::size_t length, MachineData& out);
 bool decodeTreadmillData(const std::uint8_t* data, std::size_t length, MachineData& out);
 bool decodeCrossTrainerData(const std::uint8_t* data, std::size_t length, MachineData& out);
 bool decodeRowerData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeStepClimberData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeStairClimberData(const std::uint8_t* data, std::size_t length, MachineData& out);
 
 struct Features {
     std::uint32_t machine = 0;

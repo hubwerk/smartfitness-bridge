@@ -54,6 +54,8 @@ std::vector<Metric> dashboardMetrics(MachineProfile profile) {
             return {Metric::Speed, Metric::Incline, Metric::HeartRate, Metric::Power, Metric::Cadence};
         case MachineProfile::Rower:
         case MachineProfile::CrossTrainer:
+        case MachineProfile::StepClimber:
+        case MachineProfile::StairClimber:
             return {Metric::Power, Metric::Cadence, Metric::HeartRate, Metric::Speed, Metric::Incline};
         case MachineProfile::IndoorBike:
         default:
@@ -156,6 +158,8 @@ const char* profileLabel(MachineProfile profile) {
         case MachineProfile::Treadmill: return "Treadmill";
         case MachineProfile::CrossTrainer: return "Cross trainer";
         case MachineProfile::Rower: return "Rower";
+        case MachineProfile::StepClimber: return "Step climber";
+        case MachineProfile::StairClimber: return "Stair climber";
         case MachineProfile::IndoorBike:
         default: return "Bike";
     }
@@ -167,6 +171,8 @@ const char* ftmsProfileLabel(FtmsOutputProfile profile) {
         case FtmsOutputProfile::Treadmill: return profileLabel(MachineProfile::Treadmill);
         case FtmsOutputProfile::CrossTrainer: return profileLabel(MachineProfile::CrossTrainer);
         case FtmsOutputProfile::Rower: return profileLabel(MachineProfile::Rower);
+        case FtmsOutputProfile::StepClimber: return profileLabel(MachineProfile::StepClimber);
+        case FtmsOutputProfile::StairClimber: return profileLabel(MachineProfile::StairClimber);
         case FtmsOutputProfile::Auto:
         default: return "Auto";
     }
@@ -250,13 +256,14 @@ bool deserialize(const std::vector<std::uint8_t>& data, HmiSettings& settings) {
 
 FtmsOutputProfile nextFtmsProfile(FtmsOutputProfile profile) {
     const auto next = static_cast<std::uint8_t>(profile) + 1;
-    return next > static_cast<std::uint8_t>(FtmsOutputProfile::Rower) ? FtmsOutputProfile::Auto
+    return next > static_cast<std::uint8_t>(FtmsOutputProfile::StairClimber) ? FtmsOutputProfile::Auto
                                                                        : static_cast<FtmsOutputProfile>(next);
 }
 
 const std::vector<std::string>& ftmsNamePresets() {
     static const std::vector<std::string> presets{FtmsOutput::kDefaultName, "SF Bike", "SF Treadmill",
-                                                  "SF Cross Trainer", "SF Rower", "Garage Bike", "Home Treadmill"};
+                                                  "SF Cross Trainer", "SF Rower", "SF Step Climber",
+                                                  "SF Stair Climber", "Garage Bike", "Home Treadmill"};
     return presets;
 }
 

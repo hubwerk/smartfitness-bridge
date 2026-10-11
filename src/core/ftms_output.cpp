@@ -1,5 +1,6 @@
 #include "ftms_output.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <utility>
@@ -12,6 +13,7 @@ using namespace smartfitness;
 
 namespace {
 constexpr std::uint32_t kAdvertiseRetryMs = 1000;
+constexpr float kRadiansToDegrees = 57.2957795131F;
 }
 
 #ifdef ARDUINO
@@ -42,8 +44,8 @@ struct FtmsOutput::Transport : public NimBLEServerCallbacks, public NimBLECharac
     FtmsOutput& owner;
     NimBLEServer* server = nullptr;
     NimBLECharacteristic* feature = nullptr;
-    NimBLECharacteristic* bikeData = nullptr;
-    NimBLECharacteristic* treadmillData = nullptr;
+    std::array<NimBLECharacteristic*, 6> machineData{};
+    std::array<NimBLECharacteristic*, 4> ranges{};
     NimBLECharacteristic* trainingStatus = nullptr;
     NimBLECharacteristic* controlPoint = nullptr;
     NimBLECharacteristic* machineStatus = nullptr;
@@ -65,7 +67,7 @@ void FtmsOutput::begin() {
     begun_ = true;
     resetSession();
     refreshProfile();
-    feature_ = ftms::encodeFeature(trainerState().capabilities, profile_);
+    feature_ = ftms::encodeFeature(trainerState().capabilities, profile_, outputMetrics());
     transportSetFeature();
 }
 
@@ -73,7 +75,7 @@ void FtmsOutput::loop() {
     handleConnectionChanges();
     drainControlPoint();
     updateTrainingStatus();
-    publishBikeData();
+    publishMachineData();
 }
 
 void FtmsOutput::setEnabled(bool enabled) {
@@ -87,8 +89,7 @@ void FtmsOutput::setEnabled(bool enabled) {
 
 void FtmsOutput::publishTrainerState(const TrainerState& state) {
     const bool inputProfileChanged = trainerState().profile != state.profile;
-    const bool lostTreadmill = profile_ == MachineProfile::Treadmill &&
-        trainerState().connected &&
+    const bool lostTreadmill = profile_ == MachineProfile::Treadmill && trainerState().connected &&
         (!state.connected || (trainerState().trainerDetected && !state.trainerDetected));
     BridgeOutput::publishTrainerState(state);
     refreshProfile();
@@ -96,7 +97,7 @@ void FtmsOutput::publishTrainerState(const TrainerState& state) {
         generation_.fetch_add(1);
         resetSession();
     }
-    auto feature = ftms::encodeFeature(state.capabilities, profile_);
+    auto feature = ftms::encodeFeature(state.capabilities, profile_, outputMetrics());
     if (feature == feature_) return;
     feature_ = std::move(feature);
     transportSetFeature();
@@ -108,7 +109,7 @@ void FtmsOutput::setProfileOverride(FtmsOutputProfile profile) {
     resetSession();
     profileOverride_ = profile;
     refreshProfile();
-    feature_ = ftms::encodeFeature(trainerState().capabilities, profile_);
+    feature_ = ftms::encodeFeature(trainerState().capabilities, profile_, outputMetrics());
     transportSetFeature();
 }
 
@@ -118,7 +119,7 @@ void FtmsOutput::refreshProfile() {
     const auto next = effectiveOutputProfile(profileOverride_, trainerState().profile);
     if (next == profile_) return;
     profile_ = next;
-    feature_ = ftms::encodeFeature(trainerState().capabilities, profile_);
+    feature_ = ftms::encodeFeature(trainerState().capabilities, profile_, outputMetrics());
     transportSetFeature();
     generation_.fetch_add(1);
     resetSession();
@@ -126,6 +127,11 @@ void FtmsOutput::refreshProfile() {
     status_.clear();
     bikeData_.clear();
     treadmillData_.clear();
+    crossTrainerData_.clear();
+    rowerData_.clear();
+    stepClimberData_.clear();
+    stairClimberData_.clear();
+    machineDataPackets_.clear();
     trainingStatus_ = ftms::TrainingStatus::Idle;
     profileDisconnectPending_ = connections_.load() > 0;
     transportDisconnectClients();
@@ -194,10 +200,40 @@ bool FtmsOutput::clientConnected() const { return connected_; }
 bool FtmsOutput::controlGranted() const { return granted_; }
 const ftms::Bytes& FtmsOutput::lastIndoorBikeData() const { return bikeData_; }
 const ftms::Bytes& FtmsOutput::lastTreadmillData() const { return treadmillData_; }
+const ftms::Bytes& FtmsOutput::lastCrossTrainerData() const { return crossTrainerData_; }
+const ftms::Bytes& FtmsOutput::lastRowerData() const { return rowerData_; }
+const ftms::Bytes& FtmsOutput::lastStepClimberData() const { return stepClimberData_; }
+const ftms::Bytes& FtmsOutput::lastStairClimberData() const { return stairClimberData_; }
+ftms::Bytes& FtmsOutput::machineData() {
+    switch (profile_) {
+        case MachineProfile::Treadmill: return treadmillData_;
+        case MachineProfile::CrossTrainer: return crossTrainerData_;
+        case MachineProfile::Rower: return rowerData_;
+        case MachineProfile::StepClimber: return stepClimberData_;
+        case MachineProfile::StairClimber: return stairClimberData_;
+        default: return bikeData_;
+    }
+}
+const ftms::Bytes& FtmsOutput::lastMachineData() const {
+    switch (profile_) {
+        case MachineProfile::Treadmill: return treadmillData_;
+        case MachineProfile::CrossTrainer: return crossTrainerData_;
+        case MachineProfile::Rower: return rowerData_;
+        case MachineProfile::StepClimber: return stepClimberData_;
+        case MachineProfile::StairClimber: return stairClimberData_;
+        default: return bikeData_;
+    }
+}
+const std::vector<ftms::Bytes>& FtmsOutput::lastMachineDataPackets() const { return machineDataPackets_; }
+const ftms::Bytes& FtmsOutput::lastTrainingStatus() const { return trainingData_; }
 const ftms::Bytes& FtmsOutput::lastControlResponse() const { return response_; }
 const ftms::Bytes& FtmsOutput::lastMachineStatus() const { return status_; }
 const ftms::Bytes& FtmsOutput::feature() const { return feature_; }
-ftms::Bytes FtmsOutput::speedRange() const { return ftms::encodeSupportedSpeedRange(); }
+ftms::Bytes FtmsOutput::speedRange() const {
+    ftms::Features features;
+    return ftms::decodeFeature(feature_.data(), feature_.size(), features) &&
+        (features.targets & ftms::kTargetSpeed) ? ftms::encodeSupportedSpeedRange() : ftms::Bytes{};
+}
 void FtmsOutput::setClock(Clock clock) { clock_ = std::move(clock); }
 
 std::uint32_t FtmsOutput::now() const {
@@ -217,7 +253,9 @@ void FtmsOutput::handleConnectionChanges() {
         granted_ = false;
         bikeDataSent_ = false;
         trainingStatusSent_ = false;
+        sessionStopped_ = false;
         treadmillData_.clear();
+        machineDataPackets_.clear();
         // The stack stops advertising once a central connects.
         if (connected_) advertising_ = false;
     }
@@ -236,8 +274,7 @@ void FtmsOutput::drainControlPoint() {
     for (std::size_t index = 0; index < count; ++index) {
         // Writes from an earlier (now disconnected) session are dropped.
         if (connected_ && pending[index].generation == seenGeneration_ &&
-            pending[index].generation == generation_.load() &&
-            (profile_ != MachineProfile::Treadmill || connections_.load() > 0))
+            pending[index].generation == generation_.load() && connections_.load() > 0)
             handleControlPoint(pending[index]);
     }
 }
@@ -269,42 +306,81 @@ void FtmsOutput::handleControlPoint(const PendingWrite& write) {
     response_ = ftms::encodeControlPointResponse(command.opcode, result);
     transportIndicateResponse();
     if (result != ftms::ResultCode::Success) return;
+    const auto opcode = static_cast<ftms::OpCode>(command.opcode);
+    if (opcode == ftms::OpCode::Reset || opcode == ftms::OpCode::StopOrPause ||
+        opcode == ftms::OpCode::StartOrResume) {
+        sessionStopped_ = opcode != ftms::OpCode::StartOrResume;
+        trainingStatus_ = sessionStopped_ ? ftms::TrainingStatus::Idle : ftms::TrainingStatus::ManualMode;
+        transportNotifyTrainingStatus();
+        trainingStatusSent_ = true;
+        if (opcode == ftms::OpCode::Reset) bikeDataSent_ = false;
+    } else if (opcode == ftms::OpCode::SetTargetSpeed && command.request.value > 0) {
+        sessionStopped_ = false;
+    }
     auto status = ftms::encodeMachineStatus(command);
     if (status.empty()) return;
     status_ = std::move(status);
     transportNotifyStatus();
 }
 
-void FtmsOutput::publishBikeData() {
+FitnessMetrics FtmsOutput::outputMetrics() const {
+    const auto& state = trainerState();
+    if (!state.connected) return {};
+    auto metrics = state.metrics;
+    const auto legacy = [&state](MetricSample& field, Metric metric) {
+        if (!field.valid) field = state.sample(metric);
+        if (!std::isfinite(field.value)) field.valid = false;
+    };
+    legacy(metrics.speed, Metric::Speed);
+    legacy(metrics.distance, Metric::Distance);
+    legacy(metrics.cadence, Metric::Cadence);
+    legacy(metrics.power, Metric::Power);
+    legacy(metrics.heartRate, Metric::HeartRate);
+    legacy(metrics.incline, Metric::Incline);
+    legacy(metrics.elapsed, Metric::ElapsedTime);
+    for (const auto field : kFitnessMetricFields)
+        if (!std::isfinite((metrics.*field).value)) (metrics.*field).valid = false;
+    auto mapped = ftms::mapMachineData(metrics, state.profile, profile_);
+    if ((profile_ == MachineProfile::Treadmill || profile_ == MachineProfile::CrossTrainer) &&
+        mapped.incline.valid && std::isfinite(mapped.incline.value) &&
+        (!mapped.rampAngle.valid || !std::isfinite(mapped.rampAngle.value))) {
+        mapped.rampAngle = {std::atan(mapped.incline.value / 100.0F) * kRadiansToDegrees, true};
+    }
+    return mapped;
+}
+
+void FtmsOutput::publishMachineData() {
     if (!connected_) return;
-    const bool treadmill = profile_ == MachineProfile::Treadmill;
-    auto payload = treadmill ? ftms::encodeTreadmillData(ftms::treadmillDataFrom(trainerState()))
-                             : ftms::encodeIndoorBikeData(ftms::indoorBikeDataFrom(trainerState()));
-    auto& data = treadmill ? treadmillData_ : bikeData_;
+    const auto metrics = outputMetrics();
+    auto payload = ftms::encodeMachineData(profile_, metrics);
+    auto packets = ftms::splitMachineData(profile_, metrics, transportMaxPayload());
+    auto& data = machineData();
     const std::uint32_t timestamp = now();
     const std::uint32_t elapsed = timestamp - lastBikeDataMs_;
     if (bikeDataSent_) {
         if (elapsed < kBikeDataMinIntervalMs) return;
-        if (payload == data && elapsed < kBikeDataMaxIntervalMs) return;
+        if (payload == data && packets == machineDataPackets_ && elapsed < kBikeDataMaxIntervalMs) return;
     }
     data = std::move(payload);
+    machineDataPackets_ = std::move(packets);
     lastBikeDataMs_ = timestamp;
     bikeDataSent_ = true;
-    if (treadmill) transportNotifyTreadmillData();
-    else transportNotifyBikeData();
+    transportNotifyMachineData();
 }
 
 void FtmsOutput::updateTrainingStatus() {
-    auto status = trainerState().connected ? ftms::TrainingStatus::ManualMode : ftms::TrainingStatus::Idle;
+    auto status = trainerState().connected && !sessionStopped_
+        ? ftms::TrainingStatus::ManualMode : ftms::TrainingStatus::Idle;
     if (profile_ == MachineProfile::Treadmill) {
-        const auto& speed = trainerState().sample(Metric::Speed);
-        status = trainerState().connected && speed.valid && std::isfinite(speed.value) && speed.value > 0
+        const auto speed = outputMetrics().speed;
+        status = !sessionStopped_ && trainerState().connected && speed.valid &&
+            std::isfinite(speed.value) && speed.value > 0
             ? ftms::TrainingStatus::ManualMode : ftms::TrainingStatus::Idle;
     }
-    if (status == trainingStatus_ &&
-        (profile_ != MachineProfile::Treadmill || !connected_ || trainingStatusSent_)) return;
+    if (status == trainingStatus_ && (!connected_ || trainingStatusSent_)) return;
     trainingStatus_ = status;
     transportNotifyTrainingStatus();
+    trainingStatusSent_ = connected_;
     if (profile_ == MachineProfile::Treadmill && connected_) {
         status_ = status == ftms::TrainingStatus::Idle ? ftms::Bytes{0x02, 0x01} : ftms::Bytes{0x04};
         transportNotifyStatus();
@@ -331,7 +407,9 @@ void FtmsOutput::resetSession() {
     granted_ = false;
     bikeDataSent_ = false;
     trainingStatusSent_ = false;
+    sessionStopped_ = false;
     treadmillData_.clear();
+    machineDataPackets_.clear();
     std::lock_guard<std::mutex> lock(mutex_);
     queueHead_ = 0;
     queueCount_ = 0;
@@ -341,42 +419,37 @@ void FtmsOutput::resetSession() {
 
 bool FtmsOutput::transportBegin() {
     if (transport_) return true;
-    auto transport = std::unique_ptr<Transport>(new Transport(*this));
-    // The BLE input (central) may have initialised the shared stack already,
-    // in which case init() ignores the name: set it explicitly.
-    if (!NimBLEDevice::getInitialized()) NimBLEDevice::init(name_);
-    NimBLEDevice::setDeviceName(name_);
-    transport->server = NimBLEDevice::createServer();
-    transport->server->setCallbacks(transport.get(), false);
-    // Advertising is restarted from loop() so the enable toggle stays authoritative.
-    transport->server->advertiseOnDisconnect(false);
-
+    if (!transport_) {
+        transport_.reset(new Transport(*this));
+        // The central and peripheral share one stack; never deinitialize it to
+        // rebuild the peripheral's GATT service.
+        if (!NimBLEDevice::getInitialized()) NimBLEDevice::init(name_);
+        NimBLEDevice::setDeviceName(name_);
+        transport_->server = NimBLEDevice::createServer();
+        transport_->server->setCallbacks(transport_.get(), false);
+        transport_->server->advertiseOnDisconnect(false);
+    }
+    auto* transport = transport_.get();
     NimBLEService* service = transport->server->createService(NimBLEUUID(ftms::kServiceUuid));
     transport->feature = service->createCharacteristic(NimBLEUUID(ftms::kFeatureUuid), NIMBLE_PROPERTY::READ);
-    transport->bikeData = service->createCharacteristic(NimBLEUUID(ftms::kIndoorBikeDataUuid), NIMBLE_PROPERTY::NOTIFY);
-    transport->treadmillData = service->createCharacteristic(NimBLEUUID(ftms::kTreadmillDataUuid), NIMBLE_PROPERTY::NOTIFY);
+    const std::array<std::uint16_t, 6> dataUuids{ftms::kIndoorBikeDataUuid, ftms::kTreadmillDataUuid,
+        ftms::kCrossTrainerDataUuid, ftms::kRowerDataUuid, ftms::kStepClimberDataUuid, ftms::kStairClimberDataUuid};
+    for (std::size_t index = 0; index < dataUuids.size(); ++index)
+        transport->machineData[index] = service->createCharacteristic(NimBLEUUID(dataUuids[index]), NIMBLE_PROPERTY::NOTIFY);
     transport->trainingStatus = service->createCharacteristic(
         NimBLEUUID(ftms::kTrainingStatusUuid), NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
-    NimBLECharacteristic* incline = service->createCharacteristic(
-        NimBLEUUID(ftms::kSupportedInclinationRangeUuid), NIMBLE_PROPERTY::READ);
-    NimBLECharacteristic* speed = service->createCharacteristic(
-        NimBLEUUID(ftms::kSupportedSpeedRangeUuid), NIMBLE_PROPERTY::READ);
-    NimBLECharacteristic* resistance = service->createCharacteristic(
-        NimBLEUUID(ftms::kSupportedResistanceRangeUuid), NIMBLE_PROPERTY::READ);
-    NimBLECharacteristic* power = service->createCharacteristic(
-        NimBLEUUID(ftms::kSupportedPowerRangeUuid), NIMBLE_PROPERTY::READ);
+    const std::array<std::uint16_t, 4> rangeUuids{ftms::kSupportedSpeedRangeUuid,
+        ftms::kSupportedInclinationRangeUuid, ftms::kSupportedResistanceRangeUuid, ftms::kSupportedPowerRangeUuid};
+    for (std::size_t index = 0; index < rangeUuids.size(); ++index)
+        transport->ranges[index] = service->createCharacteristic(NimBLEUUID(rangeUuids[index]), NIMBLE_PROPERTY::READ);
     transport->controlPoint = service->createCharacteristic(
         NimBLEUUID(ftms::kControlPointUuid), NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::INDICATE);
     transport->machineStatus = service->createCharacteristic(NimBLEUUID(ftms::kMachineStatusUuid), NIMBLE_PROPERTY::NOTIFY);
-    transport->controlPoint->setCallbacks(transport.get());
+    transport->controlPoint->setCallbacks(transport);
 
     transport->feature->setValue(feature_);
     const auto training = ftms::encodeTrainingStatus(trainingStatus_);
     transport->trainingStatus->setValue(training);
-    incline->setValue(ftms::encodeSupportedInclinationRange());
-    speed->setValue(ftms::encodeSupportedSpeedRange());
-    resistance->setValue(ftms::encodeSupportedResistanceRange());
-    power->setValue(ftms::encodeSupportedPowerRange());
     service->start();
 
     NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
@@ -385,7 +458,7 @@ bool FtmsOutput::transportBegin() {
     advertising->setServiceData(NimBLEUUID(ftms::kServiceUuid), std::string(serviceData.begin(), serviceData.end()));
     advertising->setScanResponse(true);
     advertising->setName(name_);
-    transport_ = std::move(transport);
+    transportApplyProfile();
     return true;
 }
 
@@ -411,37 +484,64 @@ void FtmsOutput::transportApplyName() {
 }
 
 void FtmsOutput::transportSetFeature() {
-    if (transport_) transport_->feature->setValue(feature_);
+    if (transport_) {
+        transport_->feature->setValue(feature_);
+        ftms::Features features;
+        ftms::decodeFeature(feature_.data(), feature_.size(), features);
+        transport_->ranges[0]->setValue(features.targets & ftms::kTargetSpeed
+            ? ftms::encodeSupportedSpeedRange() : ftms::Bytes{});
+        transport_->ranges[1]->setValue(features.targets & ftms::kTargetInclination
+            ? ftms::encodeSupportedInclinationRange() : ftms::Bytes{});
+        transport_->ranges[2]->setValue(features.targets & ftms::kTargetResistance
+            ? ftms::encodeSupportedResistanceRange() : ftms::Bytes{});
+        transport_->ranges[3]->setValue(features.targets & ftms::kTargetPower
+            ? ftms::encodeSupportedPowerRange() : ftms::Bytes{});
+    }
 }
 
 void FtmsOutput::transportApplyProfile() {
     if (!transport_) return;
+    // Keep the six data UUIDs stable: rebuilding NimBLE 1.4's service objects
+    // would leave its notification callback registry pointing at deleted objects.
+    for (auto* characteristic : transport_->machineData) characteristic->setValue(ftms::Bytes{});
+    transportSetFeature();
     const auto data = ftms::encodeAdvertisingServiceData(profile_);
     NimBLEDevice::getAdvertising()->setServiceData(NimBLEUUID(ftms::kServiceUuid),
         std::string(data.begin(), data.end()));
     transport_->trainingStatus->setValue(ftms::encodeTrainingStatus(trainingStatus_));
 }
 
-void FtmsOutput::transportNotifyTreadmillData() {
-    if (!transport_) return;
-    transport_->treadmillData->setValue(treadmillData_);
-    transport_->treadmillData->notify();
+std::size_t FtmsOutput::transportMaxPayload() const {
+    if (!transport_) return 20;
+    std::size_t maximum = 512;
+    const auto peers = transport_->server->getPeerDevices();
+    if (peers.empty()) return 20;
+    for (const auto id : peers) {
+        const auto mtu = transport_->server->getPeerMTU(id);
+        maximum = std::min(maximum, mtu >= 23 ? static_cast<std::size_t>(mtu - 3) : std::size_t{20});
+    }
+    return maximum;
 }
 
-void FtmsOutput::transportNotifyBikeData() {
+void FtmsOutput::transportNotifyMachineData() {
     if (!transport_) return;
-    transport_->bikeData->setValue(bikeData_);
-    transport_->bikeData->notify();
+    auto* characteristic = transport_->machineData[static_cast<std::size_t>(profile_)];
+    for (const auto& packet : machineDataPackets_) {
+        characteristic->setValue(packet);
+        characteristic->notify();
+    }
 }
 
 void FtmsOutput::transportNotifyTrainingStatus() {
+    trainingData_ = ftms::encodeTrainingStatus(trainingStatus_);
     if (!transport_) return;
-    transport_->trainingStatus->setValue(ftms::encodeTrainingStatus(trainingStatus_));
-    transport_->trainingStatus->notify();
+    transport_->trainingStatus->setValue(trainingData_);
+    if (connected_) transport_->trainingStatus->notify();
 }
 
 void FtmsOutput::transportIndicateResponse() {
-    if (transport_) transport_->controlPoint->indicate(response_.data(), response_.size());
+    if (transport_)
+        transport_->controlPoint->indicate(response_.data(), response_.size());
 }
 
 void FtmsOutput::transportNotifyStatus() {
@@ -463,9 +563,9 @@ void FtmsOutput::transportDisconnectClients() {
 void FtmsOutput::transportApplyName() {}
 void FtmsOutput::transportSetFeature() {}
 void FtmsOutput::transportApplyProfile() {}
-void FtmsOutput::transportNotifyBikeData() {}
-void FtmsOutput::transportNotifyTreadmillData() {}
-void FtmsOutput::transportNotifyTrainingStatus() {}
+std::size_t FtmsOutput::transportMaxPayload() const { return 20; }
+void FtmsOutput::transportNotifyMachineData() {}
+void FtmsOutput::transportNotifyTrainingStatus() { trainingData_ = ftms::encodeTrainingStatus(trainingStatus_); }
 void FtmsOutput::transportIndicateResponse() {}
 void FtmsOutput::transportNotifyStatus() {}
 

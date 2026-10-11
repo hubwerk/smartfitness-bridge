@@ -44,6 +44,9 @@ protected:
     sensors::RevolutionRate powerWheel_{2048, 32};
     bool cscCadence_ = false;
     bool cscSpeed_ = false;
+    bool crankKnown_ = false;
+    bool cscWheelKnown_ = false;
+    bool powerWheelKnown_ = false;
 };
 
 class TacxFecSource final : public TrainerSensorSource {

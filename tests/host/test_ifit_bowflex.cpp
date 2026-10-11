@@ -236,8 +236,9 @@ void testBowflexSchwinn() {
     data = Bytes(17,0); data[4] = 0xff; data[5] = 0xff; notify(schwinn,data,sn);
     data[4] = 0; data[5] = 0; notify(schwinn,data,sn+1000);
     assert(schwinn.sample().cadence.value == 60);
-    schwinn.tick(sn+4000);
+    schwinn.tick(sn+4001);
     assert(schwinn.sample().cadence.value == 0);
+    assert(!schwinn.sample().cadence.valid);
     assert(!schwinn.isTrainer());
 }
 void testMatchers() {

@@ -71,11 +71,13 @@ bool YesoulSource::onConnected(std::uint32_t subscribedMask, std::uint32_t) {
 void YesoulSource::onNotify(std::size_t, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) {
     yesoul::Frame frame;
     if (!yesoul::decode(data, length, frame)) return;
-    sample_.cadence = {frame.cadence, true};
-    sample_.power = {frame.power, true};
-    sample_.speed = {yesoul::speedFromCadence(frame.cadence), true};
-    sample_.resistance = {static_cast<float>(frame.resistance), true};
-    touch(nowMs);
+    SourceSample record;
+    record.cadence = {frame.cadence, true};
+    record.power = {frame.power, true};
+    record.speed = {yesoul::speedFromCadence(frame.cadence), true};
+    record.resistance = {static_cast<float>(frame.resistance), true};
+    record.distance = {frame.distance * 1000.0F, true};
+    commitSample(record, nowMs);
 }
 
 TrainerCapabilities YesoulSource::capabilities() const {
@@ -88,11 +90,17 @@ TrainerCapabilities YesoulSource::capabilities() const {
 void KeiserM3iSource::onAdvertisement(const ble::Advertisement& advertisement, std::uint32_t nowMs) {
     keiser::Broadcast broadcast;
     if (!keiser::parse(advertisement.manufacturerData.data(), advertisement.manufacturerData.size(), broadcast)) return;
-    sample_.cadence = {broadcast.cadence, true};
-    sample_.power = {broadcast.power, true};
-    if (broadcast.heartRate > 0.0F) sample_.heartRate = {broadcast.heartRate, true};
-    if (broadcast.gear > 0) sample_.resistance = {static_cast<float>(broadcast.gear), true};
-    touch(nowMs);
+    SourceSample record;
+    record.cadence = {broadcast.cadence, true};
+    record.power = {broadcast.power, true};
+    record.heartRate = {broadcast.heartRate, true};
+    std::size_t offset = advertisement.manufacturerData[0] == 2 && advertisement.manufacturerData[1] == 1 ? 2 : 0;
+    if (broadcast.minor >= 0x21 && advertisement.manufacturerData.size() > offset + 16)
+        record.resistance = {static_cast<float>(broadcast.gear), true};
+    record.distance = {broadcast.distanceKm * 1000.0F, true};
+    record.elapsed = {static_cast<float>(broadcast.seconds), true};
+    record.totalEnergy = {static_cast<float>(broadcast.calories), true};
+    commitSample(record, nowMs);
 }
 
 TrainerCapabilities KeiserM3iSource::capabilities() const {

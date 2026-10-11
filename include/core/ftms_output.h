@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 #include "bridge_output.h"
 #include "ftms/ftms_codec.hpp"
 
@@ -51,9 +52,16 @@ public:
     bool clientConnected() const;
     bool controlGranted() const;
 
-    // Last payloads handed to the transport (diagnostics and host tests).
+    // Complete records and MTU-sized notification packets (diagnostics and host tests).
     const smartfitness::ftms::Bytes& lastIndoorBikeData() const;
     const smartfitness::ftms::Bytes& lastTreadmillData() const;
+    const smartfitness::ftms::Bytes& lastCrossTrainerData() const;
+    const smartfitness::ftms::Bytes& lastRowerData() const;
+    const smartfitness::ftms::Bytes& lastStepClimberData() const;
+    const smartfitness::ftms::Bytes& lastStairClimberData() const;
+    const smartfitness::ftms::Bytes& lastMachineData() const;
+    const std::vector<smartfitness::ftms::Bytes>& lastMachineDataPackets() const;
+    const smartfitness::ftms::Bytes& lastTrainingStatus() const;
     const smartfitness::ftms::Bytes& lastControlResponse() const;
     const smartfitness::ftms::Bytes& lastMachineStatus() const;
     const smartfitness::ftms::Bytes& feature() const;
@@ -74,7 +82,9 @@ private:
     void handleConnectionChanges();
     void drainControlPoint();
     void handleControlPoint(const PendingWrite& write);
-    void publishBikeData();
+    smartfitness::ftms::Bytes& machineData();
+    smartfitness::FitnessMetrics outputMetrics() const;
+    void publishMachineData();
     void updateTrainingStatus();
     void startAdvertising();
     void stopAdvertising();
@@ -90,8 +100,8 @@ private:
     void transportApplyName();
     void transportSetFeature();
     void transportApplyProfile();
-    void transportNotifyBikeData();
-    void transportNotifyTreadmillData();
+    std::size_t transportMaxPayload() const;
+    void transportNotifyMachineData();
     void transportNotifyTrainingStatus();
     void transportIndicateResponse();
     void transportNotifyStatus();
@@ -115,6 +125,13 @@ private:
     smartfitness::ftms::Bytes feature_;
     smartfitness::ftms::Bytes bikeData_;
     smartfitness::ftms::Bytes treadmillData_;
+    smartfitness::ftms::Bytes crossTrainerData_;
+    smartfitness::ftms::Bytes rowerData_;
+    smartfitness::ftms::Bytes stepClimberData_;
+    smartfitness::ftms::Bytes stairClimberData_;
+    std::vector<smartfitness::ftms::Bytes> machineDataPackets_;
+    smartfitness::ftms::Bytes trainingData_;
+    bool sessionStopped_ = false;
     smartfitness::ftms::Bytes response_;
     smartfitness::ftms::Bytes status_;
     Clock clock_;

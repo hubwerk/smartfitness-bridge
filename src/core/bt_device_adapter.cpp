@@ -26,6 +26,14 @@ bool SimulatedDeviceAdapter::scanAndConnect() {
     telemetry_.cadence = 80;
     telemetry_.power = 150;
     telemetry_.heartRate = 120;
+    telemetry_.speedValid = true;
+    telemetry_.cadenceValid = true;
+    telemetry_.powerValid = true;
+    telemetry_.heartRateValid = true;
+    telemetry_.metrics.speed = {telemetry_.speed, true};
+    telemetry_.metrics.cadence = {telemetry_.cadence, true};
+    telemetry_.metrics.power = {telemetry_.power, true};
+    telemetry_.metrics.heartRate = {telemetry_.heartRate, true};
     emitTelemetry(telemetry_);
     return true;
 }
@@ -40,6 +48,7 @@ void SimulatedDeviceAdapter::setTrainer(bool trainer) {
     trainer_ = trainer;
     telemetry_.trainerDetected = trainerDetected();
     telemetry_.targetPower = 0;
+    telemetry_.targetPowerValid = false;
     emitTelemetry(telemetry_);
 }
 
@@ -59,12 +68,27 @@ bool SimulatedDeviceAdapter::apply(const ControlRequest& request) {
     if (!trainerDetected() || !capabilities().supports(request.control) || !std::isfinite(request.value))
         return false;
     switch (request.control) {
-        case Control::Speed: telemetry_.speed = request.value; break;
-        case Control::Incline: telemetry_.incline = request.value; break;
-        case Control::Resistance: telemetry_.resistance = request.value; break;
+        case Control::Speed:
+            telemetry_.speed = request.value;
+            telemetry_.speedValid = true;
+            telemetry_.metrics.speed = {request.value, true};
+            break;
+        case Control::Incline:
+            telemetry_.incline = request.value;
+            telemetry_.inclineValid = true;
+            telemetry_.metrics.incline = {request.value, true};
+            break;
+        case Control::Resistance:
+            telemetry_.resistance = request.value;
+            telemetry_.resistanceValid = true;
+            telemetry_.metrics.resistance = {request.value, true};
+            break;
         case Control::Power:
             telemetry_.power = request.value;
             telemetry_.targetPower = request.value;
+            telemetry_.powerValid = true;
+            telemetry_.targetPowerValid = true;
+            telemetry_.metrics.power = {request.value, true};
             break;
         default: return false;
     }

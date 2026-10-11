@@ -214,7 +214,8 @@ void testOutputProfiles() {
     assert(status["ftmsOutput"]["override"] == "auto");
     assert(status["telemetry"]["elapsed"].isNull());
     assert(contains(rig.ui.handleCommand("help"), "ftms-profile"));
-    for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower"}) {
+    for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower",
+                                    "step-climber", "stair-climber"}) {
         Command command;
         std::string error;
         assert(parseConsoleCommand("ftms-profile " + value, command, error));
@@ -238,7 +239,7 @@ void testOutputProfiles() {
         command.type = CommandType::FtmsProfile;
         command.text = value;
         assert(!rig.ui.execute(command).ok);
-        assert(rig.config.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
+        assert(rig.config.config().ftmsOutputProfile == FtmsOutputProfile::StairClimber);
     }
     assert(contains(rig.ui.handleCommand("ftms-profile treadmill"), "output-profile=treadmill"));
     assert(rig.config.hasUnsavedChanges());
@@ -251,7 +252,8 @@ void testOutputProfiles() {
 
     rig.ui.handleCommand("ant off");
     ApiExchange api;
-    for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower"}) {
+    for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower",
+                                    "step-climber", "stair-climber"}) {
         const auto response = api.submit("config", "{\"ftmsOutputProfile\":\"" + value + "\",\"save\":true}");
         assert(response.status == 202);
         const auto id = parse(response.body)["id"].as<std::uint32_t>();
@@ -274,9 +276,10 @@ void testOutputProfiles() {
     const auto omitted = api.submit("config", R"({"ant":false})");
     assert(omitted.status == 202);
     api.process(rig.ui);
-    assert(rig.config.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
+    assert(rig.config.config().ftmsOutputProfile == FtmsOutputProfile::StairClimber);
     rig.ui.handleCommand("ftms-profile auto");
-    for (const auto profile : {MachineProfile::Treadmill, MachineProfile::CrossTrainer, MachineProfile::Rower}) {
+    for (const auto profile : {MachineProfile::Treadmill, MachineProfile::CrossTrainer, MachineProfile::Rower,
+                               MachineProfile::StepClimber, MachineProfile::StairClimber}) {
         TrainerState input;
         input.connected = true;
         input.profile = profile;
@@ -516,6 +519,29 @@ void testJsonViews() {
     assert(document["input"]["dropped"]["notifications"] == 0);
     assert(document["input"]["dropped"]["commands"] == 0);
     assert(contains(rig.ui.status(), "dropped(scans=0,events=0,notifications=0,commands=0)"));
+    assert(document["telemetry"]["incline"].isNull());
+    assert(document["metrics"]["resistance"].isNull());
+    assert(document["metrics"]["power"] == 180);
+}
+
+void testOptionalMetricsJson() {
+    StatusView optional;
+    optional.telemetry[static_cast<std::size_t>(Metric::Power)] = {true, 0.0F};
+    optional.telemetry[static_cast<std::size_t>(Metric::Speed)] = {true, std::numeric_limits<float>::quiet_NaN()};
+    optional.metrics.power = {0.0F, true};
+    optional.metrics.strokeRate = {24.5F, true};
+    optional.metrics.strokeCount = {0.0F, true};
+    optional.metrics.floors = {0.0F, true};
+    optional.metrics.stepCount = {30.0F, true};
+    optional.metrics.energyPerMinute = {std::numeric_limits<float>::quiet_NaN(), true};
+    const auto document = parse(web::statusJson(optional, {}));
+    assert(document["telemetry"]["power"] == 0);
+    assert(document["telemetry"]["speed"].isNull() && document["telemetry"]["cadence"].isNull());
+    assert(document["metrics"].size() == 31);
+    assert(document["metrics"]["power"] == 0 && document["metrics"]["strokeCount"] == 0);
+    assert(document["metrics"]["strokeRate"] == 24.5);
+    assert(document["metrics"]["floors"] == 0 && document["metrics"]["stepCount"] == 30);
+    assert(document["metrics"]["pace"].isNull() && document["metrics"]["energyPerMinute"].isNull());
 }
 
 void testWifiPolicy() {
@@ -608,6 +634,7 @@ void runWebTests() {
     testApiExchangeThreads();
     testApiBleQueueRejections();
     testJsonViews();
+    testOptionalMetricsJson();
     testWifiPolicy();
     testRequestProtection();
     testBodyReceipt();

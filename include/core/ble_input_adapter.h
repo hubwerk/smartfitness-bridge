@@ -136,6 +136,7 @@ private:
     smartfitness::ble::BleAddress excludedPeer_;
     bool excludedPeerValid_ = false;
     float targetPower_ = 0.0F;
+    bool targetPowerValid_ = false;
     std::uint32_t lastEmitMs_ = 0;
     bool lastEmittedConnected_ = false;
     bool lastEmittedStale_ = false;

@@ -16,7 +16,13 @@ std::string serialized(const JsonDocument& document) {
 
 void addMetric(JsonObject object, const char* key, const StatusView& status, Metric metric) {
     const auto& sample = status.metric(metric);
-    if (sample.valid) object[key] = std::round(static_cast<double>(sample.value) * 10.0) / 10.0;
+    if (sample.valid && std::isfinite(sample.value))
+        object[key] = std::round(static_cast<double>(sample.value) * 10.0) / 10.0;
+    else object[key] = nullptr;
+}
+
+void addSample(JsonObject object, const char* key, const MetricSample& sample) {
+    if (sample.valid && std::isfinite(sample.value)) object[key] = sample.value;
     else object[key] = nullptr;
 }
 }  // namespace
@@ -36,6 +42,39 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
     addMetric(telemetry, "incline", status, Metric::Incline);
     addMetric(telemetry, "distance", status, Metric::Distance);
     addMetric(telemetry, "elapsed", status, Metric::ElapsedTime);
+    JsonObject metrics = document["metrics"].to<JsonObject>();
+    const auto& samples = status.metrics;
+    addSample(metrics, "speed", samples.speed);
+    addSample(metrics, "cadence", samples.cadence);
+    addSample(metrics, "power", samples.power);
+    addSample(metrics, "heartRate", samples.heartRate);
+    addSample(metrics, "incline", samples.incline);
+    addSample(metrics, "resistance", samples.resistance);
+    addSample(metrics, "distance", samples.distance);
+    addSample(metrics, "elapsed", samples.elapsed);
+    addSample(metrics, "averageSpeed", samples.averageSpeed);
+    addSample(metrics, "averageCadence", samples.averageCadence);
+    addSample(metrics, "averagePower", samples.averagePower);
+    addSample(metrics, "rampAngle", samples.rampAngle);
+    addSample(metrics, "positiveElevationGain", samples.positiveElevationGain);
+    addSample(metrics, "negativeElevationGain", samples.negativeElevationGain);
+    addSample(metrics, "pace", samples.pace);
+    addSample(metrics, "averagePace", samples.averagePace);
+    addSample(metrics, "totalEnergy", samples.totalEnergy);
+    addSample(metrics, "energyPerHour", samples.energyPerHour);
+    addSample(metrics, "energyPerMinute", samples.energyPerMinute);
+    addSample(metrics, "metabolicEquivalent", samples.metabolicEquivalent);
+    addSample(metrics, "remaining", samples.remaining);
+    addSample(metrics, "forceOnBelt", samples.forceOnBelt);
+    addSample(metrics, "stepRate", samples.stepRate);
+    addSample(metrics, "averageStepRate", samples.averageStepRate);
+    addSample(metrics, "strideCount", samples.strideCount);
+    addSample(metrics, "strokeRate", samples.strokeRate);
+    addSample(metrics, "averageStrokeRate", samples.averageStrokeRate);
+    addSample(metrics, "strokeCount", samples.strokeCount);
+    addSample(metrics, "floors", samples.floors);
+    addSample(metrics, "stepCount", samples.stepCount);
+    addSample(metrics, "movementDirection", samples.movementDirection);
     document["deviceName"] = status.deviceName;
     document["trainer"] = status.trainer;
     document["canControl"] = status.canControl;

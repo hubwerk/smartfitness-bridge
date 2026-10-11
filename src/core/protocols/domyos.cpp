@@ -68,6 +68,7 @@ bool FrameAssembler::feed(const std::uint8_t* data, std::size_t length, Bytes& o
         joined.insert(joined.end(), value.begin(), value.end());
         value = joined;
     }
+    else if (incomplete_ && length != 20 && length != 26) return false;
     last_ = value;
     // Any packet other than the expected tail abandons a pending head
     // (upstream keeps the flag latched, which would pause polling forever).
@@ -91,7 +92,7 @@ bool decodeStatus(const Bytes& frame, Status& out) {
     out.speed = static_cast<float>((frame[6] << 8) | frame[7]) / 10.0F;
     out.cadence = static_cast<float>(frame[9]);
     out.distance = static_cast<float>((frame[12] << 8) | frame[13]) / 10.0F;
-    out.resistance = frame[14] < 1 ? 1 : frame[14];
+    out.resistance = frame[14];
     out.heartRate = frame[18];
     return true;
 }
@@ -118,6 +119,7 @@ void DomyosSource::reset() {
     initializing_ = false;
     initDone_ = false;
     lastPollMs_ = 0;
+    fragmentMs_ = 0;
     assembler_.reset();
 }
 
@@ -141,6 +143,8 @@ void DomyosSource::sendStep(std::uint32_t nowMs) {
 }
 
 void DomyosSource::tick(std::uint32_t nowMs) {
+    SourceProtocol::tick(nowMs);
+    if (assembler_.incomplete() && nowMs - fragmentMs_ > 500U) assembler_.reset();
     if (initializing_) {
         if (nowMs - stepSentMs_ < domyos::kStepTimeoutMs) return;
         if (attempts_ >= domyos::kStepAttempts) {
@@ -171,15 +175,19 @@ void DomyosSource::onNotify(std::size_t, const std::uint8_t* data, std::size_t l
         }
     }
     domyos::Bytes frame;
+    if (assembler_.incomplete() && nowMs - fragmentMs_ > 500U) assembler_.reset();
+    if (length == 20) fragmentMs_ = nowMs;
     if (!assembler_.feed(data, length, frame)) return;
     domyos::Status status;
     if (!domyos::decodeStatus(frame, status)) return;
-    sample_.speed = {status.speed, true};
-    sample_.cadence = {status.cadence, true};
-    sample_.resistance = {static_cast<float>(status.resistance), true};
-    sample_.power = {domyos::power(status.resistance, status.cadence), true};
-    if (status.heartRate > 0) sample_.heartRate = {static_cast<float>(status.heartRate), true};
-    touch(nowMs);
+    SourceSample record;
+    record.speed = {status.speed, true};
+    record.cadence = {status.cadence, true};
+    record.resistance = {static_cast<float>(status.resistance), true};
+    record.power = {domyos::power(status.resistance, status.cadence), true};
+    record.heartRate = {static_cast<float>(status.heartRate), true};
+    record.distance = {status.distance * 1000.0F, true};
+    commitSample(record, nowMs);
 }
 
 bool DomyosSource::control(const ControlRequest& request, std::uint32_t) {

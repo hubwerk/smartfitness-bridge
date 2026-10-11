@@ -49,6 +49,7 @@ public:
         value.connected = connected;
         value.trainerDetected = trainer;
         value.power = 180;
+        value.powerValid = true;
         return value;
     }
     bool apply(const ControlRequest&) override {
@@ -73,6 +74,7 @@ void testCapabilitiesAndSamples() {
     assert(!state.capabilities.supports(Control::Resistance));
     assert(state.sample(Metric::Power).valid);
     assert(state.sample(Metric::Power).value == 175.0F);
+    assert(state.metrics.power.valid && state.metrics.power.value == 175.0F);
     state.capabilities.setMetric(static_cast<Metric>(255), true);
     state.setSample(static_cast<Metric>(255), 99.0F);
     assert(!state.capabilities.supports(static_cast<Metric>(255)));
@@ -294,7 +296,7 @@ void testAuthoritativeAdapterState() {
     adapter.supported.setMetric(Metric::Power, false);
     bridge.loop();
     assert(bridge.state() == RuntimeState::Trainer);
-    assert(!bridge.trainerState().sample(Metric::Power).valid);
+    assert(bridge.trainerState().sample(Metric::Power).valid);
     assert(!bridge.hasControlTarget() && !ant.hasControlTarget() && !ftms.hasControlTarget());
     assert(bridge.routeControl({Control::Power, 200}) == ControlResult::Unsupported);
 
@@ -389,6 +391,46 @@ void testOptionalTreadmillTotals() {
     assert(!bridge.trainerState().sample(Metric::ElapsedTime).valid);
 }
 
+void testExplicitMetricPresence() {
+    BridgeCore bridge;
+    TrainerState state;
+    state.connected = true;
+    for (unsigned i = 0; i < static_cast<unsigned>(Metric::Count); ++i)
+        state.capabilities.setMetric(static_cast<Metric>(i), true);
+    bridge.setTrainerState(state);
+    FitnessTelemetry telemetry;
+    telemetry.connected = true;
+    telemetry.power = 123;
+    bridge.setTelemetry(telemetry);
+    assert(!bridge.trainerState().sample(Metric::Speed).valid);
+    assert(!bridge.trainerState().sample(Metric::Cadence).valid);
+    assert(!bridge.trainerState().sample(Metric::Power).valid);
+    assert(!bridge.trainerState().sample(Metric::HeartRate).valid);
+    assert(!bridge.trainerState().sample(Metric::Incline).valid);
+
+    telemetry.power = 0;
+    telemetry.powerValid = telemetry.heartRateValid = true;
+    telemetry.metrics.strokeCount = {0, true};
+    telemetry.metrics.averagePower = {123, true};
+    telemetry.metrics.remaining = {0, true};
+    bridge.setTelemetry(telemetry);
+    assert(bridge.trainerState().sample(Metric::Power).valid);
+    assert(bridge.trainerState().sample(Metric::Power).value == 0);
+    assert(bridge.trainerState().sample(Metric::HeartRate).valid);
+    assert(bridge.trainerState().metrics.strokeCount.valid);
+    assert(bridge.trainerState().metrics.averagePower.value == 123);
+    assert(bridge.trainerState().metrics.remaining.valid);
+    telemetry.power = NAN;
+    telemetry.powerValid = true;
+    telemetry.metrics = {};
+    bridge.setTelemetry(telemetry);
+    assert(!bridge.trainerState().sample(Metric::Power).valid);
+    assert(!bridge.trainerState().metrics.strokeCount.valid);
+    telemetry.connected = false;
+    bridge.setTelemetry(telemetry);
+    assert(!bridge.trainerState().metrics.heartRate.valid);
+}
+
 }  // namespace
 
 void runBridgeCoreTests() {
@@ -403,4 +445,5 @@ void runBridgeCoreTests() {
     testReattachmentAndCallbackCleanup();
     testRuntimeProfiles();
     testOptionalTreadmillTotals();
+    testExplicitMetricPresence();
 }

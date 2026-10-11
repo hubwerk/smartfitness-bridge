@@ -30,11 +30,6 @@ enum class Control : std::uint8_t {
     Count
 };
 
-struct MetricSample {
-    float value = 0.0F;
-    bool valid = false;
-};
-
 struct TrainerCapabilities {
     std::uint32_t metrics = 0;
     std::uint32_t controls = 0;
@@ -51,6 +46,7 @@ struct TrainerState {
     TrainerCapabilities capabilities;
     MachineProfile profile = MachineProfile::IndoorBike;
     std::array<MetricSample, static_cast<std::size_t>(Metric::Count)> telemetry{};
+    FitnessMetrics metrics;
 
     const MetricSample& sample(Metric metric) const;
     void setSample(Metric metric, float value, bool valid = true);

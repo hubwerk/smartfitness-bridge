@@ -20,6 +20,13 @@ qdomyos-zwift vendor ports, reconnect/backoff, stale-data handling, FTMS output,
 Wi-Fi setup and web UI, a shared console/API command layer, and NVS configuration.
 ANT output remains a stub; CPS/HRS output services and OTA are not implemented.
 
+FTMS input and output support **Indoor Bike, Treadmill, Cross Trainer, Rower,
+Step Climber, and Stair Climber**, with automatic source-profile mapping and a
+persisted manual output override. Every measurement is presence-aware: missing
+fields stay unset (shown as “–”), while reported zero remains a valid value.
+See [FTMS field layouts, optional semantics, and protocol mapping](docs/ftms-profiles.md)
+and the [supported input devices](docs/supported-devices.md).
+
 **Not verified on hardware.** Host tests and firmware compilation do not establish
 real-device compatibility, radio coexistence, app interoperability, or safe physical
 trainer operation. All supported-device entries are unverified on equipment.
@@ -407,7 +414,7 @@ The Serial monitor (115200 baud, newline-terminated) accepts the same commands a
 | `ftms-input on/off` | Select paired BLE input / simulation; independent of output |
 | `ftms-output on/off` | Enable advertising / disconnect client and stop advertising |
 | `ftms-name <name>` | Set 1–20 printable ASCII characters; spaces are allowed |
-| `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower>` | Select output profile; `auto` follows input, unsupported output types fall back to bike; `save` persists |
+| `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower\|step-climber\|stair-climber>` | Select output profile; `auto` follows input; `save` persists |
 | `wifi <ssid> [password]`, `wifi-clear`, `ap-pass <password>` | Wi-Fi settings (save + restart to apply) |
 | `save`, `load`, `factory-reset`, `restart` | Persistence and reboot |
 
@@ -460,7 +467,8 @@ fixed order and stop at the first failure, **without rollback**.
 | WS | `/ws` | – | Server sends `status`, `scan`, `config`, `result`; client messages ignored |
 
 Config types: `ftmsName`, `ftmsOutputProfile`, SSID, and passwords are strings;
-`ftmsOutputProfile` accepts `auto`, `bike`, `treadmill`, `cross-trainer` or `rower`.
+`ftmsOutputProfile` accepts `auto`, `bike`, `treadmill`, `cross-trainer`, `rower`,
+`step-climber` or `stair-climber`.
 Toggles and `save`
 are booleans. `wifiSsid:""` clears SSID/password. `wifiPassword` requires
 `wifiSsid`; omit it to retain the old password, or use `""` for an open network.
@@ -519,7 +527,11 @@ API JSON responses use `Cache-Control: no-store`.
 ### Snapshot examples
 
 `GET /api/status` (**200**); metric values are numbers rounded to one decimal,
-or `null` when invalid. Example disconnected snapshot:
+or `null` when invalid. The additional `metrics` object exposes all normalized
+profile fields (including stroke/step counts, averages, energy and remaining
+time) without rounding; every absent/non-finite field is `null`. Pace units follow
+`input.profile`; see [profile layouts](docs/ftms-profiles.md).
+Example disconnected snapshot (extended `metrics` object omitted for brevity):
 
 ```json
 {
@@ -610,7 +622,7 @@ NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little
 | paired source valid | 1 | `0` or `1`, default `0` |
 | paired source address type | 1 | `0`–`3`; console/API accepts public (`0`) or random (`1`) |
 | paired source address | 6 | Address bytes in display order; invalid source requires type/address all zero |
-| `ftmsOutputProfile` (v3) | 1 | After source address, before CRC: `0` auto (default), `1` bike, `2` treadmill, `3` cross-trainer, `4` rower |
+| `ftmsOutputProfile` (v3) | 1 | After source address, before CRC: `0` auto (default), `1` bike, `2` treadmill, `3` cross-trainer, `4` rower, `5` step-climber, `6` stair-climber |
 | CRC-32 | 4 | Little endian; over all preceding bytes, reflected polynomial `0xEDB88320`, initial/final XOR `0xffffffff` |
 
 Each text field is a one-byte length followed by exactly that many bytes (no NUL).
@@ -641,7 +653,8 @@ corruption, not tampering or encryption.
 ## FTMS output (Bluetooth LE)
 `FtmsOutput` is a NimBLE-Arduino GATT server (firmware only; the transport is compiled under `#ifdef ARDUINO`, so host tests need no BLE stack). It advertises the Fitness Machine Service UUID `0x1826`, FTMS service data (machine available, effective output type), and the configured name (`ftms-name`, default `SmartFitness Bridge`, max 20 ASCII characters).
 
-The shared machine-profile names are `auto|bike|treadmill|cross-trainer|rower`.
+The shared machine-profile names are
+`auto|bike|treadmill|cross-trainer|rower|step-climber|stair-climber`.
 `auto` uses the active input profile: vendor adapters declare their machine type,
 and FTMS input derives it from discovered data characteristics and FTMS service
 data rather than treating every `0x1826` source as a bike. Simulation and sensor
@@ -651,15 +664,15 @@ For ambiguous FTMS subscriptions, the first valid data notification fixes the
 input profile; other machine-data UUIDs are ignored. An explicit supported FTMS
 advertised type can change that selection and clears old metrics/freshness.
 
-Bike and treadmill output are implemented. **Full Cross Trainer Data and Rower
-Data output are deferred to follow-up work**, including their profile-specific
-features, control semantics, codecs and hardware/app validation. These input
-profiles remain visible as `cross-trainer`/`rower`, while their effective output
-is explicitly shown as `bike` fallback; selecting those overrides also falls
-back to bike. This is not a transparent reproduction of the source GATT server.
+All six profile codecs are implemented, including all defined optional fields.
+Only supplied measurements are emitted; paired/grouped fields require all
+members, and no missing value is manufactured to complete a group. See the
+[profile tables](docs/ftms-profiles.md) for layouts and mapping. This is not a
+transparent reproduction of the source GATT server; hardware/app validation
+remains outstanding.
 
-The GATT database is stable and includes both Indoor Bike Data and Treadmill
-Data characteristics. Only the effective profile's data is notified. A profile
+The GATT database is stable and includes all six machine-data
+characteristics. Only the effective profile's data is notified. A profile
 change disconnects the client, invalidates its Request Control grant and queued
 session commands, and re-advertises with the new machine-type service data.
 The database itself does not change, so no Service Changed indication is
@@ -668,9 +681,13 @@ read features again, and request control again.
 
 | Characteristic | UUID | Properties | Content |
 |---|---|---|---|
-| Fitness Machine Feature | `0x2ACC` | read | Profile/capability-derived. Bike: cadence, inclination, HR, power; targets: inclination (+ bike simulation), resistance, power. Treadmill: mandatory instantaneous speed plus optional inclination, HR, distance and elapsed time; targets: speed/inclination only when supported. Bit 0 means average speed, not instantaneous-speed support, and is not set |
-| Indoor Bike Data | `0x2AD2` | notify | Speed (0.01 km/h), cadence (0.5 rpm), power (W, sint16), heart rate (bpm). A field and its flag are present only when the core marks the metric valid. Sent on change (at most every 250 ms) and at least once per second while a client is connected |
-| Treadmill Data | `0x2ACD` | notify | Valid speed (0.01 km/h), inclination and ramp angle, HR, optional distance and elapsed time; treadmill profile only. Same notification cadence as bike data |
+| Fitness Machine Feature | `0x2ACC` | read | Profile/capability-derived measurement and target bits. Bit 0 means average speed, not instantaneous-speed support |
+| Indoor Bike Data | `0x2AD2` | notify | All present bike fields; at most every 250 ms on change and at least once per second while a client is connected |
+| Treadmill Data | `0x2ACD` | notify | All present treadmill fields; same notification cadence |
+| Cross Trainer Data | `0x2ACE` | notify | uint24 flags, all present cross-trainer fields including direction |
+| Rower Data | `0x2AD1` | notify | Stroke rate/count group, pace, and other present rowing fields |
+| Step Climber Data | `0x2ACF` | notify | Floors/step-count group and other present step-climber fields |
+| Stair Climber Data | `0x2AD0` | notify | Floors, stride count and other present stair-climber fields |
 | Training Status | `0x2AD3` | read, notify | Bike: Idle without a device, Manual Mode when connected. Treadmill: Idle until valid nonzero speed, Manual Mode while moving |
 | Supported Speed Range | `0x2AD4` | read | Core bounds 0.00 … 100.00 km/h, step 0.01 km/h; tighter input limits are enforced by the adapter, not yet exposed here |
 | Supported Inclination Range | `0x2AD5` | read | −20.0 … 25.0 %, step 0.1 % |
@@ -684,8 +701,11 @@ Inclination `0x03` (sint16, 0.1 %), Start/Resume `0x07`, and Stop/Pause `0x08`
 (`0x01` stop, `0x02` pause). Treadmill adds Set Target Speed `0x02` (uint16,
 0.01 km/h). Bike supports Set Target Resistance `0x04` (uint8 0.1, sint16 0.1
 also accepted), Set Target Power `0x05` (sint16 W), and Set Indoor Bike Simulation
-Parameters `0x11` (grade mapped to incline). Treadmill output rejects power,
-resistance and bike simulation; an override does not grant unsupported controls.
+Parameters `0x11` (grade mapped to incline). Cross trainers support appropriate
+speed/inclination/resistance/power targets; rowers support resistance/power.
+Treadmill output rejects power, resistance and bike simulation; climber output
+does not advertise these targets. An override does not grant unsupported source
+controls.
 Other opcodes return Not Supported (`0x02`); wrong lengths return Invalid
 Parameter (`0x03`).
 
@@ -702,11 +722,9 @@ Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnec
   the core target.
 - Disconnect and stale-data handling never send stop/speed commands. Use the
   equipment's physical stop and safety key; bridge control is not a safety system.
-- Treadmill packets fit within **20 bytes**, even with speed, inclination/ramp
-  angle, HR, distance and elapsed time, so no More Data fragmentation is needed.
-  FTMS-supplied distance and elapsed time are decoded and forwarded when actually
-  present and valid. Vendor-source totals are not synthesized; elapsed time is
-  never invented from connection uptime. No energy fields are emitted.
+- Full records may exceed 20 bytes and are fragmented using More Data according
+  to the negotiated ATT MTU. Reported energy, distance, counts and time are
+  forwarded only when present; no totals are invented from connection uptime.
 - Bike simulation parameters map only grade to incline; wind speed, rolling
   resistance and drag are not forwarded.
 - Only one client is served at a time (advertising stops while connected). No bonding/security, no Cycling Power or Heart Rate services.

@@ -36,6 +36,18 @@ const MetricSample& TrainerState::sample(Metric metric) const {
 void TrainerState::setSample(Metric metric, float value, bool valid) {
     const auto index = static_cast<std::size_t>(metric);
     if (index < telemetry.size()) telemetry[index] = {value, valid && std::isfinite(value)};
+    MetricSample* field = nullptr;
+    switch (metric) {
+        case Metric::Speed: field = &metrics.speed; break;
+        case Metric::Distance: field = &metrics.distance; break;
+        case Metric::Cadence: field = &metrics.cadence; break;
+        case Metric::Power: field = &metrics.power; break;
+        case Metric::HeartRate: field = &metrics.heartRate; break;
+        case Metric::Incline: field = &metrics.incline; break;
+        case Metric::ElapsedTime: field = &metrics.elapsed; break;
+        default: break;
+    }
+    if (field) *field = {value, valid && std::isfinite(value)};
 }
 
 BridgeCore::BridgeCore(TrainerControlAdapter* adapter) : adapter_(adapter) {}
@@ -126,10 +138,6 @@ void BridgeCore::setTrainerState(const TrainerState& state) {
         dirty_ = true;
     }
     trainer_ = state;
-    for (std::size_t index = 0; index < trainer_.telemetry.size(); ++index) {
-        if (!trainer_.capabilities.supports(static_cast<Metric>(index)))
-            trainer_.telemetry[index].valid = false;
-    }
     if (!trainer_.connected) {
         trainer_ = {};
         trainer_.profile = state.profile;
@@ -155,15 +163,22 @@ void BridgeCore::setTelemetry(const FitnessTelemetry& telemetry) {
         next.trainerDetected = telemetry.trainerDetected;
         setTrainerState(next);
     }
-    trainer_.setSample(Metric::Speed, telemetry_.speed, trainer_.connected && trainer_.capabilities.supports(Metric::Speed));
-    trainer_.setSample(Metric::Cadence, telemetry_.cadence, trainer_.connected && trainer_.capabilities.supports(Metric::Cadence));
-    trainer_.setSample(Metric::Power, telemetry_.power, trainer_.connected && trainer_.capabilities.supports(Metric::Power));
-    trainer_.setSample(Metric::HeartRate, telemetry_.heartRate, trainer_.connected && trainer_.capabilities.supports(Metric::HeartRate));
-    trainer_.setSample(Metric::Incline, telemetry_.incline, trainer_.connected && trainer_.capabilities.supports(Metric::Incline));
+    trainer_.metrics = trainer_.connected ? telemetry_.metrics : FitnessMetrics{};
+    for (auto field : kFitnessMetricFields) {
+        auto& sample = trainer_.metrics.*field;
+        if (!std::isfinite(sample.value)) sample.valid = false;
+    }
+    trainer_.setSample(Metric::Speed, telemetry_.speed, trainer_.connected && telemetry_.speedValid);
+    trainer_.setSample(Metric::Cadence, telemetry_.cadence, trainer_.connected && telemetry_.cadenceValid);
+    trainer_.setSample(Metric::Power, telemetry_.power, trainer_.connected && telemetry_.powerValid);
+    trainer_.setSample(Metric::HeartRate, telemetry_.heartRate, trainer_.connected && telemetry_.heartRateValid);
+    trainer_.setSample(Metric::Incline, telemetry_.incline, trainer_.connected && telemetry_.inclineValid);
     trainer_.setSample(Metric::Distance, telemetry_.distance,
-                      trainer_.connected && telemetry_.distanceValid && trainer_.capabilities.supports(Metric::Distance));
+                      trainer_.connected && telemetry_.distanceValid);
     trainer_.setSample(Metric::ElapsedTime, telemetry_.elapsed,
-                      trainer_.connected && telemetry_.elapsedValid && trainer_.capabilities.supports(Metric::ElapsedTime));
+                      trainer_.connected && telemetry_.elapsedValid);
+    trainer_.metrics.resistance = {telemetry_.resistance, trainer_.connected && telemetry_.resistanceValid &&
+                                                       std::isfinite(telemetry_.resistance)};
     dirty_ = true;
 }
 

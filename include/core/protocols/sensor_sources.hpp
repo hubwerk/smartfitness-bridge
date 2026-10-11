@@ -25,6 +25,8 @@ public:
 private:
     sensors::RevolutionRate crank_{1024, 16};
     sensors::RevolutionRate wheel_{2048, 32};
+    bool crankKnown_ = false;
+    bool wheelKnown_ = false;
 };
 
 class CscSource final : public SensorSourceBase {
@@ -39,6 +41,8 @@ public:
 private:
     sensors::RevolutionRate crank_{1024, 16};
     sensors::RevolutionRate wheel_{1024, 32};
+    bool crankKnown_ = false;
+    bool wheelKnown_ = false;
 };
 
 class HeartRateSource final : public SensorSourceBase {

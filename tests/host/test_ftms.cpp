@@ -218,7 +218,7 @@ void testFtmsOutputControlFlow() {
     // Read-only device: control requests are refused by the core gate.
     adapter.setTrainer(false);
     bridge.loop();
-    assert(ftms.feature() == (Bytes{0x0A, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}));
+    assert(ftms.feature() == (Bytes{0x8A, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}));
     assert(write(ftms, bridge, {0x05, 0xFA, 0x00}) == (Bytes{0x80, 0x05, 0x05}));
     assert(write(ftms, bridge, {0x11, 0x00, 0x00, 0xF4, 0x01, 0x28, 0x33}) == (Bytes{0x80, 0x11, 0x05}));
     assert(adapter.telemetry().power == 200);
@@ -227,6 +227,8 @@ void testFtmsOutputControlFlow() {
     bridge.loop();
     assert(write(ftms, bridge, {0x05, 0xFA, 0x00}) == (Bytes{0x80, 0x05, 0x05}));
     assert(bridge.scanAndConnect());
+    bridge.loop();
+    assert(write(ftms, bridge, {0x00}) == (Bytes{0x80, 0x00, 0x01}));
 
     // Reset releases control.
     assert(write(ftms, bridge, {0x01}) == (Bytes{0x80, 0x01, 0x01}));
@@ -322,6 +324,7 @@ void testTreadmillCodec() {
     ftms::TreadmillData data;
     data.speed = valid(8.5F);
     data.incline = valid(-5);
+    data.rampAngle = valid(-2.9F);
     data.distance = valid(1234);
     data.heartRate = valid(120);
     const Bytes payload{0x0C, 0x01, 0x52, 0x03, 0xD2, 0x04, 0x00, 0xCE, 0xFF, 0xE3, 0xFF, 0x78};
@@ -334,8 +337,9 @@ void testTreadmillCodec() {
     data = {};
     data.distance = valid(1.0e30F);
     data.incline = valid(1.0e30F);
+    data.rampAngle = valid(1.0e30F);
     assert(ftms::encodeTreadmillData(data) ==
-           (Bytes{0x0D, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x84, 0x03}));
+           (Bytes{0x0D, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0x7F}));
     data = {};
     data.elapsed = valid(42);
     data.speed = {NAN, true};
@@ -371,6 +375,11 @@ void testTreadmillCodec() {
 
 class FakeTreadmill final : public BtDeviceAdapter {
 public:
+    FakeTreadmill() {
+        value.speedValid = true;
+        value.inclineValid = true;
+        value.heartRateValid = true;
+    }
     void begin() override {}
     void loop() override { emitTelemetry(value); }
     bool scanAndConnect() override { value.connected = true; return true; }
@@ -488,9 +497,9 @@ void testTreadmillOutput() {
     bridge.loop();
     assert(!output.controlGranted());
     output.setProfileOverride(FtmsOutputProfile::Rower);
-    assert(output.profile() == MachineProfile::IndoorBike);
+    assert(output.profile() == MachineProfile::Rower);
     output.setProfileOverride(FtmsOutputProfile::CrossTrainer);
-    assert(output.profile() == MachineProfile::IndoorBike);
+    assert(output.profile() == MachineProfile::CrossTrainer);
     output.setProfileOverride(FtmsOutputProfile::Auto);
     bridge.scanAndConnect();
     bridge.loop();
@@ -525,16 +534,294 @@ void testTreadmillOutput() {
     assert(!output.clientConnected() && !output.controlGranted());
 }
 
+using Member = MetricSample FitnessMetrics::*;
+
+const std::vector<Member>& allFields() {
+    static const std::vector<Member> fields{
+        &FitnessMetrics::speed, &FitnessMetrics::cadence, &FitnessMetrics::power,
+        &FitnessMetrics::heartRate, &FitnessMetrics::incline, &FitnessMetrics::resistance,
+        &FitnessMetrics::distance, &FitnessMetrics::elapsed, &FitnessMetrics::averageSpeed,
+        &FitnessMetrics::averageCadence, &FitnessMetrics::averagePower, &FitnessMetrics::rampAngle,
+        &FitnessMetrics::positiveElevationGain, &FitnessMetrics::negativeElevationGain,
+        &FitnessMetrics::pace, &FitnessMetrics::averagePace, &FitnessMetrics::totalEnergy,
+        &FitnessMetrics::energyPerHour, &FitnessMetrics::energyPerMinute,
+        &FitnessMetrics::metabolicEquivalent, &FitnessMetrics::remaining,
+        &FitnessMetrics::forceOnBelt, &FitnessMetrics::stepRate, &FitnessMetrics::averageStepRate,
+        &FitnessMetrics::strideCount, &FitnessMetrics::strokeRate, &FitnessMetrics::averageStrokeRate,
+        &FitnessMetrics::strokeCount, &FitnessMetrics::floors, &FitnessMetrics::stepCount,
+        &FitnessMetrics::movementDirection
+    };
+    return fields;
+}
+
+std::vector<Member> profileFields(MachineProfile profile) {
+    using M = FitnessMetrics;
+    std::vector<Member> fields{&M::totalEnergy, &M::energyPerHour, &M::energyPerMinute,
+        &M::heartRate, &M::metabolicEquivalent, &M::elapsed, &M::remaining};
+    const auto add = [&](std::initializer_list<Member> extra) { fields.insert(fields.end(), extra); };
+    switch (profile) {
+        case MachineProfile::IndoorBike:
+            add({&M::speed, &M::averageSpeed, &M::cadence, &M::averageCadence,
+                 &M::distance, &M::resistance, &M::power, &M::averagePower});
+            break;
+        case MachineProfile::Treadmill:
+            add({&M::speed, &M::averageSpeed, &M::distance, &M::incline, &M::rampAngle,
+                 &M::positiveElevationGain, &M::negativeElevationGain, &M::pace, &M::averagePace,
+                 &M::forceOnBelt, &M::power});
+            break;
+        case MachineProfile::CrossTrainer:
+            add({&M::speed, &M::averageSpeed, &M::distance, &M::stepRate, &M::averageStepRate,
+                 &M::strideCount, &M::positiveElevationGain, &M::negativeElevationGain,
+                 &M::incline, &M::rampAngle, &M::resistance, &M::power, &M::averagePower,
+                 &M::movementDirection});
+            break;
+        case MachineProfile::Rower:
+            add({&M::strokeRate, &M::strokeCount, &M::averageStrokeRate, &M::distance,
+                 &M::pace, &M::averagePace, &M::power, &M::averagePower, &M::resistance});
+            break;
+        case MachineProfile::StepClimber:
+            add({&M::floors, &M::stepCount, &M::stepRate, &M::averageStepRate, &M::positiveElevationGain});
+            break;
+        case MachineProfile::StairClimber:
+            add({&M::floors, &M::stepRate, &M::averageStepRate, &M::positiveElevationGain, &M::strideCount});
+            break;
+    }
+    return fields;
+}
+
+void assertTruncated(MachineProfile profile, const Bytes& bytes) {
+    for (std::size_t length = 0; length < bytes.size(); ++length) {
+        FitnessMetrics out;
+        for (const auto field : allFields()) out.*field = valid(99);
+        assert(!ftms::decodeMachineData(profile, bytes.data(), length, out));
+        for (const auto field : allFields()) assert(!(out.*field).valid);
+    }
+    FitnessMetrics out;
+    assert(!ftms::decodeMachineData(profile, nullptr, bytes.size(), out));
+}
+
+void testAllProfileFields() {
+    const std::array<MachineProfile, 6> profiles{MachineProfile::IndoorBike, MachineProfile::Treadmill,
+        MachineProfile::CrossTrainer, MachineProfile::Rower, MachineProfile::StepClimber, MachineProfile::StairClimber};
+    const std::array<Bytes, 6> headers{Bytes{0xFE, 0x1F}, Bytes{0xFE, 0x1F}, Bytes{0xFE, 0xFF, 0},
+        Bytes{0xFE, 0x1F}, Bytes{0xFE, 1}, Bytes{0xFE, 3}};
+    const std::array<std::size_t, 6> lengths{30, 34, 41, 30, 23, 23};
+    for (std::size_t i = 0; i < profiles.size(); ++i) {
+        const auto profile = profiles[i];
+        FitnessMetrics input;
+        for (const auto field : profileFields(profile)) input.*field = valid(10);
+        input.power = valid(-125);
+        input.averagePower = valid(-87);
+        input.incline = valid(-5.5F);
+        input.rampAngle = valid(-2.9F);
+        input.forceOnBelt = valid(-230);
+        input.distance = valid(0xFEDCBA);
+        input.metabolicEquivalent = valid(6.3F);
+        input.movementDirection = valid(1);
+        input.pace = valid(profile == MachineProfile::Rower ? 123 : 12.3F);
+        input.averagePace = valid(profile == MachineProfile::Rower ? 134 : 13.4F);
+        // Set irrelevant fields valid as well; the codec must not emit them.
+        const auto encoded = ftms::encodeMachineData(profile, input);
+        assert(encoded.size() == lengths[i]);
+        for (std::size_t j = 0; j < headers[i].size(); ++j) assert(encoded[j] == headers[i][j]);
+        FitnessMetrics output;
+        assert(ftms::decodeMachineData(profile, encoded.data(), encoded.size(), output));
+        for (const auto field : profileFields(profile)) {
+            assert((output.*field).valid);
+            assert(std::fabs((output.*field).value - (input.*field).value) < 0.001F);
+        }
+        assert(ftms::encodeMachineData(profile, output) == encoded);
+        assertTruncated(profile, encoded);
+        assert(effectiveOutputProfile(FtmsOutputProfile::Auto, profile) == profile);
+        FtmsOutputProfile parsed;
+        assert(parseFtmsOutputProfile(machineProfileName(profile), parsed));
+        assert(effectiveOutputProfile(parsed, MachineProfile::IndoorBike) == profile);
+        const auto type = profile == MachineProfile::IndoorBike ? 0x20 :
+            profile == MachineProfile::Treadmill ? 1 : profile == MachineProfile::CrossTrainer ? 2 :
+            profile == MachineProfile::Rower ? 0x10 : profile == MachineProfile::StepClimber ? 4 : 8;
+        assert(ftms::encodeAdvertisingServiceData(profile) == (Bytes{1, static_cast<std::uint8_t>(type), 0}));
+
+        for (std::size_t mtu : {8U, 9U, 20U, 100U}) {
+            const auto packets = ftms::splitMachineData(profile, input, mtu);
+            assert(!packets.empty());
+            FitnessMetrics merged;
+            for (std::size_t p = 0; p < packets.size(); ++p) {
+                assert(packets[p].size() <= mtu);
+                assert((packets[p][0] & 1U) == (p + 1 == packets.size() ? 0U : 1U));
+                FitnessMetrics fragment;
+                assert(ftms::decodeMachineData(profile, packets[p].data(), packets[p].size(), fragment));
+                assertTruncated(profile, packets[p]);
+                for (const auto field : allFields())
+                    if ((fragment.*field).valid) merged.*field = fragment.*field;
+            }
+            assert(ftms::encodeMachineData(profile, merged) == encoded);
+        }
+        assert(ftms::splitMachineData(profile, input, 1).empty());
+        assert(ftms::splitMachineData(profile, input, 6).empty()); // 5-byte energy group + flags
+        for (const auto field : allFields()) input.*field = valid(0);
+        const auto zero = ftms::encodeMachineData(profile, input);
+        assert(ftms::decodeMachineData(profile, zero.data(), zero.size(), output));
+        for (const auto field : profileFields(profile)) assert((output.*field).valid && (output.*field).value == 0);
+        assertTruncated(profile, zero);
+    }
+}
+
+void testAtomicGroupsAndMapping() {
+    FitnessMetrics input;
+    input.floors = valid(0x1234);
+    input.stepCount = valid(0x5678);
+    assert(ftms::encodeStepClimberData(input) == (Bytes{0, 0, 0x34, 0x12, 0x78, 0x56}));
+    assert(ftms::encodeStairClimberData(input) == (Bytes{0, 0, 0x34, 0x12}));
+    input = {};
+    input.strokeRate = valid(32.5F);
+    input.strokeCount = valid(0x1234);
+    assert(ftms::encodeRowerData(input) == (Bytes{0, 0, 65, 0x34, 0x12}));
+    input = {};
+    input.resistance = valid(-5);
+    assert(ftms::encodeIndoorBikeData(input) == (Bytes{0x21, 0, 0xFB, 0xFF}));
+    assert(ftms::encodeRowerData(input) == (Bytes{0x81, 0, 0xFB, 0xFF}));
+    assert(ftms::encodeCrossTrainerData(input) == (Bytes{0x81, 0, 0, 0xCE, 0xFF}));
+    input = {};
+    input.incline = valid(5);
+    input.power = valid(100);
+    input.totalEnergy = valid(10);
+    input.floors = valid(3);
+    input.strokeRate = valid(20);
+    assert(ftms::encodeTreadmillData(input) == (Bytes{1, 0}));
+    assert(ftms::encodeStepClimberData(input) == (Bytes{1, 0}));
+    assert(ftms::encodeRowerData(input) == (Bytes{0x21, 0, 100, 0}));
+    input.rampAngle = {NAN, true};
+    assert(ftms::encodeTreadmillData(input) == (Bytes{1, 0}));
+    input = {};
+    input.speed = valid(18);
+    input.cadence = valid(45);
+    input.averageSpeed = valid(20);
+    input.averageCadence = valid(50);
+    const auto rower = ftms::mapMachineData(input, MachineProfile::IndoorBike, MachineProfile::Rower);
+    assert(rower.pace.valid && rower.pace.value == 100);
+    assert(rower.strokeRate.valid && rower.strokeRate.value == 45 && !rower.strokeCount.valid);
+    assert(!rower.averagePace.valid && !rower.averageStrokeRate.valid);
+    assert(!rower.rampAngle.valid && !rower.power.valid);
+    auto bike = ftms::mapMachineData(rower, MachineProfile::Rower, MachineProfile::IndoorBike);
+    assert(bike.speed.valid && bike.speed.value == 18 && !bike.pace.valid);
+    input = {};
+    input.pace = valid(0);
+    input.strokeRate = valid(0);
+    bike = ftms::mapMachineData(input, MachineProfile::Rower, MachineProfile::IndoorBike);
+    assert(!bike.speed.valid && bike.cadence.valid && bike.cadence.value == 0);
+    const auto stoppedRower = ftms::mapMachineData(input, MachineProfile::Rower, MachineProfile::Rower);
+    assert(stoppedRower.pace.valid && stoppedRower.pace.value == 0 && !stoppedRower.speed.valid);
+    input = {};
+    input.speed = valid(0);
+    const auto zeroSpeed = ftms::mapMachineData(input, MachineProfile::IndoorBike, MachineProfile::Rower);
+    assert(zeroSpeed.speed.valid && zeroSpeed.speed.value == 0 && !zeroSpeed.pace.valid);
+    input = {};
+    input.stepRate = valid(70);
+    bike = ftms::mapMachineData(input, MachineProfile::CrossTrainer, MachineProfile::IndoorBike);
+    assert(bike.cadence.valid && bike.cadence.value == 70);
+    const auto cross = ftms::mapMachineData(bike, MachineProfile::IndoorBike, MachineProfile::CrossTrainer);
+    assert(cross.stepRate.valid && cross.stepRate.value == 70 && !cross.averageStepRate.valid);
+    input = {};
+    for (const auto field : allFields()) input.*field = {INFINITY, true};
+    for (MachineProfile profile : {MachineProfile::IndoorBike, MachineProfile::Treadmill,
+         MachineProfile::CrossTrainer, MachineProfile::Rower, MachineProfile::StepClimber, MachineProfile::StairClimber}) {
+        const auto encoded = ftms::encodeMachineData(profile, input);
+        assert(encoded == (profile == MachineProfile::CrossTrainer ? Bytes{1, 0, 0} : Bytes{1, 0}));
+    }
+    input = {};
+    input.distance = valid(-1);
+    auto bytes = ftms::encodeIndoorBikeData(input);
+    assert(bytes == (Bytes{0x11, 0, 0, 0, 0}));
+    input.distance = valid(1e30F);
+    assert(ftms::encodeIndoorBikeData(input) == (Bytes{0x11, 0, 0xFF, 0xFF, 0xFF}));
+}
+
+void testProfileFeaturesAndControls() {
+    TrainerCapabilities caps;
+    for (Control control : {Control::Speed, Control::Incline, Control::Resistance, Control::Power}) caps.setControl(control, true);
+    for (MachineProfile profile : {MachineProfile::IndoorBike, MachineProfile::Treadmill,
+         MachineProfile::CrossTrainer, MachineProfile::Rower, MachineProfile::StepClimber, MachineProfile::StairClimber}) {
+        FitnessMetrics input;
+        for (const auto field : profileFields(profile)) input.*field = valid(1);
+        ftms::Features features;
+        auto bytes = ftms::encodeFeature(caps, profile, input);
+        assert(ftms::decodeFeature(bytes.data(), bytes.size(), features));
+        assert((features.machine & ftms::kFeatureExpendedEnergy) && (features.machine & ftms::kFeatureHeartRate));
+        const bool climbing = profile == MachineProfile::StepClimber || profile == MachineProfile::StairClimber;
+        if (climbing) assert(features.targets == 0);
+        if (profile == MachineProfile::Rower) assert(features.targets == (ftms::kTargetResistance | ftms::kTargetPower));
+        if (profile != MachineProfile::IndoorBike) assert(!(features.targets & ftms::kTargetIndoorBikeSimulation));
+        ftms::ControlPointCommand command;
+        const Bytes simulation{0x11, 0, 0, 0, 0, 0, 0};
+        assert(ftms::decodeControlPoint(simulation.data(), simulation.size(), command, profile));
+        assert(command.status == (profile == MachineProfile::IndoorBike ? ResultCode::Success : ResultCode::NotSupported));
+        if (climbing) for (const Bytes& request : {Bytes{2, 0, 0}, Bytes{3, 0, 0}, Bytes{4, 0}, Bytes{5, 0, 0}}) {
+            assert(ftms::decodeControlPoint(request.data(), request.size(), command, profile));
+            assert(command.status == ResultCode::NotSupported && !command.hasRequest);
+        }
+    }
+}
+
+void testSixProfileOutputs() {
+    for (MachineProfile profile : {MachineProfile::IndoorBike, MachineProfile::Treadmill,
+         MachineProfile::CrossTrainer, MachineProfile::Rower, MachineProfile::StepClimber, MachineProfile::StairClimber}) {
+        FtmsOutput output;
+        output.setClock([] { return 10000U; });
+        output.begin();
+        TrainerState state;
+        state.connected = true;
+        state.profile = profile;
+        for (const auto field : profileFields(profile)) state.metrics.*field = valid(10);
+        state.metrics.movementDirection = valid(1);
+        output.publishTrainerState(state);
+        output.notifyClientConnected();
+        output.loop();
+        assert(output.profile() == profile);
+        const auto mapped = ftms::mapMachineData(state.metrics, profile, profile);
+        assert(output.lastMachineData() == ftms::encodeMachineData(profile, mapped));
+        assert(!output.lastMachineDataPackets().empty());
+        FitnessMetrics merged;
+        for (const auto& packet : output.lastMachineDataPackets()) {
+            assert(packet.size() <= 20);
+            FitnessMetrics fragment;
+            assert(ftms::decodeMachineData(profile, packet.data(), packet.size(), fragment));
+            merged.merge(fragment);
+        }
+        assert(ftms::encodeMachineData(profile, merged) == output.lastMachineData());
+        if (profile != MachineProfile::IndoorBike) assert(output.lastIndoorBikeData().empty());
+        if (profile != MachineProfile::Treadmill) assert(output.lastTreadmillData().empty());
+        if (profile == MachineProfile::CrossTrainer) assert(output.lastCrossTrainerData() == output.lastMachineData());
+        if (profile == MachineProfile::Rower) assert(output.lastRowerData() == output.lastMachineData());
+        if (profile == MachineProfile::StepClimber) assert(output.lastStepClimberData() == output.lastMachineData());
+        if (profile == MachineProfile::StairClimber) assert(output.lastStairClimberData() == output.lastMachineData());
+        const Bytes pending{0x05, 0, 0};
+        assert(output.enqueueControlPoint(pending.data(), pending.size()));
+        const auto replacement = profile == MachineProfile::IndoorBike ? FtmsOutputProfile::Rower : FtmsOutputProfile::IndoorBike;
+        output.setProfileOverride(replacement);
+        output.loop();
+        assert(!output.clientConnected() && !output.controlGranted());
+        assert(output.lastMachineData().empty() && output.lastMachineDataPackets().empty());
+    }
+}
+
 }  // namespace
 
-void runFtmsTests() {
+void runFtmsCodecTests() {
+    testAllProfileFields();
+    testAtomicGroupsAndMapping();
+    testProfileFeaturesAndControls();
     testTreadmillCodec();
-    testTreadmillOutput();
-    testFtmsClientAddress();
     testIndoorBikeDataEncoding();
     testStaticCharacteristics();
     testControlPointDecoding();
     testResponsesAndStatus();
+}
+
+void runFtmsTests() {
+    runFtmsCodecTests();
+    testSixProfileOutputs();
+    testTreadmillOutput();
+    testFtmsClientAddress();
     testFtmsOutputControlFlow();
     testFtmsNameAndConsole();
 }

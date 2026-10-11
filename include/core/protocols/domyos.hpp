@@ -54,8 +54,8 @@ private:
 struct Status {
     float speed = 0.0F;     // km/h
     float cadence = 0.0F;   // rpm
-    int resistance = 1;     // 1..15
-    int heartRate = 0;      // bpm, 0 = no reading
+    int resistance = 0;     // reported device level
+    int heartRate = 0;      // bpm
     float distance = 0.0F;  // km
 };
 bool decodeStatus(const Bytes& frame, Status& out);
@@ -87,6 +87,7 @@ private:
     bool initializing_ = false;
     bool initDone_ = false;
     std::uint32_t lastPollMs_ = 0;
+    std::uint32_t fragmentMs_ = 0;
     domyos::FrameAssembler assembler_;
 };
 
