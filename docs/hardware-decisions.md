@@ -134,3 +134,72 @@ These are derived implementations, not merely a future inspiration.
 - Dependency licenses remain separate and must also be respected.
 - Existing headers record upstream source paths but not a commit revision.
   Host vectors based on those layouts are not evidence of hardware compatibility.
+
+## HD-006: Two firmware variants (web / HMI) on one shared core
+
+**Status:** Accepted
+
+### Context
+The bridge should run either headless with a Wi-Fi web UI (ESP32-S3 DevKitC-1
+N16R8) or with a local display (ELECROW CrowPanel 1.28" rotary display) offering
+the same interactions. Business logic (BLE input, protocols, `BridgeCore`, FTMS
+output, configuration, commands) must not be duplicated.
+
+### Decision
+- Sources are split into `core` (`include/core`, `src/core`), `variants/web` and
+  `variants/hmi`. Each PlatformIO environment compiles `main.cpp`, the core and
+  only its own variant directory (`build_src_filter`) and only its own libraries.
+- The variant is selected with exactly one of `-DSF_VARIANT_WEB` /
+  `-DSF_VARIANT_HMI`; `include/variant.h` fails with `#error` for none or both.
+  `main.cpp` runs the shared setup and calls `variant::begin()` / `variant::loop()`.
+- The former `WebUi` is split: the variant-neutral `BridgeController` executes
+  `Command`s and builds a view model (`bridge_view_model.h`); `web_json` renders it
+  for the web variant, the HMI renders it with LVGL.
+- The shared configuration schema stays at v3 including the Wi-Fi fields; the HMI
+  variant ignores them and never starts Wi-Fi. HMI-only settings (brightness,
+  screen timeout, LED ring) live in a separate NVS namespace (`sfhmi`).
+- `env:esp32s3dev` keeps its name and behaviour.
+
+### Consequences
+- The core is host-tested without any variant source (`make host-tests-core`).
+- Without Wi-Fi the HMI variant has more free RAM and no BLE/Wi-Fi coexistence
+  load, but no remote API.
+- New user-facing features need a `Command` plus a renderer in each variant.
+
+## HD-007: CrowPanel 1.28" HMI hardware, drivers and LVGL version
+
+**Status:** Accepted (not hardware-verified)
+
+### Context
+The CrowPanel 1.28" ESP32-S3 Rotary Display (ESP32-S3R8, 8 MB octal PSRAM, 16 MB
+flash) has a 240×240 round GC9A01 IPS panel on SPI, a CST816D capacitive touch
+controller on I2C, a rotary encoder with push button, PWM backlight and a ring of
+WS2812 LEDs. The firmware must stay on Arduino core 2.0.x because NimBLE-Arduino
+1.4.3 needs it.
+
+### Decision
+- **Pins** only from ELECROW's official GitHub repository (factory firmware,
+  lesson examples, schematic *ESP32 Display-1.28-V1.0*, commit `63e407f`), all in
+  `include/variants/hmi/board_crowpanel128.h` with per-pin sources. Unclear items
+  are marked `TODO(verify)`.
+- **Display:** LovyanGFX 1.2.7 (`Panel_GC9A01`, SPI2 at 80 MHz, DMA flush), as in
+  ELECROW's examples; it builds on core 2.0.17.
+- **Touch:** a small own CST816D reader (single register read, no blocking retries)
+  instead of ELECROW's example driver, which retries forever on I2C errors.
+- **Encoder:** pin-change interrupts with a quadrature table; LVGL reads the
+  accumulated detents through an encoder input device (knob-only operation via
+  LVGL groups). Button = press, long press = back.
+- **LVGL 9.2.2:** current 9.x release that works with core 2.0.17 and LovyanGFX;
+  the same version drives the headless host simulator. Partial rendering with one
+  240×40 RGB565 buffer in internal DMA-capable RAM (PSRAM fallback; the flush
+  waits for DMA, so a second buffer would not help); built-in
+  Montserrat fonts.
+- **LED ring:** Adafruit NeoPixel 1.12.3, optional (`SF_HMI_LED_RING` build flag
+  and a runtime setting) for connection/control status.
+
+### Consequences
+- Display orientation, touch mapping, encoder direction, LED count/order and
+  GPIO 2 (external 5 V enable) must be checked on a real board.
+- German UI text needs a custom font with umlauts.
+- Upgrading to LVGL 9.3+ or Arduino core 3.x requires re-checking LovyanGFX and
+  NimBLE compatibility.

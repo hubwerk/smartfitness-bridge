@@ -2,11 +2,14 @@
 
 [![CI](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml)
 
-Firmware for an ESP32-S3 DevKitC-1 N16R8 that reads fitness equipment over BLE
-and forwards measurements and supported trainer controls through Bluetooth FTMS.
+Firmware for ESP32-S3 boards that reads fitness equipment over BLE and forwards
+measurements and supported trainer controls through Bluetooth FTMS. It is built in
+two variants that share one core (see [Build variants](#build-variants)): a **web**
+variant with Wi-Fi + web UI and an **HMI** variant with a local LVGL touch/knob UI
+on the ELECROW CrowPanel 1.28" round rotary display.
 
 > **License:** GPL-3.0-or-later (see [`LICENSE`](LICENSE)). The vendor protocols in
-> `src/protocols/` and `include/protocols/` are ported from
+> `src/core/protocols/` and `include/core/protocols/` are ported from
 > [`cagnulein/qdomyos-zwift`](https://github.com/cagnulein/qdomyos-zwift) (GPL-3.0),
 > which makes the firmware a derivative work.
 
@@ -23,11 +26,44 @@ trainer operation. All supported-device entries are unverified on equipment.
 The post-PR-#10 [main CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38030185653)
 passed both host tests and firmware build; the badge above tracks CI.
 
+## Build variants
+
+| | Web variant | HMI variant |
+|---|---|---|
+| PlatformIO env | `esp32s3dev` (default) | `crowpanel128` |
+| Build flag | `-DSF_VARIANT_WEB` | `-DSF_VARIANT_HMI` |
+| Board | ESP32-S3 DevKitC-1 N16R8 | ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display (ESP32-S3R8, 8 MB PSRAM, 16 MB flash) |
+| User interface | Wi-Fi + web UI + REST/WebSocket API + Serial console | LVGL UI on the 240×240 round display (knob + touch) + Serial console |
+| Extra libraries | ArduinoJson, AsyncTCP, ESPAsyncWebServer | LVGL, LovyanGFX, Adafruit NeoPixel |
+
+Exactly one variant flag must be defined; `include/variant.h` stops the build with
+`#error` otherwise. `src/main.cpp` contains the shared setup (config, BLE input,
+simulation, `BridgeCore`, FTMS output, Serial console) and calls the variant hooks
+`variant::begin()` / `variant::loop()`. Both variants use the same `Command`s and the
+same `BridgeController`; the web variant renders its view model as JSON, the HMI
+variant renders it with LVGL. The stored configuration (schema v3, including the
+Wi-Fi fields) is identical; the HMI variant simply never starts Wi-Fi.
+
+Source layout:
+
+- `include/core/`, `src/core/` – shared core: BLE input, protocols, `BridgeCore`,
+  FTMS output/profiles, `ConfigStore`/NVS, `Command` layer, `BridgeController` and
+  the view model (`bridge_view_model.h`). It builds without any web or HMI source
+  (checked by `make host-tests-core`).
+- `include/variants/web/`, `src/variants/web/` – `WebPortal`, `ApiExchange`,
+  `WifiPolicy`, JSON rendering (`web_json`) and the web app
+  (`src/variants/web/assets/index.html`).
+- `include/variants/hmi/`, `src/variants/hmi/` – LVGL screens (`hmi_ui`), the
+  pure-C++ HMI model (`hmi_model`, strings in `hmi_strings`), board drivers
+  (`hmi_hal`) and the pin header `board_crowpanel128.h`.
+- `sim/` – headless LVGL host simulator that renders every HMI screen to PNG.
+
 ## Hardware and flashing
 
-Target: **ESP32-S3 DevKitC-1 N16R8**, 16 MB flash, 8 MB PSRAM, Arduino framework,
-`qio_opi` memory mode and `default_16MB.csv` partitions. Use the board's flashing
-connection.
+Targets: **ESP32-S3 DevKitC-1 N16R8** (web variant) and **ELECROW CrowPanel 1.28"
+ESP32-S3 Rotary Display** (HMI variant). Both have 16 MB flash and 8 MB octal PSRAM
+and use the Arduino framework, `qio_opi` memory mode and `default_16MB.csv`
+partitions. Use the board's flashing connection (the CrowPanel has one USB-C port).
 
 **Prerequisites:** Python 3.8+, Git, and PlatformIO Core (`pip install -U
 platformio`), or the VS Code **PlatformIO IDE** extension, which bundles Core
@@ -39,17 +75,18 @@ CH34x) is needed only when using the board's UART port.
 ```sh
 git clone https://github.com/manuelh83/smartfitness-bridge.git
 cd smartfitness-bridge
-pio run -e esp32s3dev
+pio run -e esp32s3dev     # web variant
+pio run -e crowpanel128   # HMI variant
 ```
 
 - The first build downloads the toolchain, Arduino core, and pinned libraries; allow a few minutes.
-- `scripts/embed_web_assets.py` runs automatically before compiling; no separate step is needed.
-- Output files are in `.pio/build/esp32s3dev/`: `firmware.bin`, `bootloader.bin`, and `partitions.bin`.
+- `scripts/embed_web_assets.py` runs automatically before compiling the web variant; no separate step is needed.
+- Output files are in `.pio/build/<env>/`: `firmware.bin`, `bootloader.bin`, and `partitions.bin`. CI uploads them as `firmware-esp32s3dev` / `firmware-crowpanel128` artifacts.
 
 ### Flash and monitor
 
 ```sh
-pio run -e esp32s3dev -t upload
+pio run -e esp32s3dev -t upload     # or: -e crowpanel128
 pio device monitor -b 115200
 ```
 
@@ -70,6 +107,80 @@ pin a 6.x `espressif32` platform version that ships Arduino core 2.0.17 (check t
 [Dependency compatibility](#dependency-compatibility) section and platform release
 notes for the exact version), then run `pio run -t clean` and rebuild with
 `pio run -e esp32s3dev`.
+
+## HMI variant (CrowPanel 1.28")
+
+> **Not tested on hardware.** The HMI firmware compiles; layout and knob-only
+> navigation are checked in the host simulator only. Display orientation, touch
+> coordinates, encoder direction and LED ring order still need a real board.
+
+### Board pins
+
+All pins are in [`include/variants/hmi/board_crowpanel128.h`](include/variants/hmi/board_crowpanel128.h),
+taken from ELECROW's official repository
+[`Elecrow-RD/CrowPanel-1.28inch-HMI-ESP32-Rotary-Display-240-240-IPS-Round-Touch-Knob-Screen`](https://github.com/Elecrow-RD/CrowPanel-1.28inch-HMI-ESP32-Rotary-Display-240-240-IPS-Round-Touch-Knob-Screen)
+(commit `63e407f`): factory firmware `RotaryScreen_1_28.ino`, the lesson examples and
+the schematic *ESP32 Display-1.28-V1.0*. Summary: GC9A01 on SPI (SCLK 10, MOSI 11,
+DC 3, CS 9, RST 14), backlight PWM GPIO 46, LCD power enable GPIO 1, CST816D touch on
+I2C (SDA 6, SCL 7, INT 5, RST 13, address 0x15), encoder A 45 / B 42, button 41
+(active low), 5 × WS2812 on GPIO 48. Items marked `TODO(verify)` in the header
+(GPIO 2 5 V output enable, LED count/order) could not be confirmed beyond the
+example code.
+
+Drivers: LovyanGFX 1.2.7 (GC9A01, DMA flush), a small CST816D reader, and an
+interrupt-driven quadrature decoder (4 quarter-steps per detent) read by the LVGL encoder input. LVGL 9.2.2 runs on the main
+loop with one partial 240×40 RGB565 draw buffer (internal DMA RAM, PSRAM fallback).
+
+### Navigation
+
+| Input | Action |
+|---|---|
+| Turn knob | Move focus / change value / cycle dashboard metric |
+| Press knob | Select, confirm a value |
+| Hold knob (~0.4 s, LVGL long press) | Back |
+| Tap | Select |
+| Swipe right | Back (on the dashboard: previous metric) |
+| Swipe left | Next dashboard metric |
+
+Screens (same interactions as the web UI):
+
+- **Dashboard** – arc gauge for the selected metric (power, cadence, speed, heart
+  rate, incline, distance, time), target, connection/trainer/control state, machine
+  profile and FTMS client state. Press opens the menu.
+- **Devices** – start/stop scan, scan results (name, RSSI, adapter), pair/connect
+  with optional adapter override (all adapters incl. `ifit-model-N` and WalkingPad
+  cipher profiles), disconnect, unpair, simulation on/off.
+- **Control** – target power/resistance/incline/speed. Values are set with the knob
+  (fine steps) or the +/- buttons and applied with a knob press. Rejections show the
+  `CommandResult` message. **Treadmill speed changes need an explicit Confirm**
+  (Cancel is focused by default); the editor starts from the measured speed, and the
+  bridge never starts the belt by itself. "Stop belt" sends speed 0.
+- **Settings** – FTMS name (presets or on-screen keyboard), FTMS output on/off, FTMS
+  output profile, ANT on/off (requires hardware), save, load, factory reset (two
+  confirmations), restart, firmware version, brightness, screen timeout and LED
+  ring. Brightness/timeout/LED ring are stored in a separate NVS namespace
+  (`sfhmi`), so the shared configuration stays at schema v3.
+
+The status refreshes at 5 Hz; UI callbacks only enqueue `Command`s that the main
+loop executes. UI strings are centralised in `src/variants/hmi/hmi_strings.cpp`
+(English; a German table can be added, but needs a font with umlauts).
+
+### Simulator and screenshots
+
+```sh
+git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git .cache/lvgl
+make hmi-screenshots          # writes screenshots/*.png
+```
+
+The headless simulator renders every screen from the shared view model with fake
+data and runs a knob-only walkthrough. CI uploads the PNGs as the
+`hmi-screenshots` artifact.
+
+### HMI limitations
+
+- No Wi-Fi, web UI or REST/WebSocket API in this variant (Serial console stays).
+- Only the built-in Montserrat fonts (ASCII); German umlauts need a custom font.
+- Nothing is hardware-verified; see the pin TODOs above.
 
 ## Architecture
 
@@ -92,7 +203,8 @@ flowchart TD
     IS --> CORE["BridgeCore: trainer / capability / bounds gate"]
     CORE --> OUT["FTMS output"]
     CORE --> ANT["ANT output stub"]
-    API --> CMD["Shared Command layer / WebUi executor"]
+    API --> CMD["Shared Command layer / BridgeController"]
+    HMI["HMI variant: LVGL UI command queue"] --> CMD
     CON["Serial console"] --> CMD
     CMD --> CORE
     CMD --> BLE
@@ -104,18 +216,19 @@ flowchart TD
   OUT --> FP
 ```
 
-Everything that runs on the Arduino `loop()` – the core, the adapters' protocol logic, the command executor – is single-threaded. BLE callbacks (NimBLE host task and the central worker task) and HTTP/WebSocket handlers (AsyncTCP task) only push into bounded, lock-protected queues; the loop drains them.
+The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent and LVGL runs on the main loop, pushing `Command`s into a bounded queue that the loop executes. Everything that runs on the Arduino `loop()` – the core, the adapters' protocol logic, the command executor – is single-threaded. BLE callbacks (NimBLE host task and the central worker task) and HTTP/WebSocket handlers (AsyncTCP task) only push into bounded, lock-protected queues; the loop drains them.
 
-- `smartfitness::BridgeCore` (`include/bridge/bridge_core.hpp`): one canonical core header shared by firmware and host tests. Tracks disconnected, connected/read-only, trainer, and control-ready states.
+- `smartfitness::BridgeCore` (`include/core/bridge/bridge_core.hpp`): one canonical core header shared by firmware and host tests. Tracks disconnected, connected/read-only, trainer, and control-ready states.
 - `BtDeviceAdapter`: equipment input interface. Implementations: `SimulatedDeviceAdapter`, `BleInputAdapter` (real BLE devices) and `InputSelector`, which forwards to the BLE input when a device is paired and BLE input is enabled, otherwise to the simulation.
-- `BleInputAdapter` (`include/ble_input_adapter.h`): scanning, pairing, connection lifecycle, stale telemetry. It talks to the radio through the `CentralTransport` interface (`include/ble/central_transport.hpp`); `NimbleCentral` implements it on the firmware, `tests/host/fake_central.hpp` in host tests.
-- Protocols (`include/protocols/`): pure C++ `SourceProtocol` implementations (FTMS, sensors, vendor ports) and the adapter registry.
+- `BleInputAdapter` (`include/core/ble_input_adapter.h`): scanning, pairing, connection lifecycle, stale telemetry. It talks to the radio through the `CentralTransport` interface (`include/core/ble/central_transport.hpp`); `NimbleCentral` implements it on the firmware, `tests/host/fake_central.hpp` in host tests.
+- Protocols (`include/core/protocols/`): pure C++ `SourceProtocol` implementations (FTMS, sensors, vendor ports) and the adapter registry.
 - `AntOutput` / `FtmsOutput`: independent outputs. `AntOutput` is still a placeholder; `FtmsOutput` is a working BLE FTMS peripheral (see below).
-- FTMS codec (`include/ftms/ftms_codec.hpp`): pure C++ encoding/decoding of FTMS characteristics, used by both the output and the FTMS input.
-- `WebUi` (`include/web_ui.h`): the shared command executor. The Serial console and the web API both produce `Command` values (`include/bridge_commands.h`) and run them through `WebUi::execute`; it also renders the status/scan/config JSON views.
-- `ApiExchange` (`include/web_api.h`) validates API JSON and hands jobs to the loop; `WebPortal` (`include/web_portal.h`, firmware only) owns Wi-Fi, DNS/captive portal, mDNS and the HTTP/WebSocket server; `WifiPolicy` (`include/wifi_policy.h`) decides AP/STA/fallback.
-- `ConfigStore` (`include/config_store.h`): configuration persisted through a `ConfigBackend` (NVS on the firmware, memory in host tests). See [Persistent configuration](#persistent-configuration).
-- `smartfitness::FtmsRoles` (`include/bridge/ftms_roles.hpp`): independent input/output role flags. `ftms.input` now means "use the paired BLE device as input (auto-connect)".
+- FTMS codec (`include/core/ftms/ftms_codec.hpp`): pure C++ encoding/decoding of FTMS characteristics, used by both the output and the FTMS input.
+- `BridgeController` (`include/core/bridge_controller.h`): the variant-neutral command executor. The Serial console, the web API and the HMI all produce `Command` values (`include/core/bridge_commands.h`) and run them through `BridgeController::execute`; it also builds the status/scan/config view model (`include/core/bridge_view_model.h`).
+- Web variant: `web_json` (`include/variants/web/web_json.h`) renders the view model as JSON; `ApiExchange` (`include/variants/web/web_api.h`) validates API JSON and hands jobs to the loop; `WebPortal` (`include/variants/web/web_portal.h`, firmware only) owns Wi-Fi, DNS/captive portal, mDNS and the HTTP/WebSocket server; `WifiPolicy` (`include/variants/web/wifi_policy.h`) decides AP/STA/fallback.
+- HMI variant: `hmi::Model` (pure C++, host-tested) turns the view model into screen content and UI actions into `Command`s; `HmiUi` builds the LVGL screens; `hmi_hal` drives display, touch, encoder, backlight and LED ring.
+- `ConfigStore` (`include/core/config_store.h`): configuration persisted through a `ConfigBackend` (NVS on the firmware, memory in host tests). See [Persistent configuration](#persistent-configuration).
+- `smartfitness::FtmsRoles` (`include/core/bridge/ftms_roles.hpp`): independent input/output role flags. `ftms.input` now means "use the paired BLE device as input (auto-connect)".
 
 ## First setup walkthrough
 
@@ -201,7 +314,7 @@ match rules, metrics, controls, attribution, and test status. Only the listed
 qdomyos-zwift ports exist; this is not support for its entire device catalogue.
 
 To add a protocol:
-1. Implement pure C++ `SourceProtocol` in `include/protocols/` and `src/protocols/`:
+1. Implement pure C++ `SourceProtocol` in `include/core/protocols/` and `src/core/protocols/`:
    `plan()` declares reads/subscriptions, `onRead()`/`onNotify()` decode bytes,
    `control()`/`tick()` queue writes drained by `takeWrite()`; advertisement-only
    inputs use `onAdvertisement()`.
@@ -209,7 +322,7 @@ To add a protocol:
    discovery is opt-in through `ConnectPlan`; explicitly allowlist write UUIDs
    and receive the resolved endpoint through `onWriteEndpoint()`.
 2. Add an id (`[a-z0-9_-]`, at most 16 characters), matcher, factory, and priority
-   to `kProtocols` in `src/protocols/registry.cpp`. Highest matching priority wins;
+   to `kProtocols` in `src/core/protocols/registry.cpp`. Highest matching priority wins;
    avoid broad vendor matches stealing unrelated devices from standard protocols.
 3. Add host tests with representative byte samples and malformed/truncated packets
    in `tests/host/test_ble_input.cpp`, and add the source to the Makefile.
@@ -298,7 +411,7 @@ except pairing/unpairing, which persist their own changes immediately.
 
 ## Web interface
 ### Using the UI
-The single-page app (`web/index.html`, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
+The single-page app (`src/variants/web/assets/index.html`, web variant only, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
 - **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and FTMS output client state (WebSocket, ≤ 4 Hz).
 - **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
 - **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
@@ -648,10 +761,15 @@ From the repository root:
 ```sh
 make host-tests
 pio run -e esp32s3dev
+pio run -e crowpanel128
+make hmi-screenshots LVGL_DIR=.cache/lvgl   # optional, needs an LVGL v9.2.2 checkout
 ```
 
 Host tests use GNU Make and g++, compile C++17 with
-`-Wall -Wextra -Werror -pthread`, and run `/tmp/smartfitness-core-test`.
+`-Wall -Wextra -Werror -pthread`. `make host-tests` runs three steps:
+`host-tests-core` links the core alone (no web or HMI sources), `host-tests-all`
+runs the full suite (core, `BridgeController`/view model, web JSON/API, HMI model),
+and `variant-guard` checks that `include/variant.h` rejects zero or two variant flags.
 They cover core gating/disconnects, FTMS codec/control flow, config round trips,
 v1 migration/CRC/validation/write avoidance, BLE registry/codecs/reconnect/stale
 handling, console/API validation, POST origin/content-type checks, fragmented-body
@@ -665,7 +783,7 @@ SoftAP failure/fallback with simultaneous BLE/Wi-Fi activity. Host regressions
 verify the state machines and pure validation helpers, not radio/transport timing.
 
 PlatformIO runs `scripts/embed_web_assets.py` before building: it converts
-`web/index.html` into deterministic gzip bytes in `include/generated/web_assets.h`,
+`src/variants/web/assets/index.html` into deterministic gzip bytes in `include/generated/web_assets.h`,
 rewriting only on content changes. It can also be invoked with
 `python3 scripts/embed_web_assets.py`. Generated headers (`include/generated/`)
 and `.pio/` are gitignored; edit the HTML, not the generated header.
@@ -678,12 +796,16 @@ and `.pio/` are gitignored; edit the HTML, not the generated header.
 | NimBLE-Arduino | **1.4.3**, pinned; 1.x APIs match core 2.0.17, NimBLE 2.x needs core 3.x |
 | ESPAsyncWebServer | **3.12.1**, pinned; async HTTP/WebSocket handling with bounded main-loop handoff |
 | AsyncTCP | **3.5.0**, pinned; networking backend for ESPAsyncWebServer |
-| ArduinoJson | **7.4.3**, pinned; shared firmware/API JSON validation and rendering |
+| ArduinoJson | **7.4.3**, pinned; web variant API JSON validation and rendering |
+| LVGL | **9.2.2**, pinned; HMI variant UI (also used by the host simulator) |
+| LovyanGFX | **1.2.7**, pinned; HMI variant GC9A01 display driver, builds on core 2.0.17 |
+| Adafruit NeoPixel | **1.12.3**, pinned; HMI variant optional LED ring |
 
 `platform = espressif32` is **unpinned**; the library pins do not freeze the core
 or entire toolchain. Host tests use the vendored ArduinoJson header in
 `tests/host/third_party`. CI installs PlatformIO **6.2.0** on Python 3.12 and runs
-host tests plus the `esp32s3dev` build for pushes/PRs to `main`. Do not interpret
+host tests, the `esp32s3dev` and `crowpanel128` builds (firmware artifacts) and the
+HMI simulator screenshots for pushes/PRs to `main`. Do not interpret
 green CI as hardware validation.
 
 ### Extension contract

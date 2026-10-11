@@ -15,7 +15,7 @@
 #include "ble/bounded_queue.hpp"
 #include "bridge_commands.h"
 
-class WebUi;
+class BridgeController;
 
 struct ApiResponse {
     int status = 200;
@@ -50,7 +50,7 @@ public:
     // --- main loop ---
     // Executes up to maxJobs queued jobs; returns the result JSON messages
     // (also stored for result()) so they can be pushed over the WebSocket.
-    std::vector<std::string> process(WebUi& ui, std::size_t maxJobs = 2);
+    std::vector<std::string> process(BridgeController& ui, std::size_t maxJobs = 2);
     void publish(Snapshot kind, const std::string& json);
 
     std::uint32_t droppedRequests() const { return queue_.dropped(); }

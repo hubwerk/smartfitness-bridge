@@ -1,0 +1,821 @@
+#include "hmi_ui.h"
+
+#include <algorithm>
+#include <cstdio>
+
+#include "ftms_output.h"
+
+using namespace smartfitness;
+
+namespace hmi {
+namespace {
+
+HmiUi* g_ui = nullptr;
+
+constexpr lv_coord_t kScreenSize = 240;
+constexpr lv_coord_t kListWidth = 176;
+constexpr lv_coord_t kListHeight = 164;
+constexpr std::uint32_t kToastMs = 2500;
+
+lv_color_t stateColor(const StatusView& status) {
+    const Rgb rgb = statusColor(status);
+    // The LED colours are dim on purpose; scale them up for the screen.
+    auto scale = [](std::uint8_t value) { return static_cast<std::uint8_t>(std::min(255, value * 3 / 2 + 40)); };
+    return lv_color_make(scale(rgb.r), scale(rgb.g), scale(rgb.b));
+}
+
+std::string withValue(Str label, const std::string& value) { return std::string(tr(label)) + ": " + value; }
+
+std::string percent(std::uint8_t value) { return std::to_string(value) + " %"; }
+
+}  // namespace
+
+void HmiUi::begin(lv_indev_t* encoder, const HmiSettings& settings, HmiActions actions) {
+    g_ui = this;
+    encoder_ = encoder;
+    settings_ = settings;
+    actions_ = std::move(actions);
+    adapters_ = adapterViews();
+    group_ = lv_group_create();
+    lv_group_set_wrap(group_, true);
+    if (encoder_) {
+        lv_indev_set_group(encoder_, group_);
+        lv_indev_add_event_cb(encoder_, backOnLongPress, LV_EVENT_LONG_PRESSED, this);
+    }
+
+    toast_ = lv_label_create(lv_layer_top());
+    lv_obj_set_width(toast_, 176);
+    lv_label_set_long_mode(toast_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(toast_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(toast_, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(toast_, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(toast_, LV_OPA_90, 0);
+    lv_obj_set_style_radius(toast_, 10, 0);
+    lv_obj_set_style_pad_all(toast_, 6, 0);
+    lv_obj_align(toast_, LV_ALIGN_BOTTOM_MID, 0, -30);
+    lv_obj_add_flag(toast_, LV_OBJ_FLAG_HIDDEN);
+    toastTimer_ = lv_timer_create(hideToast, kToastMs, this);
+    lv_timer_pause(toastTimer_);
+
+    screen_ = Screen::Dashboard;
+    build(false);
+}
+
+// --- data -------------------------------------------------------------------
+
+void HmiUi::setStatus(const StatusView& status) {
+    status_ = status;
+    if (screen_ == Screen::Dashboard && dash_.value) updateDashboard();
+}
+
+void HmiUi::setScan(const ScanView& scan) { scan_ = scan; }
+
+void HmiUi::setConfig(const ConfigView& config) { config_ = config; }
+
+void HmiUi::setSettings(const HmiSettings& settings) {
+    settings_ = settings;
+    if (screen_ == Screen::Settings) rebuildPending_ = true;
+}
+
+void HmiUi::showResult(const Command&, const CommandResult& result) {
+    std::string text = result.message.empty() ? std::string(tr(Str::Ok)) : result.message;
+    if (text.size() > 120) text = text.substr(0, 117) + "...";
+    lv_label_set_text(toast_, text.c_str());
+    lv_obj_set_style_bg_color(toast_, result.ok ? lv_palette_darken(LV_PALETTE_GREEN, 3)
+                                                : lv_palette_darken(LV_PALETTE_RED, 2), 0);
+    lv_obj_remove_flag(toast_, LV_OBJ_FLAG_HIDDEN);
+    lv_timer_reset(toastTimer_);
+    lv_timer_resume(toastTimer_);
+}
+
+void HmiUi::hideToast(lv_timer_t* timer) {
+    auto* ui = static_cast<HmiUi*>(lv_timer_get_user_data(timer));
+    lv_obj_add_flag(ui->toast_, LV_OBJ_FLAG_HIDDEN);
+    lv_timer_pause(timer);
+}
+
+// --- navigation -------------------------------------------------------------
+
+void HmiUi::navigate(Screen screen) {
+    const Screen from = navigatePending_ ? pending_ : screen_;
+    if (screen == Screen::Dashboard) {
+        history_.clear();
+    } else if (screen != from) {
+        history_.push_back(from);
+    }
+    pending_ = screen;
+    navigatePending_ = true;
+}
+
+void HmiUi::back() {
+    if (screen_ == Screen::Confirm) resetSequence_.cancel();
+    if (history_.empty()) {
+        pending_ = Screen::Dashboard;
+    } else {
+        pending_ = history_.back();
+        history_.pop_back();
+    }
+    navigatePending_ = true;
+}
+
+void HmiUi::returnTo(Screen screen) {
+    while (!history_.empty() && history_.back() != screen) history_.pop_back();
+    if (!history_.empty()) history_.pop_back();
+    pending_ = screen;
+    navigatePending_ = true;
+}
+
+void HmiUi::openDevice(std::size_t index) {
+    if (index >= scan_.devices.size()) return;
+    device_ = scan_.devices[index];
+    navigate(Screen::DeviceDetail);
+}
+
+void HmiUi::openAdjust(Control control) {
+    editor_.begin(control, status_);
+    navigate(Screen::Adjust);
+}
+
+void HmiUi::openFactoryReset() {
+    resetSequence_.start();
+    ConfirmState state;
+    state.title = Str::ConfirmResetTitle;
+    state.text = tr(Str::ConfirmResetText1);
+    state.confirmLabel = Str::Continue;
+    state.returnTo = Screen::Settings;
+    state.action = [this] {
+        resetSequence_.confirm();
+        ConfirmState second;
+        second.title = Str::ConfirmResetTitle;
+        second.text = tr(Str::ConfirmResetText2);
+        second.confirmLabel = Str::Erase;
+        second.returnTo = Screen::Settings;
+        second.action = [this] {
+            if (resetSequence_.confirm()) submit(makeCommand(CommandType::FactoryReset));
+        };
+        confirm(second);
+    };
+    confirm(state);
+}
+
+void HmiUi::openRestart() {
+    ConfirmState state;
+    state.title = Str::ConfirmRestartTitle;
+    state.text = tr(Str::ConfirmRestartText);
+    state.confirmLabel = Str::Restart;
+    state.returnTo = Screen::Settings;
+    state.action = [this] { submit(makeCommand(CommandType::Restart)); };
+    confirm(state);
+}
+
+void HmiUi::confirm(ConfirmState state) {
+    confirm_ = std::move(state);
+    confirmReplaced_ = true;
+    // Fresh build (focus back on Cancel) even when a confirmation follows a
+    // confirmation; navigate() does not stack the same screen twice.
+    navigate(Screen::Confirm);
+}
+
+void HmiUi::submit(const Command& command) {
+    if (actions_.submit) actions_.submit(command);
+}
+
+void HmiUi::changeSettings(const HmiSettings& settings) {
+    settings_ = settings;
+    if (actions_.settingsChanged) actions_.settingsChanged(settings_);
+    rebuildPending_ = true;
+}
+
+bool HmiUi::inputBusy() const {
+    for (lv_indev_t* indev = lv_indev_get_next(nullptr); indev; indev = lv_indev_get_next(indev)) {
+        if (lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) return true;
+    }
+    return false;
+}
+
+void HmiUi::backOnLongPress(lv_event_t* event) {
+    auto* ui = static_cast<HmiUi*>(lv_event_get_user_data(event));
+    // Registered on the encoder only (the event parameter is the focused
+    // object, not the indev).
+    lv_indev_t* indev = ui->encoder_;
+    // Swallow the rest of this press (no click on release, no edit toggle).
+    lv_indev_wait_release(indev);
+    lv_indev_reset(indev, nullptr);
+    if (ui->screen_ != Screen::Dashboard) ui->back();
+}
+
+void HmiUi::eventTrampoline(lv_event_t* event) {
+    if (!g_ui) return;
+    const auto index = reinterpret_cast<std::uintptr_t>(lv_event_get_user_data(event));
+    if (index < g_ui->callbacks_.size() && g_ui->callbacks_[index]) {
+        auto callback = g_ui->callbacks_[index];  // may rebuild the table
+        callback(event);
+    }
+}
+
+void HmiUi::bind(lv_obj_t* obj, lv_event_code_t code, std::function<void(lv_event_t*)> action) {
+    callbacks_.push_back(std::move(action));
+    lv_obj_add_event_cb(obj, eventTrampoline, code, reinterpret_cast<void*>(callbacks_.size() - 1));
+}
+
+// --- rebuild ----------------------------------------------------------------
+
+std::string HmiUi::signature() const {
+    std::string sig;
+    switch (screen_) {
+        case Screen::Devices:
+            sig += std::to_string(scan_.scanning) + std::to_string(scan_.bleAvailable) +
+                   std::to_string(static_cast<int>(status_.state)) + status_.input.link + status_.input.paired.address +
+                   status_.input.paired.adapter + std::to_string(status_.input.bleSelected) +
+                   std::to_string(config_.simulatedTrainer);
+            for (const auto& device : scan_.devices)
+                sig += "|" + device.address + device.name + device.adapter + std::to_string(device.rssi);
+            break;
+        case Screen::Control:
+            sig += std::to_string(static_cast<int>(status_.state)) + std::to_string(status_.canControl) +
+                   std::to_string(static_cast<int>(status_.input.profile)) + targetLabel(status_);
+            for (const bool supported : status_.controls) sig += supported ? "1" : "0";
+            break;
+        case Screen::Settings:
+            sig += config_.ftmsName + std::to_string(config_.ftmsOutput) +
+                   std::to_string(static_cast<int>(config_.ftmsOutputProfile)) + std::to_string(config_.ant) +
+                   std::to_string(config_.unsaved) + std::to_string(settings_.brightness) +
+                   std::to_string(settings_.screenTimeoutS) + std::to_string(settings_.ledRing);
+            break;
+        default:
+            break;
+    }
+    return sig;
+}
+
+void HmiUi::update() {
+    if (inputBusy()) return;
+    if (navigatePending_) {
+        navigatePending_ = false;
+        rebuildPending_ = false;
+        screen_ = pending_;
+        build(false);
+        return;
+    }
+    if (rebuildPending_ || signature() != builtSignature_) {
+        rebuildPending_ = false;
+        build(true);
+    }
+}
+
+void HmiUi::build(bool keepFocus) {
+    std::uint32_t focus = 0;
+    if (keepFocus) {
+        lv_obj_t* focused = lv_group_get_focused(group_);
+        for (std::uint32_t index = 0; index < lv_group_get_obj_count(group_); ++index) {
+            if (lv_group_get_obj_by_index(group_, index) == focused) focus = index;
+        }
+    }
+    lv_obj_t* old = root_;
+    defaultFocus_ = 0;
+    lv_group_remove_all_objs(group_);
+    callbacks_.clear();
+    dash_ = {};
+    roller_ = rollerInfo_ = adjustValue_ = textArea_ = nullptr;
+
+    switch (screen_) {
+        case Screen::Dashboard: buildDashboard(); break;
+        case Screen::Menu: buildMenu(); break;
+        case Screen::Devices: buildDevices(); break;
+        case Screen::DeviceDetail: buildDeviceDetail(); break;
+        case Screen::AdapterPicker: buildAdapterPicker(); break;
+        case Screen::Control: buildControl(); break;
+        case Screen::Adjust: buildAdjust(); break;
+        case Screen::Confirm: buildConfirm(); break;
+        case Screen::Settings: buildSettings(); break;
+        case Screen::FtmsName: buildFtmsName(); break;
+        case Screen::Keyboard: buildKeyboard(); break;
+    }
+    builtSignature_ = signature();
+    if (!keepFocus) focus = defaultFocus_;
+
+    lv_screen_load(root_);
+    if (old) lv_obj_delete(old);
+
+    const std::uint32_t count = lv_group_get_obj_count(group_);
+    if (count > 0) lv_group_focus_obj(lv_group_get_obj_by_index(group_, std::min(focus, count - 1)));
+    // Dashboard, Adjust and Keyboard take the knob rotation directly.
+    lv_group_set_editing(group_, screen_ == Screen::Dashboard || screen_ == Screen::Adjust ||
+                                     screen_ == Screen::Keyboard);
+}
+
+// --- widgets ----------------------------------------------------------------
+
+lv_obj_t* HmiUi::makeScreen(const std::string& title) {
+    root_ = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(root_, lv_color_black(), 0);
+    lv_obj_remove_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
+    if (!title.empty()) {
+        lv_obj_t* label = lv_label_create(root_);
+        lv_label_set_text(label, title.c_str());
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_palette_lighten(LV_PALETTE_BLUE, 2), 0);
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 16);
+    }
+    if (screen_ != Screen::Dashboard) {
+        bind(root_, LV_EVENT_GESTURE, [this](lv_event_t*) {
+            lv_indev_t* indev = lv_indev_active();
+            if (indev && lv_indev_get_gesture_dir(indev) == LV_DIR_RIGHT) {
+                lv_indev_wait_release(indev);
+                back();
+            }
+        });
+    }
+    return root_;
+}
+
+lv_obj_t* HmiUi::makeList(lv_obj_t* screen) {
+    lv_obj_t* list = lv_obj_create(screen);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_size(list, kListWidth, kListHeight);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 40);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(list, 6, 0);
+    lv_obj_set_style_pad_ver(list, 4, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+    return list;
+}
+
+lv_obj_t* HmiUi::addButton(lv_obj_t* parent, const std::string& text, std::function<void()> action, bool focusable) {
+    lv_obj_t* button = lv_button_create(parent);
+    lv_obj_set_width(button, lv_pct(100));
+    lv_obj_set_height(button, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(button, 34, 0);
+    lv_obj_set_style_pad_ver(button, 6, 0);
+    lv_obj_set_style_pad_hor(button, 4, 0);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_obj_t* label = lv_label_create(button);
+    lv_label_set_text(label, text.c_str());
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, lv_pct(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(label);
+    if (action) {
+        bind(button, LV_EVENT_CLICKED, [action](lv_event_t*) { action(); });
+    } else {
+        lv_obj_add_state(button, LV_STATE_DISABLED);
+    }
+    if (focusable && action) lv_group_add_obj(group_, button);
+    return button;
+}
+
+lv_obj_t* HmiUi::addLabel(lv_obj_t* parent, const std::string& text, const lv_font_t* font) {
+    lv_obj_t* label = lv_label_create(parent);
+    lv_label_set_text(label, text.c_str());
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, lv_pct(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(label, font ? font : &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(label, lv_palette_lighten(LV_PALETTE_GREY, 2), 0);
+    return label;
+}
+
+// --- dashboard --------------------------------------------------------------
+
+void HmiUi::buildDashboard() {
+    makeScreen("");
+    lv_obj_t* pad = lv_obj_create(root_);
+    lv_obj_remove_style_all(pad);
+    lv_obj_set_size(pad, kScreenSize, kScreenSize);
+    lv_obj_center(pad);
+    lv_obj_add_flag(pad, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
+    lv_group_add_obj(group_, pad);
+
+    dash_.arc = lv_arc_create(pad);
+    lv_obj_set_size(dash_.arc, 226, 226);
+    lv_obj_center(dash_.arc);
+    lv_arc_set_bg_angles(dash_.arc, 135, 45);
+    lv_arc_set_range(dash_.arc, 0, 1000);
+    lv_obj_remove_flag(dash_.arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_arc_width(dash_.arc, 12, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(dash_.arc, 12, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(dash_.arc, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(dash_.arc, 0, LV_PART_KNOB);
+
+    auto label = [pad](const lv_font_t* font, lv_coord_t y, lv_color_t color) {
+        lv_obj_t* obj = lv_label_create(pad);
+        lv_obj_set_style_text_font(obj, font, 0);
+        lv_obj_set_style_text_color(obj, color, 0);
+        lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(obj, LV_ALIGN_CENTER, 0, y);
+        return obj;
+    };
+    const lv_color_t grey = lv_palette_lighten(LV_PALETTE_GREY, 1);
+    dash_.state = label(&lv_font_montserrat_12, -76, grey);
+    dash_.name = label(&lv_font_montserrat_14, -44, grey);
+    dash_.value = label(&lv_font_montserrat_40, -6, lv_color_white());
+    dash_.unit = label(&lv_font_montserrat_14, 28, grey);
+    dash_.target = label(&lv_font_montserrat_12, 54, lv_palette_lighten(LV_PALETTE_AMBER, 1));
+    dash_.info = label(&lv_font_montserrat_12, 84, grey);
+    lv_obj_set_width(dash_.info, 150);
+    lv_label_set_long_mode(dash_.info, LV_LABEL_LONG_DOT);
+
+    bind(pad, LV_EVENT_KEY, [this](lv_event_t* event) {
+        const std::uint32_t key = lv_event_get_key(event);
+        if (key == LV_KEY_RIGHT || key == LV_KEY_DOWN) cycleMetric(1);
+        if (key == LV_KEY_LEFT || key == LV_KEY_UP) cycleMetric(-1);
+    });
+    bind(pad, LV_EVENT_CLICKED, [this](lv_event_t*) { navigate(Screen::Menu); });
+    bind(pad, LV_EVENT_GESTURE, [this](lv_event_t*) {
+        lv_indev_t* indev = lv_indev_active();
+        if (!indev) return;
+        const lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+        if (dir == LV_DIR_LEFT || dir == LV_DIR_RIGHT) {
+            lv_indev_wait_release(indev);
+            cycleMetric(dir == LV_DIR_LEFT ? 1 : -1);
+        }
+    });
+    updateDashboard();
+}
+
+void HmiUi::cycleMetric(int detents) {
+    metric_.step(status_.input.profile, detents);
+    updateDashboard();
+}
+
+void HmiUi::updateDashboard() {
+    if (!dash_.value) return;
+    const Metric metric = metric_.current(status_.input.profile);
+    const MetricFormat& format = metricFormat(metric);
+    const MetricView& sample = status_.metric(metric);
+    lv_label_set_text(dash_.name, tr(format.name));
+    lv_label_set_text(dash_.value, formatMetric(sample, metric).c_str());
+    lv_label_set_text(dash_.unit, format.unit);
+    float ratio = 0.0F;
+    if (sample.valid && format.gaugeMax > format.gaugeMin)
+        ratio = (sample.value - format.gaugeMin) / (format.gaugeMax - format.gaugeMin);
+    lv_arc_set_value(dash_.arc, static_cast<int32_t>(std::min(1.0F, std::max(0.0F, ratio)) * 1000.0F));
+    lv_obj_set_style_arc_color(dash_.arc, stateColor(status_), LV_PART_INDICATOR);
+
+    lv_label_set_text(dash_.state, tr(stateLabel(status_.state)));
+    lv_obj_set_style_text_color(dash_.state, stateColor(status_), 0);
+    lv_label_set_text(dash_.target, targetLabel(status_).c_str());
+    const std::string info = std::string(profileLabel(status_.input.profile)) + " | " + ftmsLabel(status_.ftmsOutput) +
+                             "\n" + inputLabel(status_);
+    lv_label_set_text(dash_.info, info.c_str());
+}
+
+// --- menu -------------------------------------------------------------------
+
+void HmiUi::buildMenu() {
+    makeScreen(tr(Str::Menu));
+    lv_obj_t* list = makeList(root_);
+    addButton(list, tr(Str::Dashboard), [this] { navigate(Screen::Dashboard); });
+    addButton(list, tr(Str::Devices), [this] { navigate(Screen::Devices); });
+    addButton(list, tr(Str::Control), [this] { navigate(Screen::Control); });
+    addButton(list, tr(Str::Settings), [this] { navigate(Screen::Settings); });
+    addLabel(list, tr(Str::HintBack));
+}
+
+// --- devices ----------------------------------------------------------------
+
+void HmiUi::buildDevices() {
+    makeScreen(tr(Str::Devices));
+    lv_obj_t* list = makeList(root_);
+    std::string paired = tr(Str::NotPaired);
+    if (status_.input.paired.valid) {
+        paired = std::string(tr(Str::Paired)) + ": " +
+                 (status_.input.paired.name.empty() ? status_.input.paired.address : status_.input.paired.name);
+        if (!status_.input.paired.adapter.empty()) paired += " (" + status_.input.paired.adapter + ")";
+    }
+    addLabel(list, paired + "\n" + inputLabel(status_) + " - " + tr(stateLabel(status_.state)));
+    if (!scan_.bleAvailable) addLabel(list, tr(Str::BleUnavailable));
+
+    if (scan_.scanning) {
+        addButton(list, tr(Str::StopScan), [this] { submit(makeCommand(CommandType::ScanStop)); });
+    } else {
+        addButton(list, tr(Str::Scan), [this] {
+            Command scan = makeCommand(CommandType::Scan);
+            scan.durationMs = 10000;
+            submit(scan);
+        });
+    }
+    if (status_.input.paired.valid) {
+        addButton(list, tr(Str::Connect), [this] { submit(makeCommand(CommandType::Connect)); });
+    }
+    addButton(list, tr(Str::Disconnect), [this] { submit(makeCommand(CommandType::Disconnect)); });
+    if (status_.input.paired.valid) {
+        addButton(list, tr(Str::Unpair), [this] {
+            ConfirmState state;
+            state.title = Str::ConfirmUnpairTitle;
+            state.text = tr(Str::ConfirmUnpairText);
+            state.confirmLabel = Str::Unpair;
+            state.returnTo = Screen::Devices;
+            state.action = [this] { submit(makeCommand(CommandType::Unpair)); };
+            confirm(state);
+        });
+    }
+    addButton(list, tr(Str::StartSimulation), [this] { submit(makeCommand(CommandType::Simulate)); });
+    addButton(list, withValue(Str::SimTrainer, onOff(config_.simulatedTrainer)),
+              [this] { submit(makeFlag(CommandType::Trainer, !config_.simulatedTrainer)); });
+
+    std::string results = std::string(tr(Str::Results)) + " (" + std::to_string(scan_.devices.size()) + ")";
+    if (scan_.scanning) results += " - " + std::string(tr(Str::Scanning));
+    addLabel(list, results, &lv_font_montserrat_14);
+    if (scan_.devices.empty()) addLabel(list, tr(Str::NoResults));
+    for (std::size_t index = 0; index < scan_.devices.size(); ++index) {
+        addButton(list, scanEntryLabel(scan_.devices[index]), [this, index] { openDevice(index); });
+    }
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildDeviceDetail() {
+    makeScreen(device_.name.empty() ? device_.address : device_.name);
+    lv_obj_t* list = makeList(root_);
+    std::string info = device_.address + "\n" + std::to_string(device_.rssi) + " dBm\n" + tr(Str::Adapter) + ": " +
+                       (device_.adapter.empty() ? std::string(tr(Str::Unknown))
+                                                : device_.adapter + " (" + tr(Str::Detected) + ")");
+    addLabel(list, info);
+    if (!device_.adapter.empty()) {
+        addButton(list, tr(Str::Pair), [this] {
+            Command pair;
+            if (makePair(device_, "", pair)) submit(pair);
+            returnTo(Screen::Devices);
+        });
+    }
+    addButton(list, std::string(tr(Str::PairAs)) + "...", [this] { navigate(Screen::AdapterPicker); });
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildAdapterPicker() {
+    makeScreen(tr(Str::ChooseAdapter));
+    std::string options;
+    std::uint32_t selected = 0;
+    for (std::size_t index = 0; index < adapters_.size(); ++index) {
+        if (index) options += "\n";
+        options += adapters_[index].id;
+        if (device_.adapter == adapters_[index].id) selected = static_cast<std::uint32_t>(index);
+    }
+    roller_ = lv_roller_create(root_);
+    lv_roller_set_options(roller_, options.c_str(), LV_ROLLER_MODE_NORMAL);
+    lv_roller_set_visible_row_count(roller_, 3);
+    lv_obj_set_width(roller_, 176);
+    lv_obj_set_style_text_font(roller_, &lv_font_montserrat_12, 0);
+    lv_obj_align(roller_, LV_ALIGN_TOP_MID, 0, 36);
+    lv_roller_set_selected(roller_, selected, LV_ANIM_OFF);
+    lv_group_add_obj(group_, roller_);
+
+    rollerInfo_ = lv_label_create(root_);
+    lv_obj_set_width(rollerInfo_, 170);
+    lv_label_set_long_mode(rollerInfo_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(rollerInfo_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(rollerInfo_, &lv_font_montserrat_12, 0);
+    lv_obj_align_to(rollerInfo_, roller_, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+    auto showInfo = [this] {
+        const auto index = lv_roller_get_selected(roller_);
+        if (index < adapters_.size()) {
+            const auto& adapter = adapters_[index];
+            const std::string text = std::string(adapter.label) + " - " + profileLabel(adapter.profile) +
+                                     (adapter.controllable ? "" : " (read-only)");
+            lv_label_set_text(rollerInfo_, text.c_str());
+        }
+    };
+    showInfo();
+    bind(roller_, LV_EVENT_VALUE_CHANGED, [showInfo](lv_event_t*) { showInfo(); });
+
+    lv_obj_t* row = lv_obj_create(root_);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, 140, 36);
+    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -24);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_t* pair = addButton(row, tr(Str::Pair), [this] {
+        const auto index = lv_roller_get_selected(roller_);
+        Command command;
+        if (index < adapters_.size() && makePair(device_, adapters_[index].id, command)) submit(command);
+        returnTo(Screen::Devices);
+    });
+    lv_obj_set_flex_grow(pair, 1);
+    lv_obj_t* cancel = addButton(row, tr(Str::Back), [this] { back(); });
+    lv_obj_set_flex_grow(cancel, 1);
+}
+
+// --- control ----------------------------------------------------------------
+
+void HmiUi::buildControl() {
+    makeScreen(tr(Str::Control));
+    lv_obj_t* list = makeList(root_);
+    std::string state = std::string(tr(stateLabel(status_.state))) + "\n" + targetLabel(status_);
+    if (!status_.canControl) state += "\n" + std::string(tr(Str::ControlUnavailable));
+    addLabel(list, state);
+    for (const Control control : controlOrder(status_.input.profile)) {
+        const ControlSpec& spec = controlSpec(control);
+        std::string text = tr(spec.name);
+        if (!status_.supports(control)) {
+            text += " - " + std::string(tr(Str::Unsupported));
+            addButton(list, text, nullptr, false);
+            continue;
+        }
+        if (status_.hasTarget && status_.target.control == control)
+            text += ": " + formatValue(status_.target.value, spec.decimals) + " " + spec.unit;
+        addButton(list, text, [this, control] { openAdjust(control); });
+    }
+    if (status_.supports(Control::Speed)) {
+        // Stopping never needs a confirmation.
+        addButton(list, tr(Str::StopBelt), [this] {
+            Command stop = makeCommand(CommandType::Control);
+            stop.control = Control::Speed;
+            stop.value = 0.0F;
+            submit(stop);
+        });
+    }
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildAdjust() {
+    const ControlSpec& spec = controlSpec(editor_.control());
+    makeScreen(tr(spec.name));
+
+    lv_obj_t* pad = lv_obj_create(root_);
+    lv_obj_remove_style_all(pad);
+    lv_obj_set_size(pad, 120, 90);
+    lv_obj_align(pad, LV_ALIGN_CENTER, 0, -18);
+    lv_obj_add_flag(pad, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(pad, 12, 0);
+    lv_obj_set_style_border_color(pad, lv_palette_main(LV_PALETTE_BLUE), LV_STATE_FOCUSED);
+    lv_obj_set_style_border_width(pad, 2, LV_STATE_FOCUSED);
+    lv_group_add_obj(group_, pad);
+
+    adjustValue_ = lv_label_create(pad);
+    lv_obj_set_style_text_font(adjustValue_, &lv_font_montserrat_40, 0);
+    lv_obj_align(adjustValue_, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_t* unit = lv_label_create(pad);
+    lv_label_set_text(unit, spec.unit);
+    lv_obj_align(unit, LV_ALIGN_BOTTOM_MID, 0, -4);
+
+    bind(pad, LV_EVENT_KEY, [this](lv_event_t* event) {
+        const std::uint32_t key = lv_event_get_key(event);
+        if (key == LV_KEY_RIGHT || key == LV_KEY_UP) editor_.step(1);
+        if (key == LV_KEY_LEFT || key == LV_KEY_DOWN) editor_.step(-1);
+        updateAdjust();
+    });
+    bind(pad, LV_EVENT_CLICKED, [this](lv_event_t*) { applyAdjust(); });
+
+    // Touch helpers (not in the knob group).
+    auto stepButton = [this](const char* text, lv_align_t align, lv_coord_t x, int detents) {
+        lv_obj_t* button = lv_button_create(root_);
+        lv_obj_set_size(button, 44, 44);
+        lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
+        lv_obj_align(button, align, x, -18);
+        lv_obj_t* label = lv_label_create(button);
+        lv_label_set_text(label, text);
+        lv_obj_center(label);
+        bind(button, LV_EVENT_CLICKED, [this, detents](lv_event_t*) {
+            editor_.step(detents);
+            updateAdjust();
+        });
+        lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+    };
+    stepButton(LV_SYMBOL_MINUS, LV_ALIGN_LEFT_MID, 12, -1);
+    stepButton(LV_SYMBOL_PLUS, LV_ALIGN_RIGHT_MID, -12, 1);
+
+    lv_obj_t* hint = lv_label_create(root_);
+    lv_label_set_text(hint, tr(Str::HintAdjust));
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(hint, lv_palette_lighten(LV_PALETTE_GREY, 1), 0);
+    lv_obj_align(hint, LV_ALIGN_CENTER, 0, 46);
+
+    lv_obj_t* row = lv_obj_create(root_);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, 136, 36);
+    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_set_flex_grow(addButton(row, tr(Str::Apply), [this] { applyAdjust(); }, false), 1);
+    lv_obj_set_flex_grow(addButton(row, tr(Str::Back), [this] { back(); }, false), 1);
+    updateAdjust();
+}
+
+void HmiUi::updateAdjust() {
+    if (adjustValue_) lv_label_set_text(adjustValue_, editor_.valueText().c_str());
+}
+
+void HmiUi::applyAdjust() {
+    const Command command = editor_.command();
+    if (!editor_.requiresConfirmation()) {
+        submit(command);
+        returnTo(Screen::Control);
+        return;
+    }
+    ConfirmState state;
+    state.title = Str::ConfirmSpeedTitle;
+    state.text = editor_.valueText() + " " + controlSpec(editor_.control()).unit + "\n" +
+                 tr(command.value > 0.0F ? Str::ConfirmSpeedText : Str::ConfirmStopText);
+    state.confirmLabel = Str::Confirm;
+    state.returnTo = Screen::Control;
+    state.action = [this, command] { submit(command); };
+    confirm(state);
+}
+
+// --- confirm ----------------------------------------------------------------
+
+void HmiUi::buildConfirm() {
+    makeScreen(tr(confirm_.title));
+    lv_obj_t* list = makeList(root_);
+    addLabel(list, confirm_.text, &lv_font_montserrat_14);
+    // Cancel first: it gets the default focus.
+    addButton(list, tr(Str::Cancel), [this] {
+        resetSequence_.cancel();
+        returnTo(confirm_.returnTo);
+    });
+    lv_obj_t* ok = addButton(list, tr(confirm_.confirmLabel), [this] {
+        ConfirmState state = confirm_;
+        confirmReplaced_ = false;
+        if (state.action) state.action();
+        if (!confirmReplaced_) returnTo(state.returnTo);
+    });
+    lv_obj_set_style_bg_color(ok, lv_palette_darken(LV_PALETTE_RED, 2), 0);
+}
+
+// --- settings ---------------------------------------------------------------
+
+void HmiUi::buildSettings() {
+    makeScreen(tr(Str::Settings));
+    lv_obj_t* list = makeList(root_);
+    addLabel(list, tr(config_.unsaved ? Str::Unsaved : Str::SavedState));
+    addButton(list, withValue(Str::FtmsName, config_.ftmsName), [this] { navigate(Screen::FtmsName); });
+    addButton(list, withValue(Str::FtmsOutput, onOff(config_.ftmsOutput)),
+              [this] { submit(makeFlag(CommandType::FtmsOutput, !config_.ftmsOutput)); });
+    addButton(list, withValue(Str::FtmsProfile, ftmsProfileLabel(config_.ftmsOutputProfile)), [this] {
+        submit(makeText(CommandType::FtmsProfile, ftmsOutputProfileName(nextFtmsProfile(config_.ftmsOutputProfile))));
+    });
+    std::string ant = withValue(Str::Ant, onOff(config_.ant));
+    if (config_.antRequiresHardware) ant += "\n(" + std::string(tr(Str::AntRequiresHardware)) + ")";
+    addButton(list, ant, [this] { submit(makeFlag(CommandType::Ant, !config_.ant)); });
+    addButton(list, withValue(Str::Brightness, percent(settings_.brightness)), [this] {
+        HmiSettings next = settings_;
+        next.brightness = nextBrightness(settings_.brightness);
+        changeSettings(next);
+    });
+    addButton(list, withValue(Str::ScreenTimeout, screenTimeoutLabel(settings_.screenTimeoutS)), [this] {
+        HmiSettings next = settings_;
+        next.screenTimeoutS = nextScreenTimeout(settings_.screenTimeoutS);
+        changeSettings(next);
+    });
+    addButton(list, withValue(Str::LedRing, onOff(settings_.ledRing)), [this] {
+        HmiSettings next = settings_;
+        next.ledRing = !settings_.ledRing;
+        changeSettings(next);
+    });
+    addButton(list, tr(Str::Save), [this] { submit(makeCommand(CommandType::Save)); });
+    addButton(list, tr(Str::Load), [this] { submit(makeCommand(CommandType::Load)); });
+    addButton(list, tr(Str::FactoryReset), [this] { openFactoryReset(); });
+    addButton(list, tr(Str::Restart), [this] { openRestart(); });
+    addLabel(list, std::string(tr(Str::Firmware)) + " " + config_.version);
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildFtmsName() {
+    makeScreen(tr(Str::FtmsName));
+    lv_obj_t* list = makeList(root_);
+    addLabel(list, tr(Str::Presets));
+    std::uint32_t current = 0;
+    const auto& presets = ftmsNamePresets();
+    for (std::size_t index = 0; index < presets.size(); ++index) {
+        const std::string& name = presets[index];
+        if (name == config_.ftmsName) current = static_cast<std::uint32_t>(index);
+        addButton(list, (name == config_.ftmsName ? std::string(LV_SYMBOL_OK " ") : std::string()) + name, [this, name] {
+            submit(makeText(CommandType::FtmsName, name));
+            returnTo(Screen::Settings);
+        });
+    }
+    addButton(list, std::string(LV_SYMBOL_KEYBOARD " ") + tr(Str::Keyboard), [this] { navigate(Screen::Keyboard); });
+    addButton(list, tr(Str::Back), [this] { back(); });
+    defaultFocus_ = current;
+}
+
+void HmiUi::buildKeyboard() {
+    makeScreen("");
+    textArea_ = lv_textarea_create(root_);
+    lv_textarea_set_one_line(textArea_, true);
+    lv_textarea_set_max_length(textArea_, static_cast<std::uint32_t>(FtmsOutput::kMaxNameLength));
+    lv_textarea_set_text(textArea_, config_.ftmsName.c_str());
+    lv_obj_set_width(textArea_, 180);
+    lv_obj_align(textArea_, LV_ALIGN_TOP_MID, 0, 44);
+
+    lv_obj_t* keyboard = lv_keyboard_create(root_);
+    lv_obj_set_size(keyboard, 196, 116);
+    lv_obj_align(keyboard, LV_ALIGN_TOP_MID, 0, 92);
+    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_pad_all(keyboard, 2, 0);
+    lv_obj_set_style_pad_gap(keyboard, 2, 0);
+    lv_keyboard_set_textarea(keyboard, textArea_);
+    lv_group_add_obj(group_, keyboard);
+    bind(keyboard, LV_EVENT_READY, [this](lv_event_t*) {
+        submit(makeText(CommandType::FtmsName, lv_textarea_get_text(textArea_)));
+        returnTo(Screen::Settings);
+    });
+    bind(keyboard, LV_EVENT_CANCEL, [this](lv_event_t*) { back(); });
+}
+
+}  // namespace hmi

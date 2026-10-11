@@ -5,7 +5,7 @@ not certification that a particular model/firmware works. Host vectors exercise
 the protocol layouts; vendor vectors are synthetic samples based on upstream
 parsers/command bytes, not validated equipment captures.
 
-The table mirrors `src/protocols/registry.cpp`. Highest matching priority wins;
+The table mirrors `src/core/protocols/registry.cpp`. Highest matching priority wins;
 ties keep the first registered match. Pairing can override detection with a
 registered id. Names are case-sensitive unless explicitly noted below.
 
@@ -41,15 +41,15 @@ follow-up below. An override never adds missing source control capabilities.
 | `sole-treadmill`, `sole-f63`, `sole-f65`, `sole-tt8` (80) | Sole F80/F85/F89/S77/ST90/TRX7.5 / F63 / F65 / TT8 | Case-insensitive corresponding upstream model prefixes; no FTMS | Speed (mph converted to km/h), incline, HR | Status-driven speed/incline buttons; no unsolicited belt start | `src/devices/solef80treadmill/solef80treadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `walkingpad-r1`, `walkingpad-flat`, `walkingpad-re` (80) | Kingsmith / WalkingPad R1 Pro, A1/C2, RE | Case-insensitive upstream R1/KS prefixes; `RE` exact; excludes R2 names and FTMS-only variants | Speed | Speed only; flat walking variants capped at 6 km/h, R1 at 10 km/h; no incline | `src/devices/kingsmithr1protreadmill/kingsmithr1protreadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `walkingpad-r2`, `walkingpad-g1`, `walkingpad-g1b`, `wp2-c*-s*` (90) | Kingsmith R2 / X21 / K12 / G1 / MXG | Case-insensitive upstream `KS-ST-K12PRO`, `KS-R1AC`, `KS-HC-R1AA/AC`, X21, MXG, G1 prefixes; advertised custom services select UUID variant; nondefault cipher overrides are manual; no FTMS | Speed, step rate if reported | Speed only; G1 capped at 6 km/h; no incline | `src/devices/kingsmithr2treadmill/kingsmithr2treadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
-| `ftms` (50) | FTMS bike, treadmill, cross trainer, rower | Advertised Fitness Machine Service `0x1826` | Indoor Bike `0x2AD2`, Treadmill `0x2ACD`, Cross Trainer `0x2ACE`, Rower `0x2AD1`: speed/cadence/power/HR/incline and actual distance/elapsed time where present; resistance decoded internally | Feature-gated power, resistance, incline, speed; Request Control handshake; power/resistance/incline honor supplied ranges; grade via bike simulation if needed. Speed is available via console/API and treadmill FTMS output | Local Bluetooth FTMS codec and `ftms_source.hpp` / `src/ftms_source.cpp` | Host byte-layout, feature/range/control tests; hardware unverified | Derived from input data characteristic/service data: `bike` or `treadmill`; `cross-trainer`/`rower` use `bike` fallback |
-| `cps` (40) | Cycling Power sensor | Service `0x1818` | Power, cadence derived from crank revolution/event deltas | None | Local Bluetooth CPS codec; `sensor_sources.hpp`, `src/sensor_sources.cpp`, `src/sensor_codec.cpp` | Host power/crank/wraparound tests; hardware unverified | `bike` |
+| `ftms` (50) | FTMS bike, treadmill, cross trainer, rower | Advertised Fitness Machine Service `0x1826` | Indoor Bike `0x2AD2`, Treadmill `0x2ACD`, Cross Trainer `0x2ACE`, Rower `0x2AD1`: speed/cadence/power/HR/incline and actual distance/elapsed time where present; resistance decoded internally | Feature-gated power, resistance, incline, speed; Request Control handshake; power/resistance/incline honor supplied ranges; grade via bike simulation if needed. Speed is available via console/API and treadmill FTMS output | Local Bluetooth FTMS codec and `ftms_source.hpp` / `src/core/ftms_source.cpp` | Host byte-layout, feature/range/control tests; hardware unverified | Derived from input data characteristic/service data: `bike` or `treadmill`; `cross-trainer`/`rower` use `bike` fallback |
+| `cps` (40) | Cycling Power sensor | Service `0x1818` | Power, cadence derived from crank revolution/event deltas | None | Local Bluetooth CPS codec; `sensor_sources.hpp`, `src/core/sensor_sources.cpp`, `src/core/sensor_codec.cpp` | Host power/crank/wraparound tests; hardware unverified | `bike` |
 | `csc` (30) | Cycling Speed and Cadence sensor | Service `0x1816` | Speed (fixed **2.105 m** wheel circumference), cadence from wheel/crank deltas | None | Local Bluetooth CSC codec; sensor sources/codec | Host wheel/crank/wraparound tests; hardware unverified | `bike` |
 | `hrs` (20) | Heart Rate monitor | Service `0x180D` | Heart rate, 8- or 16-bit measurement | None | Local Bluetooth HRS codec; sensor sources/codec | Host 8/16-bit parser tests; hardware unverified | `bike` |
 
 Vendor ports are GPL-derived from
 [`cagnulein/qdomyos-zwift`](https://github.com/cagnulein/qdomyos-zwift),
 Copyright Roberto Viola and contributors (GPL-3.0). Attribution is retained in
-`include/protocols/` and `src/protocols/`. The original ports do not record a
+`include/core/protocols/` and `src/core/protocols/`. The original ports do not record a
 revision; new batch-1 ports use the pinned revision below.
 Discovery rules follow upstream `src/devices/bluetooth.cpp`. See [license and
 attribution](../README.md#license-and-attribution) and [HD-005](hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports).

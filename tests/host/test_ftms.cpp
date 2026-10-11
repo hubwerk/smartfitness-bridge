@@ -4,7 +4,7 @@
 #include "ant_output.h"
 #include "ftms_output.h"
 #include "config_store.h"
-#include "web_ui.h"
+#include "bridge_controller.h"
 
 #include <cassert>
 #include <cmath>
@@ -286,7 +286,7 @@ void testFtmsNameAndConsole() {
     FtmsOutput ftms;
     ConfigStore config;
     BridgeCore bridge;
-    WebUi ui(bridge, config, adapter, ant, ftms);
+    BridgeController ui(bridge, config, adapter, ant, ftms);
     config.begin();
     bridge.attach(adapter, ant, ftms);
     bridge.begin();

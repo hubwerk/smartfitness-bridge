@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "web_ui.h"
+#include "bridge_controller.h"
 
 using namespace smartfitness;
 
@@ -337,7 +337,7 @@ void ApiExchange::store(std::uint32_t id, bool done, const std::string& json) {
     resultHead_ = (resultHead_ + 1) % results_.size();
 }
 
-std::vector<std::string> ApiExchange::process(WebUi& ui, std::size_t maxJobs) {
+std::vector<std::string> ApiExchange::process(BridgeController& ui, std::size_t maxJobs) {
     std::vector<std::string> messages;
     Job job;
     for (std::size_t count = 0; count < maxJobs && queue_.pop(job); ++count) {

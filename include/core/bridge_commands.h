@@ -1,9 +1,10 @@
 #pragma once
 
-// Command model shared by the Serial console and the web API. Both front ends
-// parse their input (text line or JSON) into a Command; the main loop executes
-// it through WebUi::execute(), so the logic and the BridgeCore gating are
-// identical for both. Pure C++ (host tested).
+// Command model shared by the Serial console, the web API (web variant) and
+// the LVGL HMI (HMI variant). Every front end turns its input (text line, JSON
+// or touch/knob action) into a Command; the main loop executes it through
+// BridgeController::execute(), so the logic and the BridgeCore gating are
+// identical for all of them. Pure C++ (host tested).
 
 #include <cstdint>
 #include <string>

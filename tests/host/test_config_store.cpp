@@ -5,7 +5,7 @@
 #include "config_backend.h"
 #include "config_store.h"
 #include "bridge_commands.h"
-#include "web_ui.h"
+#include "bridge_controller.h"
 
 #include <cassert>
 #include <string>
@@ -415,7 +415,7 @@ void testConsolePersistence() {
         FtmsOutput ftms;
         ConfigStore config(backend);
         BridgeCore bridge;
-        WebUi ui(bridge, config, adapter, ant, ftms);
+        BridgeController ui(bridge, config, adapter, ant, ftms);
         config.begin();
         bridge.attach(adapter, ant, ftms);
         bridge.begin();
@@ -443,7 +443,7 @@ void testConsolePersistence() {
         FtmsOutput ftms;
         ConfigStore config(backend);
         BridgeCore bridge;
-        WebUi ui(bridge, config, adapter, ant, ftms);
+        BridgeController ui(bridge, config, adapter, ant, ftms);
         assert(config.begin() == ConfigLoadResult::Loaded);
         bridge.attach(adapter, ant, ftms);
         bridge.begin();
@@ -468,7 +468,7 @@ void testConsolePersistence() {
     AntOutput ant;
     FtmsOutput ftms;
     BridgeCore bridge;
-    WebUi ui(bridge, config, adapter, ant, ftms);
+    BridgeController ui(bridge, config, adapter, ant, ftms);
     assert(ui.handleCommand("load").find("saved configuration invalid") == 0);
 }
 
