@@ -11,6 +11,7 @@
 #include "hmi_hal.h"
 #include "hmi_model.h"
 #include "hmi_ui.h"
+#include "lcars_theme.h"
 #include "lvgl.h"
 #include "variant.h"
 
@@ -52,9 +53,7 @@ void begin(BridgeController& controller, const BridgeConfig& config) {
         Serial.println("[HMI] display init failed; Serial console only");
         return;
     }
-    lv_theme_t* theme = lv_theme_default_init(lv_display_get_default(), lv_palette_main(LV_PALETTE_BLUE),
-                                              lv_palette_main(LV_PALETTE_TEAL), true, &lv_font_montserrat_14);
-    lv_display_set_theme(lv_display_get_default(), theme);
+    hmi::lcars::init(lv_display_get_default());
 
     hmi::HmiActions actions;
     actions.submit = [](const Command& command) {

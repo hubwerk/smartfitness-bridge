@@ -44,6 +44,19 @@ same `BridgeController`; the web variant renders its view model as JSON, the HMI
 variant renders it with LVGL. The stored configuration (schema v3, including the
 Wi-Fi fields) is identical; the HMI variant simply never starts Wi-Fi.
 
+## User interfaces
+
+Both variants share an **LCARS-inspired** palette, Antonio typography, swept
+frames, pill controls and telemetry gauges. Existing commands and safety
+confirmations are unchanged. These simulator/browser renders are **not
+hardware-verified**; colours and readability need checking on the real IPS panel.
+
+![Round HMI dashboard](docs/hmi/hmi/01-dashboard-bike.png)
+![Round HMI speed confirmation](docs/hmi/hmi/10-confirm-speed.png)
+![Web dashboard](docs/hmi/web/01-dashboard-desktop.png)
+
+[Design system, HMI/web galleries and regeneration instructions](docs/hmi/README.md).
+
 Source layout:
 
 - `include/core/`, `src/core/` – shared core: BLE input, protocols, `BridgeCore`,

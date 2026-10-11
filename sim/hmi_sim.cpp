@@ -55,7 +55,30 @@ void flush(lv_display_t* display, const lv_area_t* area, std::uint8_t* pixels) {
 std::uint32_t tick() { return g_now; }
 
 HmiUi g_ui;
+lv_indev_t* g_knob = nullptr;
 std::vector<Command> g_commands;
+
+void checkLcars() {
+    assert(lcars::uppercase("Bridge äöü ß") == "BRIDGE ÄÖÜ ß");
+    for (const auto* font : {&sf_antonio_16, &sf_antonio_20}) {
+        lv_font_glyph_dsc_t glyph{};
+        for (const auto letter : {0x30U, 0x41U, 0xC4U, 0xD6U, 0xDCU, 0xDFU}) {
+            assert(font->get_glyph_dsc(font, &glyph, letter, 0));
+        }
+        lv_font_glyph_dsc_t digit{};
+        assert(sf_antonio_48.get_glyph_dsc(&sf_antonio_48, &digit, '8', 0));
+    }
+    lv_obj_t* button = lv_button_create(lv_screen_active());
+    assert(lv_color_to_u32(lv_obj_get_style_bg_color(button, LV_PART_MAIN)) ==
+           lv_color_to_u32(lv_color_hex(lcars::Lavender)));
+    assert(lv_obj_get_style_shadow_width(button, LV_PART_MAIN) == 0);
+    lv_obj_add_state(button, LV_STATE_FOCUSED);
+    // Disable transitions so this assertion checks the settled focus style.
+    lv_obj_set_style_transition(button, nullptr, LV_STATE_FOCUSED);
+    assert(lv_obj_get_style_border_width(button, LV_PART_MAIN) == 2);
+    lv_obj_delete(button);
+    std::printf("LCARS palette, focus, and Latin-1 fonts passed\n");
+}
 
 void pump(std::uint32_t ms) {
     for (std::uint32_t t = 0; t < ms; t += 5) {
@@ -176,6 +199,19 @@ void shot(const char* name) {
     pump(400);  // let animations (scroll on focus) settle
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(nullptr);
+    lv_obj_t* focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    if (focused && lv_obj_check_type(focused, &lv_button_class)) {
+        assert(lv_obj_get_height(focused) >= 36);
+        lv_area_t area{};
+        lv_obj_get_coords(focused, &area);
+        for (const int x : {area.x1, area.x2}) {
+            for (const int y : {area.y1, area.y2}) {
+                const int dx = x - kSize / 2;
+                const int dy = y - kSize / 2;
+                assert(dx * dx + dy * dy <= kSize * kSize / 4);
+            }
+        }
+    }
     writePng(g_outDir + "/" + name + ".png");
 }
 
@@ -334,11 +370,10 @@ int main(int argc, char** argv) {
     lv_display_set_buffers(display, buffer.data(), nullptr, static_cast<std::uint32_t>(buffer.size()),
                            LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(display, flush);
-    lv_theme_t* theme = lv_theme_default_init(display, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_TEAL),
-                                              true, &lv_font_montserrat_14);
-    lv_display_set_theme(display, theme);
+    lcars::init(display);
 
     lv_indev_t* encoder = lv_indev_create();
+    g_knob = encoder;
     lv_indev_set_type(encoder, LV_INDEV_TYPE_ENCODER);
     lv_indev_set_read_cb(encoder, encoderRead);
 
@@ -350,6 +385,7 @@ int main(int argc, char** argv) {
     g_ui.setConfig(configView());
     pump(100);
 
+    checkLcars();
     knobWalkthrough();
 
     g_ui.setStatus(bikeStatus());
@@ -363,7 +399,7 @@ int main(int argc, char** argv) {
     shot("03-menu");
     g_ui.navigate(Screen::Devices);
     shot("04-devices");
-    turn(5);
+    turn(6);  // first scan result (after six device actions)
     shot("05-devices-results");
     g_ui.openDevice(0);
     shot("06-device-detail");
@@ -399,6 +435,16 @@ int main(int argc, char** argv) {
     pump(50);
     g_ui.showResult(makeCommand(CommandType::Control), {false, "control: stale telemetry"});
     shot("19-toast-rejected");
+    pump(2600);
+    auto disconnected = bikeStatus();
+    disconnected.state = RuntimeState::Disconnected;
+    disconnected.canControl = false;
+    disconnected.input.link = "disconnected";
+    disconnected.input.stale = true;
+    disconnected.ftmsOutput.client = false;
+    for (auto& metric : disconnected.telemetry) metric.valid = false;
+    g_ui.setStatus(disconnected);
+    shot("20-error-disconnected");
     std::printf("hmi simulator done\n");
     return 0;
 }

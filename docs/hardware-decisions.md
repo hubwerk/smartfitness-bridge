@@ -193,13 +193,84 @@ WS2812 LEDs. The firmware must stay on Arduino core 2.0.x because NimBLE-Arduino
   the same version drives the headless host simulator. Partial rendering with one
   240×40 RGB565 buffer in internal DMA-capable RAM (PSRAM fallback; the flush
   waits for DMA, so a second buffer would not help); built-in
-  Montserrat fonts.
+  Montserrat fonts initially (replaced by Antonio in HD-008).
 - **LED ring:** Adafruit NeoPixel 1.12.3, optional (`SF_HMI_LED_RING` build flag
   and a runtime setting) for connection/control status.
 
 ### Consequences
 - Display orientation, touch mapping, encoder direction, LED count/order and
   GPIO 2 (external 5 V enable) must be checked on a real board.
-- German UI text needs a custom font with umlauts.
+- HD-008 supplies a Latin-1 font with umlauts; the German string table is still
+  untranslated and falls back to English.
 - Upgrading to LVGL 9.3+ or Arduino core 3.x requires re-checking LovyanGFX and
   NimBLE compatibility.
+
+## HD-008: Shared LCARS-inspired interface design
+
+**Status:** Accepted; simulator/browser verified, not hardware-verified
+
+### Context
+The web and round-display variants expose the same bridge commands and safety
+rules. Their presentation should share a warm, flat, condensed design language
+without affecting the common core, API contract or physical trainer behavior.
+
+### Decision
+- Adopt the shared palette, shapes and states documented in
+  [the interface design system](hmi/README.md): black background; orange/peach
+  swept frames and navigation; blue/violet data; lavender secondary actions;
+  red alerts, stop and destructive controls. Focus has a white outline.
+- Adapt the frame to the round 240×240 panel with circular segmented gauges,
+  safe-area lists, scroll-on-focus pill rows and condensed central readouts.
+  Retain the knob/touch paths, speed confirmation and double factory-reset
+  confirmation. Web gets a desktop sidebar and responsive phone pill row.
+- Use **Antonio Regular**, **SIL OFL 1.1**, with committed source, licence and
+  regeneration tooling. HMI text fonts contain Latin-1 at 16/20 px; the 48 px
+  font contains digits/punctuation only to avoid wasting flash. Keep the LVGL
+  symbol fallback. Embed Latin-1 WOFF2 directly in the gzipped web page.
+- Include only original **LCARS-inspired** shapes/colours and the free font:
+  no trademarked logos, insignia, ship registry imagery, copied screen assets
+  or sounds. No affiliation or endorsement is implied.
+- Commit actual LVGL and fixed-fixture Chromium screenshots with before/after
+  examples. CI fails on deterministic HMI drift, warns on browser pixel drift,
+  and continues to upload both galleries as artifacts.
+
+### Flash and RAM impact
+
+The web font itself is **9,292 bytes** (WOFF2), base64-embedded inside the page.
+The deterministic HTML gzip grows from **5,334 to 17,522 bytes (+12,188 B)**.
+Removing just the font payload from the final page gives **7,223 bytes**, so
+the embedded font's incremental gzip cost is **10,299 bytes**. Final raw HTML
+is 34,270 bytes. This remains a small asset relative to the 6.25 MiB app
+partition, but the whole firmware budget must be confirmed by the linker.
+
+Baseline firmware measurements from the successful
+[main-branch CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38130475907)
+at `c153653`:
+
+| Variant | Baseline flash | Baseline static RAM | Post-restyle delta |
+|---|---:|---:|---|
+| `esp32s3dev` | 1,540,353 B | 73,100 B | Requires successful firmware build |
+| `crowpanel128` | 1,456,129 B | 52,284 B | Requires successful firmware build |
+
+Local PlatformIO installation of `espressif32` failed with `HTTPClientError`
+before compilation, including on the unchanged baseline. Do not substitute
+host ELF sizes or asset bytes for firmware-linked flash/RAM deltas. The CI
+firmware matrix remains the authority for those measurements; the configured
+app partition is 6,553,600 bytes in both environments.
+
+As an asset-only footprint check, the three generated fonts compile to
+**29,480 bytes** total in the host renderer's object files (including host
+metadata), while the formerly enabled unused Montserrat sizes are removed.
+Segmented gauges create more LVGL objects than a single arc; runtime heap,
+PSRAM, flash/RAM deltas, panel readability and colours still need firmware and
+hardware measurements.
+
+### Consequences
+- No font CDN or additional runtime network resource is required. The font is
+  served as part of the existing flash asset; Origin/Content-Type checks and
+  the no-CORS policy are unchanged.
+- The screenshot browser/font-generation dependencies are development-only;
+  there are no new firmware libraries. Generated fonts are committed so normal
+  firmware and simulator builds do not require the conversion toolchain.
+- Hardware verification remains mandatory, particularly for compact keyboard
+  keys, contrast, touch targets and the new gauge's runtime allocation cost.
