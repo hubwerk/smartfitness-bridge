@@ -1,2 +1,4 @@
 .pio/
 include/generated/
+screenshots/
+.cache/

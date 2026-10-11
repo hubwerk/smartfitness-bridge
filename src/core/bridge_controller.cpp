@@ -1,19 +1,18 @@
-#include "web_ui.h"
+#include "bridge_controller.h"
 #include "bt_device_adapter.h"
 #include "ant_output.h"
 #include "ftms_output.h"
 #include "ble_input_adapter.h"
 #include "protocols/registry.hpp"
-#include <ArduinoJson.h>
-#include <cmath>
 #include <cstdio>
+#include <utility>
 #ifdef ARDUINO
 #include <Arduino.h>
 #endif
 
 using namespace smartfitness;
-namespace {
-const char* stateName(RuntimeState state) {
+
+const char* smartfitness::runtimeStateName(RuntimeState state) {
     switch (state) {
         case RuntimeState::Disconnected: return "disconnected";
         case RuntimeState::Connected: return "connected/read-only";
@@ -23,6 +22,23 @@ const char* stateName(RuntimeState state) {
     return "unknown";
 }
 
+std::vector<AdapterView> smartfitness::adapterViews() {
+    std::vector<AdapterView> adapters;
+    adapters.reserve(protocols::protocolCount());
+    for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
+        const auto& info = protocols::protocolAt(index);
+        AdapterView adapter;
+        adapter.id = info.id;
+        adapter.label = info.label;
+        adapter.controllable = info.controllable;
+        adapter.advertisementOnly = info.advertisementOnly;
+        adapter.profile = info.profile;
+        adapters.push_back(adapter);
+    }
+    return adapters;
+}
+
+namespace {
 const char* loadResultName(ConfigLoadResult result) {
     switch (result) {
         case ConfigLoadResult::Loaded: return "configuration loaded";
@@ -42,34 +58,22 @@ PairedSourceDevice toSource(const ble::BleAddress& address) {
     source.address = address.bytes;
     return source;
 }
-
-std::string serialized(const JsonDocument& document) {
-    std::string out;
-    serializeJson(document, out);
-    return out;
-}
-
-void addMetric(JsonObject object, const char* key, const TrainerState& state, Metric metric) {
-    const auto& sample = state.sample(metric);
-    if (sample.valid) object[key] = std::round(static_cast<double>(sample.value) * 10.0) / 10.0;
-    else object[key] = nullptr;
-}
 }  // namespace
 
-WebUi::WebUi(BridgeCore& bridge, ConfigStore& config, SimulatedDeviceAdapter& adapter,
-             AntOutput& ant, FtmsOutput& ftms)
+BridgeController::BridgeController(BridgeCore& bridge, ConfigStore& config, SimulatedDeviceAdapter& adapter,
+                                   AntOutput& ant, FtmsOutput& ftms)
     : bridge_(bridge), config_(config), adapter_(adapter), ant_(ant), ftms_(ftms) {}
 
-void WebUi::attachBleInput(InputSelector& selector, BleInputAdapter& ble) {
+void BridgeController::attachBleInput(InputSelector& selector, BleInputAdapter& ble) {
     selector_ = &selector;
     ble_ = &ble;
 }
 
-bool WebUi::bleSelected() const {
+bool BridgeController::bleSelected() const {
     return selector_ && selector_->source() == InputSelector::Source::Ble;
 }
 
-void WebUi::applyConfig() {
+void BridgeController::applyConfig() {
     const auto& config = config_.config();
     adapter_.setTrainer(config.simulatedTrainer);
     ant_.setEnabled(config.antEnabled);
@@ -95,23 +99,23 @@ void WebUi::applyConfig() {
     bridge_.loop();
 }
 
-void WebUi::begin() {
+void BridgeController::begin() {
     applyConfig();
     // Auto-connect the paired BLE device on boot.
     if (bleSelected()) bridge_.scanAndConnect();
 #ifdef ARDUINO
-    Serial.println(ble_ ? "[WebUi] Serial console. Type help." : "[WebUi] Serial console; simulation only. Type help.");
+    Serial.println(ble_ ? "[Console] Serial console. Type help." : "[Console] Serial console; simulation only. Type help.");
 #endif
 }
 
-std::string WebUi::status() const {
+std::string BridgeController::status() const {
     char buffer[320];
     const auto& telemetry = bridge_.telemetry();
     std::snprintf(buffer, sizeof(buffer),
                   "state=%s speed=%.1fkm/h cadence=%.1frpm power=%.1fW hr=%.1fbpm "
                   "target=%s ANT=%d FTMS(input=%d,output=%d) "
                   "ftms-out(advertising=%d,client=%d,control=%d) unsaved=%d",
-                  stateName(bridge_.state()), telemetry.speed, telemetry.cadence,
+                  runtimeStateName(bridge_.state()), telemetry.speed, telemetry.cadence,
                   telemetry.power, telemetry.heartRate, bridge_.hasControlTarget() ? "set" : "none",
                   config_.config().antEnabled, config_.config().ftms.input, config_.config().ftms.output,
                   ftms_.advertising(), ftms_.clientConnected(), ftms_.controlGranted(), config_.hasUnsavedChanges());
@@ -134,14 +138,14 @@ std::string WebUi::status() const {
     return text;
 }
 
-std::string WebUi::handleCommand(const std::string& line) {
+std::string BridgeController::handleCommand(const std::string& line) {
     Command command;
     std::string error;
     if (!parseConsoleCommand(line, command, error)) return error;
     return execute(command).message;
 }
 
-CommandResult WebUi::pair(const Command& command) {
+CommandResult BridgeController::pair(const Command& command) {
     if (!ble_ || !selector_) return fail("BLE input not available");
     if (ble_->isExcluded(command.address)) return fail("refusing to pair with the bridge itself or its FTMS client");
     PairedDevice device;
@@ -165,7 +169,7 @@ CommandResult WebUi::pair(const Command& command) {
     return ok("paired " + label + " as " + device.adapterId + "; connecting");
 }
 
-CommandResult WebUi::execute(const Command& command) {
+CommandResult BridgeController::execute(const Command& command) {
     switch (command.type) {
         case CommandType::Help:
             return ok("status | sim | scan [s] | scan-stop | scan-results | pair <addr> [adapter|auto] [public|random] | "
@@ -311,145 +315,112 @@ CommandResult WebUi::execute(const Command& command) {
     return fail("unknown command; type help");
 }
 
-std::string WebUi::statusJson() const {
-    JsonDocument document;
-    document["type"] = "status";
-    document["version"] = SMARTFITNESS_VERSION;
-    document["state"] = stateName(bridge_.state());
+StatusView BridgeController::statusView() const {
+    StatusView view;
+    view.version = SMARTFITNESS_VERSION;
+    view.state = bridge_.state();
     const auto& state = bridge_.trainerState();
-    JsonObject telemetry = document["telemetry"].to<JsonObject>();
-    addMetric(telemetry, "power", state, Metric::Power);
-    addMetric(telemetry, "cadence", state, Metric::Cadence);
-    addMetric(telemetry, "speed", state, Metric::Speed);
-    addMetric(telemetry, "heartRate", state, Metric::HeartRate);
-    addMetric(telemetry, "incline", state, Metric::Incline);
-    addMetric(telemetry, "distance", state, Metric::Distance);
-    addMetric(telemetry, "elapsed", state, Metric::ElapsedTime);
-    document["deviceName"] = bridge_.telemetry().deviceName;
-    document["trainer"] = state.trainerDetected;
-    document["canControl"] = bridge_.canControl();
-    JsonArray controls = document["controls"].to<JsonArray>();
-    for (std::uint8_t index = 0; index < static_cast<std::uint8_t>(Control::Count); ++index) {
-        const auto control = static_cast<Control>(index);
-        if (state.capabilities.supports(control)) controls.add(controlName(control));
+    for (std::size_t index = 0; index < view.telemetry.size(); ++index) {
+        const auto& sample = state.sample(static_cast<Metric>(index));
+        view.telemetry[index].valid = sample.valid;
+        view.telemetry[index].value = sample.value;
     }
-    if (bridge_.hasControlTarget()) {
-        JsonObject target = document["target"].to<JsonObject>();
-        target["control"] = controlName(bridge_.controlTarget().control);
-        target["value"] = bridge_.controlTarget().value;
-    } else {
-        document["target"] = nullptr;
-    }
-    JsonObject input = document["input"].to<JsonObject>();
-    input["source"] = bleSelected() ? "ble" : "simulation";
-    input["profile"] = machineProfileName(state.profile);
-    input["bleAvailable"] = ble_ != nullptr;
+    view.deviceName = bridge_.telemetry().deviceName;
+    view.trainer = state.trainerDetected;
+    view.canControl = bridge_.canControl();
+    for (std::size_t index = 0; index < view.controls.size(); ++index)
+        view.controls[index] = state.capabilities.supports(static_cast<Control>(index));
+    view.hasTarget = bridge_.hasControlTarget();
+    if (view.hasTarget) view.target = bridge_.controlTarget();
+    auto& input = view.input;
+    input.bleSelected = bleSelected();
+    input.profile = state.profile;
+    input.bleAvailable = ble_ != nullptr;
     if (ble_) {
-        input["link"] = BleInputAdapter::linkStateName(ble_->linkState());
-        input["protocol"] = ble_->protocolId();
-        input["stale"] = ble_->stale();
-        input["scanning"] = ble_->scanning();
-        input["error"] = ble_->lastError();
-        input["reconnectAttempts"] = ble_->reconnectAttempts();
-        input["nextAttemptMs"] = ble_->nextAttemptInMs();
-        input["autoConnect"] = ble_->autoConnect();
-        JsonObject dropped = input["dropped"].to<JsonObject>();
-        dropped["scans"] = ble_->droppedScanReports();
-        dropped["events"] = ble_->droppedEvents();
-        dropped["notifications"] = ble_->droppedNotifications();
-        dropped["commands"] = ble_->droppedCommands();
+        input.link = BleInputAdapter::linkStateName(ble_->linkState());
+        input.protocol = ble_->protocolId();
+        input.stale = ble_->stale();
+        input.scanning = ble_->scanning();
+        input.error = ble_->lastError();
+        input.reconnectAttempts = ble_->reconnectAttempts();
+        input.nextAttemptMs = ble_->nextAttemptInMs();
+        input.autoConnect = ble_->autoConnect();
+        input.dropped.scans = ble_->droppedScanReports();
+        input.dropped.events = ble_->droppedEvents();
+        input.dropped.notifications = ble_->droppedNotifications();
+        input.dropped.commands = ble_->droppedCommands();
     }
     const auto& config = config_.config();
     if (config.pairedSource.valid) {
-        JsonObject paired = input["paired"].to<JsonObject>();
         ble::BleAddress address;
         address.bytes = config.pairedSource.address;
-        paired["address"] = address.toString();
-        paired["addressType"] = config.pairedSource.addressType ? "random" : "public";
-        paired["name"] = config.pairedDeviceName;
-        paired["adapter"] = config.pairedAdapterId;
-    } else {
-        input["paired"] = nullptr;
+        input.paired.valid = true;
+        input.paired.address = address.toString();
+        input.paired.randomAddress = config.pairedSource.addressType != 0;
+        input.paired.name = config.pairedDeviceName;
+        input.paired.adapter = config.pairedAdapterId;
     }
-    JsonObject ftms = document["ftmsOutput"].to<JsonObject>();
-    ftms["enabled"] = config.ftms.output;
-    ftms["profile"] = machineProfileName(ftms_.profile());
-    ftms["override"] = ftmsOutputProfileName(config.ftmsOutputProfile);
-    ftms["name"] = ftms_.deviceName();
-    ftms["advertising"] = ftms_.advertising();
-    ftms["client"] = ftms_.clientConnected();
-    ftms["control"] = ftms_.controlGranted();
-    document["ant"] = config.antEnabled;
-    document["unsaved"] = config_.hasUnsavedChanges();
-    JsonObject network = document["network"].to<JsonObject>();
-    network["mode"] = network_.mode;
-    network["ssid"] = network_.ssid;
-    network["ip"] = network_.ip;
-    network["hostname"] = network_.hostname;
-    network["stations"] = network_.stations;
-    return serialized(document);
+    auto& ftms = view.ftmsOutput;
+    ftms.enabled = config.ftms.output;
+    ftms.profile = ftms_.profile();
+    ftms.override = config.ftmsOutputProfile;
+    ftms.name = ftms_.deviceName();
+    ftms.advertising = ftms_.advertising();
+    ftms.client = ftms_.clientConnected();
+    ftms.control = ftms_.controlGranted();
+    view.ant = config.antEnabled;
+    view.unsaved = config_.hasUnsavedChanges();
+    return view;
 }
 
-std::string WebUi::scanResultsJson() const {
-    JsonDocument document;
-    document["type"] = "scan";
-    document["scanning"] = ble_ && ble_->scanning();
-    document["bleAvailable"] = ble_ != nullptr;
-    document["dropped"] = ble_ ? ble_->droppedScanResults() : 0U;
-    JsonArray devices = document["devices"].to<JsonArray>();
+ScanView BridgeController::scanView() const {
+    ScanView view;
+    view.scanning = ble_ && ble_->scanning();
+    view.bleAvailable = ble_ != nullptr;
+    view.dropped = ble_ ? ble_->droppedScanResults() : 0U;
     if (ble_) {
+        view.devices.reserve(ble_->scanResults().size());
         for (const auto& result : ble_->scanResults()) {
-            JsonObject device = devices.add<JsonObject>();
-            device["address"] = result.address.toString();
-            device["addressType"] = result.address.type ? "random" : "public";
-            device["name"] = result.name;
-            device["rssi"] = result.rssi;
-            device["connectable"] = result.connectable;
-            device["adapter"] = result.detectedAdapter;
-            JsonArray services = device["services"].to<JsonArray>();
-            for (const auto& uuid : result.services) services.add(uuid.toString());
+            ScanDeviceView device;
+            device.address = result.address.toString();
+            device.randomAddress = result.address.type != 0;
+            device.name = result.name;
+            device.rssi = result.rssi;
+            device.connectable = result.connectable;
+            device.adapter = result.detectedAdapter;
+            for (const auto& uuid : result.services) device.services.push_back(uuid.toString());
+            view.devices.push_back(std::move(device));
         }
     }
-    JsonArray adapters = document["adapters"].to<JsonArray>();
-    for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
-        const auto& info = protocols::protocolAt(index);
-        JsonObject adapter = adapters.add<JsonObject>();
-        adapter["id"] = info.id;
-        adapter["label"] = info.label;
-        adapter["controllable"] = info.controllable;
-        adapter["advertisementOnly"] = info.advertisementOnly;
-    }
-    return serialized(document);
+    return view;
 }
 
-std::string WebUi::configJson() const {
+ConfigView BridgeController::configView() const {
     const auto& config = config_.config();
-    JsonDocument document;
-    document["type"] = "config";
-    document["version"] = SMARTFITNESS_VERSION;
-    document["ftmsName"] = config.ftmsName.empty() ? std::string(FtmsOutput::kDefaultName) : config.ftmsName;
-    document["ftmsOutput"] = config.ftms.output;
-    document["ftmsOutputProfile"] = ftmsOutputProfileName(config.ftmsOutputProfile);
-    document["ftmsInput"] = config.ftms.input;
-    document["ant"] = config.antEnabled;
-    document["antRequiresHardware"] = true;
-    document["simulatedTrainer"] = config.simulatedTrainer;
-    // Passwords are never returned, only whether they are set.
-    document["wifiSsid"] = config.wifiSsid;
-    document["wifiPasswordSet"] = !config.wifiPassword.empty();
-    document["apPasswordDefault"] = config.apPassword == BridgeConfig{}.apPassword;
-    document["unsaved"] = config_.hasUnsavedChanges();
-    return serialized(document);
+    ConfigView view;
+    view.version = SMARTFITNESS_VERSION;
+    view.ftmsName = config.ftmsName.empty() ? std::string(FtmsOutput::kDefaultName) : config.ftmsName;
+    view.ftmsOutput = config.ftms.output;
+    view.ftmsOutputProfile = config.ftmsOutputProfile;
+    view.ftmsInput = config.ftms.input;
+    view.ant = config.antEnabled;
+    view.antRequiresHardware = true;
+    view.simulatedTrainer = config.simulatedTrainer;
+    view.wifiSsid = config.wifiSsid;
+    view.wifiPasswordSet = !config.wifiPassword.empty();
+    view.apPasswordDefault = config.apPassword == BridgeConfig{}.apPassword;
+    view.unsaved = config_.hasUnsavedChanges();
+    return view;
 }
 
-void WebUi::loop() {
+void BridgeController::loop() {
 #ifdef ARDUINO
     // Bound work and line length so a noisy console cannot starve the bridge.
     for (unsigned int count = 0; count < 64 && Serial.available(); ++count) {
         const char character = static_cast<char>(Serial.read());
         if (character == '\r') continue;
         if (character == '\n') {
-            if (overflow_) Serial.println("[WebUi] command too long");
+            if (overflow_) Serial.println("[Console] command too long");
             else if (!input_.empty()) Serial.println(handleCommand(input_).c_str());
             input_.clear();
             overflow_ = false;

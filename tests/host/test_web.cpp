@@ -19,7 +19,8 @@
 #include "fake_central.hpp"
 #include "ftms_output.h"
 #include "web_api.h"
-#include "web_ui.h"
+#include "bridge_controller.h"
+#include "web_json.h"
 #include "web_request.h"
 #include "wifi_policy.h"
 
@@ -49,7 +50,8 @@ struct Rig {
     FtmsOutput ftms;
     ConfigStore config{backend};
     BridgeCore core;
-    WebUi ui{core, config, simulation, ant, ftms};
+    BridgeController ui{core, config, simulation, ant, ftms};
+    NetworkStatus network;
 
     Rig() {
         config.begin();
@@ -58,6 +60,10 @@ struct Rig {
         ui.attachBleInput(selector, ble);
         ui.begin();
     }
+
+    std::string statusJson() const { return web::statusJson(ui.statusView(), network); }
+    std::string scanResultsJson() const { return web::scanResultsJson(ui.scanView()); }
+    std::string configJson() const { return web::configJson(ui.configView()); }
 };
 
 void testConsoleParsing() {
@@ -133,7 +139,7 @@ void testConsoleBlePairing() {
         FtmsOutput ftms;
         ConfigStore config(rig.backend);
         BridgeCore core;
-        WebUi ui(core, config, simulation, ant, ftms);
+        BridgeController ui(core, config, simulation, ant, ftms);
         assert(config.begin() == ConfigLoadResult::Loaded);
         core.attach(selector, ant, ftms);
         core.begin();
@@ -201,8 +207,8 @@ void testWifiCommands() {
 
 void testOutputProfiles() {
     Rig rig;
-    assert(parse(rig.ui.configJson())["ftmsOutputProfile"] == "auto");
-    auto status = parse(rig.ui.statusJson());
+    assert(parse(rig.configJson())["ftmsOutputProfile"] == "auto");
+    auto status = parse(rig.statusJson());
     assert(status["input"]["profile"] == "bike");
     assert(status["ftmsOutput"]["profile"] == "bike");
     assert(status["ftmsOutput"]["override"] == "auto");
@@ -218,12 +224,12 @@ void testOutputProfiles() {
         assert(parseFtmsOutputProfile(value, profile));
         assert(rig.config.config().ftmsOutputProfile == profile);
         assert(rig.ftms.profile() == effectiveOutputProfile(profile, rig.core.trainerState().profile));
-        status = parse(rig.ui.statusJson());
+        status = parse(rig.statusJson());
         assert(status["ftmsOutput"]["override"].as<std::string>() == value);
         assert(status["ftmsOutput"]["profile"].as<std::string>() == machineProfileName(rig.ftms.profile()));
         assert(contains(rig.ui.status(), std::string("input-profile=bike output-profile=") +
                         machineProfileName(rig.ftms.profile())));
-        assert(parse(rig.ui.configJson())["ftmsOutputProfile"].as<std::string>() == value);
+        assert(parse(rig.configJson())["ftmsOutputProfile"].as<std::string>() == value);
     }
     for (const std::string value : {"", "AUTO", "elliptical", "bike ", "treadmill extra"}) {
         Command command;
@@ -254,7 +260,7 @@ void testOutputProfiles() {
         ConfigStore rebooted(rig.backend);
         assert(rebooted.begin() == ConfigLoadResult::Loaded);
         assert(std::string(ftmsOutputProfileName(rebooted.config().ftmsOutputProfile)) == value);
-        api.publish(ApiExchange::Snapshot::Status, rig.ui.statusJson());
+        api.publish(ApiExchange::Snapshot::Status, rig.statusJson());
         assert(parse(api.snapshot(ApiExchange::Snapshot::Status))["ftmsOutput"]["override"].as<std::string>() == value);
     }
     for (const std::string body : {R"({"ftmsOutputProfile":"invalid"})", R"({"ftmsOutputProfile":3})",
@@ -278,7 +284,7 @@ void testOutputProfiles() {
         input.setSample(Metric::ElapsedTime, 321, true);
         rig.core.setTrainerState(input);
         rig.ftms.publishTrainerState(input);
-        status = parse(rig.ui.statusJson());
+        status = parse(rig.statusJson());
         assert(status["input"]["profile"].as<std::string>() == machineProfileName(profile));
         assert(status["telemetry"]["elapsed"] == 321);
         assert(status["ftmsOutput"]["profile"].as<std::string>() ==
@@ -414,7 +420,7 @@ void testApiExchange() {
 
     // Snapshots.
     assert(api.snapshot(ApiExchange::Snapshot::Status) == "{}");
-    api.publish(ApiExchange::Snapshot::Status, rig.ui.statusJson());
+    api.publish(ApiExchange::Snapshot::Status, rig.statusJson());
     assert(parse(api.snapshot(ApiExchange::Snapshot::Status))["type"] == "status");
 }
 
@@ -432,7 +438,7 @@ void testApiExchangeThreads() {
     std::size_t processed = 0;
     for (int index = 0; index < 2000; ++index) {
         processed += api.process(rig.ui).size();
-        api.publish(ApiExchange::Snapshot::Status, rig.ui.statusJson());
+        api.publish(ApiExchange::Snapshot::Status, rig.statusJson());
     }
     web.join();
     processed += api.process(rig.ui, 100).size();
@@ -472,14 +478,14 @@ void testApiBleQueueRejections() {
     result = execute("disconnect", "{}");
     assert(result["ok"] == false);
     assert(contains(result["message"].as<std::string>(), "disconnect request rejected"));
-    assert(parse(rig.ui.statusJson())["input"]["dropped"]["commands"].as<unsigned>() >= 4);
+    assert(parse(rig.statusJson())["input"]["dropped"]["commands"].as<unsigned>() >= 4);
 }
 
 void testJsonViews() {
     Rig rig;
     rig.ui.handleCommand("wifi Home secret-pass");
     rig.ui.handleCommand("ap-pass super-secret-ap");
-    const std::string config = rig.ui.configJson();
+    const std::string config = rig.configJson();
     assert(!contains(config, "secret-pass") && !contains(config, "super-secret-ap"));
     auto document = parse(config);
     assert(document["wifiSsid"] == "Home" && document["wifiPasswordSet"] == true);
@@ -489,7 +495,7 @@ void testJsonViews() {
     rig.ui.handleCommand("scan");
     rig.central.advertise(address("aa:00:00:00:00:41"), "ECH-SPORT-1", {});
     rig.core.loop();
-    document = parse(rig.ui.scanResultsJson());
+    document = parse(rig.scanResultsJson());
     assert(document["scanning"] == true && document["devices"].size() == 1);
     assert(document["devices"][0]["address"] == "aa:00:00:00:00:41");
     assert(document["devices"][0]["adapter"] == "echelon");
@@ -497,8 +503,8 @@ void testJsonViews() {
 
     rig.ui.handleCommand("sim");
     rig.ui.handleCommand("power 180");
-    rig.ui.setNetworkStatus({"ap", "SmartFitness-ABCD", "192.168.4.1", "smartfitness", 1});
-    document = parse(rig.ui.statusJson());
+    rig.network = {"ap", "SmartFitness-ABCD", "192.168.4.1", "smartfitness", 1};
+    document = parse(rig.statusJson());
     assert(document["state"] == "control-ready" && document["input"]["source"] == "simulation");
     assert(document["telemetry"]["power"].is<double>() && document["telemetry"]["heartRate"].is<double>());
     assert(document["target"]["control"] == "power" && document["target"]["value"] == 180);

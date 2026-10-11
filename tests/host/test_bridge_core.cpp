@@ -4,7 +4,7 @@
 #include "ant_output.h"
 #include "ftms_output.h"
 #include "config_store.h"
-#include "web_ui.h"
+#include "bridge_controller.h"
 
 #include <cassert>
 #include <cmath>
@@ -219,7 +219,7 @@ void testConsoleAndConfig() {
     FtmsOutput ftms;
     ConfigStore config;
     BridgeCore bridge;
-    WebUi ui(bridge, config, adapter, ant, ftms);
+    BridgeController ui(bridge, config, adapter, ant, ftms);
     config.begin();
     bridge.attach(adapter, ant, ftms);
     bridge.begin();
@@ -391,15 +391,7 @@ void testOptionalTreadmillTotals() {
 
 }  // namespace
 
-void runFtmsTests();
-void runConfigStoreTests();
-void runBleInputTests();
-void runWebTests();
-void runIfitBowflexTests();
-void runTrainersRowerTests();
-void runTreadmillTests();
-
-int main() {
+void runBridgeCoreTests() {
     testCapabilitiesAndSamples();
     testFtmsRolesAreIndependent();
     testControlGating();
@@ -411,11 +403,4 @@ int main() {
     testReattachmentAndCallbackCleanup();
     testRuntimeProfiles();
     testOptionalTreadmillTotals();
-    runFtmsTests();
-    runConfigStoreTests();
-    runBleInputTests();
-    runWebTests();
-    runIfitBowflexTests();
-    runTrainersRowerTests();
-    runTreadmillTests();
 }

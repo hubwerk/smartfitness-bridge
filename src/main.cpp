@@ -1,10 +1,12 @@
+// Firmware entry point shared by both build variants: sets up the core
+// (BLE input, BridgeCore, FTMS output, configuration, Serial console) and
+// hands over to the selected variant through variant::begin()/variant::loop().
 #include <Arduino.h>
+#include "variant.h"
 #include "bridge/bridge_core.hpp"
 #include "ant_output.h"
 #include "ftms_output.h"
-#include "web_ui.h"
-#include "web_api.h"
-#include "web_portal.h"
+#include "bridge_controller.h"
 #include "config_store.h"
 #include "bt_device_adapter.h"
 #include "ble_input_adapter.h"
@@ -19,9 +21,7 @@ FtmsOutput ftmsOutput;
 NvsConfigBackend configBackend;
 ConfigStore configStore(configBackend);
 smartfitness::BridgeCore bridge;
-WebUi webUi(bridge, configStore, simulationAdapter, antOutput, ftmsOutput);
-ApiExchange webApi;
-WebPortal webPortal(webUi, webApi);
+BridgeController controller(bridge, configStore, simulationAdapter, antOutput, ftmsOutput);
 
 namespace {
 std::uint32_t restartAtMs = 0;
@@ -41,9 +41,9 @@ void updateExcludedPeer() {
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.printf("SmartFitness Bridge %s starting...\n", SMARTFITNESS_VERSION);
+    Serial.printf("SmartFitness Bridge %s (%s variant) starting...\n", SMARTFITNESS_VERSION, variant::name());
 
-    // Load the persisted configuration before outputs are enabled (webUi.begin applies it).
+    // Load the persisted configuration before outputs are enabled (controller.begin applies it).
     switch (configStore.begin()) {
         case ConfigLoadResult::Loaded: Serial.println("[Config] loaded from NVS"); break;
         case ConfigLoadResult::Missing: Serial.println("[Config] no saved configuration; using defaults"); break;
@@ -53,22 +53,21 @@ void setup() {
     if (!bleCentral.begin()) Serial.println("[BLE] central could not be started");
     bridge.attach(inputSelector, antOutput, ftmsOutput);
     bridge.begin();
-    webUi.attachBleInput(inputSelector, bleInput);
-    webUi.begin();  // applies the configuration and auto-connects the paired device
+    controller.attachBleInput(inputSelector, bleInput);
+    controller.begin();  // applies the configuration and auto-connects the paired device
 
     const BridgeConfig& config = configStore.config();
-    webPortal.begin(config.wifiSsid, config.wifiPassword, config.apPassword);
-    Serial.println("[Web] http://smartfitness.local/ (or the address shown above)");
+    variant::begin(controller, config);
     if (!config.pairedSource.valid) Serial.println("[BridgeCore] no paired device; use scan + pair, or sim");
 }
 
 void loop() {
     updateExcludedPeer();
     bridge.loop();
-    webUi.loop();
-    webPortal.loop();
-    if (webUi.restartRequested()) {
-        // Give the HTTP/WebSocket response time to leave before rebooting.
+    controller.loop();
+    variant::loop(controller);
+    if (controller.restartRequested()) {
+        // Give the HTTP/WebSocket response (or the HMI message) time to leave before rebooting.
         if (restartAtMs == 0) restartAtMs = millis() + 1000;
         if (static_cast<std::int32_t>(millis() - restartAtMs) >= 0) ESP.restart();
     }

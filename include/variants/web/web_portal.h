@@ -6,7 +6,7 @@
 //    (WifiPolicy). mDNS "smartfitness.local".
 //  * ESPAsyncWebServer runs on the AsyncTCP task: handlers only read
 //    snapshots or enqueue requests in ApiExchange; the main loop executes
-//    them through WebUi and publishes fresh snapshots via loop().
+//    them through BridgeController and publishes fresh snapshots via loop().
 
 #ifdef ARDUINO
 
@@ -14,7 +14,8 @@
 #include <string>
 
 #include "web_api.h"
-#include "web_ui.h"
+#include "bridge_controller.h"
+#include "web_json.h"
 #include "wifi_policy.h"
 
 class WebPortal {
@@ -23,7 +24,7 @@ public:
     static constexpr std::uint32_t kStatusIntervalMs = 250;  // WebSocket push <= 4 Hz
     static constexpr std::uint32_t kScanIntervalMs = 1000;
 
-    WebPortal(WebUi& ui, ApiExchange& api);
+    WebPortal(BridgeController& ui, ApiExchange& api);
     // Starts Wi-Fi and the server; credentials come from the configuration.
     void begin(const std::string& ssid, const std::string& password, const std::string& apPassword);
     // Main loop: run queued API jobs, publish snapshots, Wi-Fi policy, DNS.
@@ -37,7 +38,7 @@ private:
     void publish(std::uint32_t now);
     NetworkStatus networkStatus() const;
 
-    WebUi& ui_;
+    BridgeController& ui_;
     ApiExchange& api_;
     Impl* impl_ = nullptr;
     WifiPolicy policy_;

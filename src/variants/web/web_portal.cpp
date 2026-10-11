@@ -69,7 +69,7 @@ struct WebPortal::Impl {
     }
 };
 
-WebPortal::WebPortal(WebUi& ui, ApiExchange& api) : ui_(ui), api_(api) {}
+WebPortal::WebPortal(BridgeController& ui, ApiExchange& api) : ui_(ui), api_(api) {}
 
 void WebPortal::begin(const std::string& ssid, const std::string& password, const std::string& apPassword) {
     if (started_) return;
@@ -231,20 +231,19 @@ NetworkStatus WebPortal::networkStatus() const {
 void WebPortal::publish(std::uint32_t now) {
     if (now - lastStatusMs_ >= kStatusIntervalMs) {
         lastStatusMs_ = now;
-        ui_.setNetworkStatus(networkStatus());
-        const std::string status = ui_.statusJson();
+        const std::string status = web::statusJson(ui_.statusView(), networkStatus());
         api_.publish(ApiExchange::Snapshot::Status, status);
         impl_->broadcast(status);
     }
     if (now - lastScanMs_ >= kScanIntervalMs) {
         lastScanMs_ = now;
-        std::string scan = ui_.scanResultsJson();
+        std::string scan = web::scanResultsJson(ui_.scanView());
         if (scan != lastScanJson_) {
             api_.publish(ApiExchange::Snapshot::Scan, scan);
             lastScanJson_ = std::move(scan);
             impl_->scanPending = true;
         }
-        std::string config = ui_.configJson();
+        std::string config = web::configJson(ui_.configView());
         if (config != lastConfigJson_) {
             api_.publish(ApiExchange::Snapshot::Config, config);
             lastConfigJson_ = std::move(config);
