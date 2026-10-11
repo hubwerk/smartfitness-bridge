@@ -11,7 +11,7 @@ struct Entry {
 };
 
 // Keep in enum order (host tests verify it). German column intentionally
-// empty until a Latin-1 font is configured; tr() falls back to English.
+// empty until translations are available; tr() falls back to English.
 constexpr Entry kTable[] = {
     {Str::AppTitle, {"SmartFitness", nullptr}},
     {Str::Dashboard, {"Dashboard", nullptr}},
@@ -65,7 +65,7 @@ constexpr Entry kTable[] = {
     {Str::ConfirmUnpairText, {"Forget the paired device.", nullptr}},
     {Str::ControlUnavailable, {"Control not available", nullptr}},
     {Str::Apply, {"Apply", nullptr}},
-    {Str::HintAdjust, {"Turn: adjust  Press: apply\nHold: cancel", nullptr}},
+    {Str::HintAdjust, {"Turn +/-  Press set  Hold back", nullptr}},
     {Str::Unsupported, {"unsupported", nullptr}},
     {Str::StopBelt, {"Stop belt", nullptr}},
     {Str::ConfirmSpeedTitle, {"Set speed?", nullptr}},

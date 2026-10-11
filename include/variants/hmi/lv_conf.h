@@ -25,13 +25,9 @@
 #define LV_USE_PERF_MONITOR 0
 #define LV_USE_MEM_MONITOR 0
 
-/* ASCII Montserrat fonts. A German string table needs a font with Latin-1
- * glyphs (umlauts) generated with the LVGL font converter. */
-#define LV_FONT_MONTSERRAT_12 1
+/* Antonio Latin-1 fonts are generated in src/variants/hmi/fonts.
+ * Montserrat 14 is retained only as the LVGL symbol fallback. */
 #define LV_FONT_MONTSERRAT_14 1
-#define LV_FONT_MONTSERRAT_20 1
-#define LV_FONT_MONTSERRAT_28 1
-#define LV_FONT_MONTSERRAT_40 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 #define LV_USE_THEME_DEFAULT 1

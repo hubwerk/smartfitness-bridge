@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "hmi_model.h"
+#include "lcars_theme.h"
 #include "lvgl.h"
 
 namespace hmi {
@@ -133,7 +134,7 @@ private:
 
     MetricCycler metric_;
     struct DashboardWidgets {
-        lv_obj_t* arc = nullptr;
+        lcars::Gauge segments{};
         lv_obj_t* name = nullptr;
         lv_obj_t* value = nullptr;
         lv_obj_t* unit = nullptr;
@@ -149,6 +150,7 @@ private:
 
     TargetEditor editor_;
     lv_obj_t* adjustValue_ = nullptr;
+    lcars::Gauge adjustSegments_{};
 
     ConfirmState confirm_;
     bool confirmReplaced_ = false;
