@@ -316,8 +316,9 @@ the saved BLE source again. `save` persists that input toggle.
 - If a connected device delivers no data for 5 s, its telemetry is marked stale and invalidated (outputs stop reporting the metrics). If no data arrives for 20 s, the link is dropped and reconnected.
 - Stale treadmill telemetry also disables treadmill controls until fresh data
   restores readiness. The FTMS input handshake never automatically sends
-  Start/Resume to a treadmill, cross-trainer or rower. Bike initialization sends
-  it only with confirmed bike identity, not an ambiguous bike fallback.
+  Start/Resume to a treadmill, cross-trainer, step/stair climber or rower. Bike
+  initialization sends it only with confirmed bike identity, not an ambiguous
+  machine.
 - The peer currently connected to the FTMS output is never offered in scan results and never connected to as an input.
 
 ## Supported devices and new protocols
@@ -407,7 +408,7 @@ The Serial monitor (115200 baud, newline-terminated) accepts the same commands a
 | `ftms-input on/off` | Select paired BLE input / simulation; independent of output |
 | `ftms-output on/off` | Enable advertising / disconnect client and stop advertising |
 | `ftms-name <name>` | Set 1–20 printable ASCII characters; spaces are allowed |
-| `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower>` | Select output profile; `auto` follows input, unsupported output types fall back to bike; `save` persists |
+| `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower\|step-climber\|stair-climber>` | Select output profile; `auto` follows input; every profile is sent natively; `save` persists |
 | `wifi <ssid> [password]`, `wifi-clear`, `ap-pass <password>` | Wi-Fi settings (save + restart to apply) |
 | `save`, `load`, `factory-reset`, `restart` | Persistence and reboot |
 
@@ -460,7 +461,12 @@ fixed order and stop at the first failure, **without rollback**.
 | WS | `/ws` | – | Server sends `status`, `scan`, `config`, `result`; client messages ignored |
 
 Config types: `ftmsName`, `ftmsOutputProfile`, SSID, and passwords are strings;
-`ftmsOutputProfile` accepts `auto`, `bike`, `treadmill`, `cross-trainer` or `rower`.
+`ftmsOutputProfile` accepts `auto`, `bike`, `treadmill`, `cross-trainer`, `rower`,
+`step-climber` or `stair-climber`. `status.telemetry` always contains `power`,
+`cadence`, `speed`, `heartRate`, `incline`, `distance` and `elapsed` (`null`
+when not received); further FTMS metrics (e.g. `averagePower`, `totalEnergy`,
+`pace`, `strokeCount`, `floors`, keys as in `metricKey()`) appear only while the
+device actually sends them. A value that was not received is never reported as 0.
 Toggles and `save`
 are booleans. `wifiSsid:""` clears SSID/password. `wifiPassword` requires
 `wifiSsid`; omit it to retain the old password, or use `""` for an open network.
@@ -610,7 +616,7 @@ NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little
 | paired source valid | 1 | `0` or `1`, default `0` |
 | paired source address type | 1 | `0`–`3`; console/API accepts public (`0`) or random (`1`) |
 | paired source address | 6 | Address bytes in display order; invalid source requires type/address all zero |
-| `ftmsOutputProfile` (v3) | 1 | After source address, before CRC: `0` auto (default), `1` bike, `2` treadmill, `3` cross-trainer, `4` rower |
+| `ftmsOutputProfile` (v3) | 1 | After source address, before CRC: `0` auto (default), `1` bike, `2` treadmill, `3` cross-trainer, `4` rower, `5` step-climber, `6` stair-climber |
 | CRC-32 | 4 | Little endian; over all preceding bytes, reflected polynomial `0xEDB88320`, initial/final XOR `0xffffffff` |
 
 Each text field is a one-byte length followed by exactly that many bytes (no NUL).
@@ -641,7 +647,8 @@ corruption, not tampering or encryption.
 ## FTMS output (Bluetooth LE)
 `FtmsOutput` is a NimBLE-Arduino GATT server (firmware only; the transport is compiled under `#ifdef ARDUINO`, so host tests need no BLE stack). It advertises the Fitness Machine Service UUID `0x1826`, FTMS service data (machine available, effective output type), and the configured name (`ftms-name`, default `SmartFitness Bridge`, max 20 ASCII characters).
 
-The shared machine-profile names are `auto|bike|treadmill|cross-trainer|rower`.
+The shared machine-profile names are
+`auto|bike|treadmill|cross-trainer|rower|step-climber|stair-climber`.
 `auto` uses the active input profile: vendor adapters declare their machine type,
 and FTMS input derives it from discovered data characteristics and FTMS service
 data rather than treating every `0x1826` source as a bike. Simulation and sensor
@@ -651,15 +658,18 @@ For ambiguous FTMS subscriptions, the first valid data notification fixes the
 input profile; other machine-data UUIDs are ignored. An explicit supported FTMS
 advertised type can change that selection and clears old metrics/freshness.
 
-Bike and treadmill output are implemented. **Full Cross Trainer Data and Rower
-Data output are deferred to follow-up work**, including their profile-specific
-features, control semantics, codecs and hardware/app validation. These input
-profiles remain visible as `cross-trainer`/`rower`, while their effective output
-is explicitly shown as `bike` fallback; selecting those overrides also falls
-back to bike. This is not a transparent reproduction of the source GATT server.
+All six FTMS machine profiles are output natively (Indoor Bike, Treadmill,
+Cross Trainer, Step Climber, Stair Climber, Rower Data) with every FTMS data
+field the profile defines; only fields whose metric is valid in the core are
+sent, so a value the source never transmitted is never sent as 0. Field types,
+resolutions and the metric mapping are listed in
+[FTMS machine profiles and data fields](docs/supported-devices.md#ftms-machine-profiles-and-data-fields).
+Records longer than 20 bytes are split into several notifications using the
+FTMS "More Data" flag. Hardware/app validation of the new profiles is pending.
+This is not a transparent reproduction of the source GATT server.
 
-The GATT database is stable and includes both Indoor Bike Data and Treadmill
-Data characteristics. Only the effective profile's data is notified. A profile
+The GATT database is stable and includes all six machine data characteristics.
+Only the effective profile's data is notified. A profile
 change disconnects the client, invalidates its Request Control grant and queued
 session commands, and re-advertises with the new machine-type service data.
 The database itself does not change, so no Service Changed indication is
@@ -668,9 +678,8 @@ read features again, and request control again.
 
 | Characteristic | UUID | Properties | Content |
 |---|---|---|---|
-| Fitness Machine Feature | `0x2ACC` | read | Profile/capability-derived. Bike: cadence, inclination, HR, power; targets: inclination (+ bike simulation), resistance, power. Treadmill: mandatory instantaneous speed plus optional inclination, HR, distance and elapsed time; targets: speed/inclination only when supported. Bit 0 means average speed, not instantaneous-speed support, and is not set |
-| Indoor Bike Data | `0x2AD2` | notify | Speed (0.01 km/h), cadence (0.5 rpm), power (W, sint16), heart rate (bpm). A field and its flag are present only when the core marks the metric valid. Sent on change (at most every 250 ms) and at least once per second while a client is connected |
-| Treadmill Data | `0x2ACD` | notify | Valid speed (0.01 km/h), inclination and ramp angle, HR, optional distance and elapsed time; treadmill profile only. Same notification cadence as bike data |
+| Fitness Machine Feature | `0x2ACC` | read | Profile/capability-derived: only fields the effective profile can carry and the source supports (e.g. bike: cadence, inclination, power; treadmill: inclination, elevation, pace, force/power; rower: cadence, pace, power). Targets: speed (treadmill, cross trainer), inclination (+ bike simulation for bikes), resistance and power (all but treadmill), only when the source supports them. Bit 0 means average speed |
+| Indoor Bike / Treadmill / Cross Trainer / Step Climber / Stair Climber / Rower Data | `0x2AD2` / `0x2ACD` / `0x2ACE` / `0x2ACF` / `0x2AD0` / `0x2AD1` | notify | Every FTMS field of the profile in its native type (see the [field table](docs/supported-devices.md#data-fields-per-profile)). A field and its flag are present only when the core marks the metric valid. Only the effective profile's characteristic is notified, on change (at most every 250 ms) and at least once per second while a client is connected |
 | Training Status | `0x2AD3` | read, notify | Bike: Idle without a device, Manual Mode when connected. Treadmill: Idle until valid nonzero speed, Manual Mode while moving |
 | Supported Speed Range | `0x2AD4` | read | Core bounds 0.00 … 100.00 km/h, step 0.01 km/h; tighter input limits are enforced by the adapter, not yet exposed here |
 | Supported Inclination Range | `0x2AD5` | read | −20.0 … 25.0 %, step 0.1 % |
@@ -681,11 +690,12 @@ read features again, and request control again.
 
 Common Control Point opcodes: Request Control `0x00`, Reset `0x01`, Set Target
 Inclination `0x03` (sint16, 0.1 %), Start/Resume `0x07`, and Stop/Pause `0x08`
-(`0x01` stop, `0x02` pause). Treadmill adds Set Target Speed `0x02` (uint16,
-0.01 km/h). Bike supports Set Target Resistance `0x04` (uint8 0.1, sint16 0.1
-also accepted), Set Target Power `0x05` (sint16 W), and Set Indoor Bike Simulation
-Parameters `0x11` (grade mapped to incline). Treadmill output rejects power,
-resistance and bike simulation; an override does not grant unsupported controls.
+(`0x01` stop, `0x02` pause). Treadmill and cross trainer add Set Target Speed
+`0x02` (uint16, 0.01 km/h). All profiles except treadmill support Set Target
+Resistance `0x04` (uint8 0.1, sint16 0.1 also accepted) and Set Target Power
+`0x05` (sint16 W); inclination is accepted for bike, treadmill and cross
+trainer. Only the bike accepts Set Indoor Bike Simulation Parameters `0x11`
+(grade mapped to incline). An override does not grant unsupported controls.
 Other opcodes return Not Supported (`0x02`); wrong lengths return Invalid
 Parameter (`0x03`).
 
