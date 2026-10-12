@@ -244,7 +244,7 @@ def render(browser, output, name, width, height):
             command(page.locator("#btn-connect"), "connect")
             assert commands[-1] == ("connect", {})
             command(page.locator("#btn-scan"), "scan")
-            assert commands[-1] == ("scan", {"seconds": 10})
+            assert commands[-1] == ("scan", {"seconds": 15}), commands[-1]
             page.locator("#toast").evaluate("e => e.style.display = 'none'")
         elif panel == "ctl":
             page.locator("#ctl-value").fill("999")
