@@ -97,8 +97,12 @@ std::string inputLabel(const smartfitness::StatusView& status);
 std::string ftmsLabel(const smartfitness::FtmsOutputView& ftms);
 // "Power 180 W" / "No target".
 std::string targetLabel(const smartfitness::StatusView& status);
-// Two-line scan list entry: name (or address) / "-60 dBm  ftms".
+// Two-line scan list entry: name (or address) / "ftms"; the signal strength is
+// shown as a pictogram next to it (see signalLevel).
 std::string scanEntryLabel(const smartfitness::ScanDeviceView& device);
+// Four-step signal-strength pictogram level (1..4 bars) for an RSSI in dBm:
+// >= -60 → 4, >= -70 → 3, >= -80 → 2, weaker → 1.
+int signalLevel(int rssi);
 // Grey scan entry: irrelevant devices (sorted last) and devices without an
 // advertised name, whose label falls back to manufacturer, service or address.
 bool scanEntryMuted(const smartfitness::ScanDeviceView& device);

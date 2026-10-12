@@ -33,6 +33,12 @@ constexpr int FocusRingWidth = 2;
 constexpr int FocusRingGap = 1;
 constexpr int FocusRing = FocusRingWidth + FocusRingGap;
 using Gauge = std::array<lv_obj_t*, GaugeSegments>;
+// Four-step signal-strength pictogram (rising bars, see hmi::signalLevel).
+constexpr int SignalBarCount = 4;
+constexpr int SignalBarWidth = 4;
+constexpr int SignalBarGap = 2;
+constexpr int SignalBarsWidth = SignalBarCount * SignalBarWidth + (SignalBarCount - 1) * SignalBarGap;
+constexpr int SignalBarsHeight = 16;
 
 void init(lv_display_t* display);
 std::string uppercase(std::string text);
@@ -41,5 +47,7 @@ void scrollbar(lv_obj_t* container);
 void pill(lv_obj_t* object, std::uint32_t color = Lavender);
 Gauge gauge(lv_obj_t* parent);
 void setGauge(const Gauge& segments, float ratio, bool alert = false);
+// Signal pictogram with `level` (0..SignalBarCount) lit bars in `color`.
+lv_obj_t* signalBars(lv_obj_t* parent, int level, std::uint32_t color);
 
 }  // namespace hmi::lcars

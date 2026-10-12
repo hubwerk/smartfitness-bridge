@@ -160,7 +160,7 @@ Screens (same interactions as the web UI):
 - **Dashboard** – arc gauge for the selected metric (power, cadence, speed, heart
   rate, incline, distance, time), target, connection/trainer/control state, machine
   profile and FTMS client state. Press opens the menu.
-- **Devices** – start/stop scan, scan results (name, RSSI, adapter), pair/connect
+- **Devices** – start/stop scan, scan results (name, adapter, 4-bar signal-strength icon instead of numeric RSSI), pair/connect
   with optional adapter override (all adapters incl. `ifit-model-N` and WalkingPad
   cipher profiles), disconnect, unpair, simulation on/off.
 - **Control** – target power/resistance/incline/speed. Values are set with the knob

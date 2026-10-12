@@ -215,4 +215,25 @@ void setGauge(const Gauge& segments, float ratio, bool alert) {
     }
 }
 
+lv_obj_t* signalBars(lv_obj_t* parent, int level, std::uint32_t color) {
+    lv_obj_t* icon = lv_obj_create(parent);
+    lv_obj_remove_style_all(icon);
+    lv_obj_set_size(icon, SignalBarsWidth, SignalBarsHeight);
+    lv_obj_remove_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
+    for (int bar = 0; bar < SignalBarCount; ++bar) {
+        lv_obj_t* segment = lv_obj_create(icon);
+        lv_obj_remove_style_all(segment);
+        const int height = SignalBarsHeight * (bar + 1) / SignalBarCount;
+        lv_obj_set_size(segment, SignalBarWidth, height);
+        lv_obj_set_pos(segment, bar * (SignalBarWidth + SignalBarGap), SignalBarsHeight - height);
+        lv_obj_set_style_radius(segment, 1, 0);
+        lv_obj_set_style_bg_color(segment, lv_color_hex(color), 0);
+        // Unlit bars stay visible as outline steps, so the level reads by shape.
+        lv_obj_set_style_bg_opa(segment, bar < level ? LV_OPA_COVER : LV_OPA_30, 0);
+        lv_obj_remove_flag(segment, LV_OBJ_FLAG_CLICKABLE);
+    }
+    return icon;
+}
+
 }  // namespace hmi::lcars

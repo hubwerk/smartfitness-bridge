@@ -155,10 +155,13 @@ void testStatusTexts() {
     ScanDeviceView device;
     device.address = "aa:00:00:00:00:22";
     device.rssi = -61;
-    assert(scanEntryLabel(device) == "aa:00:00:00:00:22\n-61 dBm  ?");
+    assert(scanEntryLabel(device) == "aa:00:00:00:00:22\n?");
+    assert(signalLevel(device.rssi) == 3);
+    assert(signalLevel(-40) == 4 && signalLevel(-60) == 4 && signalLevel(-70) == 3 && signalLevel(-71) == 2 &&
+           signalLevel(-80) == 2 && signalLevel(-81) == 1 && signalLevel(-110) == 1);
     device.label = "Apple";
     device.relevant = false;
-    assert(scanEntryLabel(device) == "Apple\n-61 dBm  ?");
+    assert(scanEntryLabel(device) == "Apple\n?");
     assert(scanEntryMuted(device));
     device.label = "FTMS";
     device.relevant = true;  // known service, but no advertised name
@@ -167,7 +170,7 @@ void testStatusTexts() {
     device.label = "WalkingPad";
     device.relevant = true;
     device.adapter = "walkingpad-r1";
-    assert(scanEntryLabel(device) == "WalkingPad\n-61 dBm  walkingpad-r1");
+    assert(scanEntryLabel(device) == "WalkingPad\nwalkingpad-r1");
     assert(!scanEntryMuted(device));
     assert(onOff(true) == "on" && onOff(false) == "off");
 }
