@@ -31,12 +31,25 @@ struct DroppedCounters {
     std::uint32_t commands = 0;
 };
 
+constexpr int kSignalRssiWeak = -85;
+constexpr int kSignalRssiFair = -75;
+constexpr int kSignalRssiGood = -65;
+
+inline std::uint8_t signalLevel(int rssi) {
+    if (rssi >= 0) return 0;
+    if (rssi >= kSignalRssiGood) return 4;
+    if (rssi >= kSignalRssiFair) return 3;
+    if (rssi >= kSignalRssiWeak) return 2;
+    return 1;
+}
+
 struct PairedView {
     bool valid = false;
     std::string address;  // "aa:bb:cc:dd:ee:ff"
     bool randomAddress = false;
     std::string name;
     std::string adapter;
+    int rssi = 0;
 };
 
 struct InputView {

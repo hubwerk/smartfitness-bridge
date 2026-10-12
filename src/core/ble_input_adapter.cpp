@@ -72,12 +72,17 @@ void BleInputAdapter::setPairedDevice(const PairedDevice& device) {
         maybeEmit(true);
     }
     paired_ = device;
-    if (changed) protocol_.reset();
+    if (changed) {
+        protocol_.reset();
+        pairedRssi_ = 0;
+        if (const auto* result = findResult(paired_.address)) pairedRssi_ = result->rssi;
+    }
 }
 
 void BleInputAdapter::clearPairedDevice() {
     disconnect();
     paired_ = {};
+    pairedRssi_ = 0;
     protocol_.reset();
 }
 
@@ -319,6 +324,7 @@ bool BleInputAdapter::isExcluded(const ble::BleAddress& address) const {
 
 void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     if (isExcluded(report.address)) return;
+    if (paired_.valid && report.address == paired_.address) pairedRssi_ = report.rssi;
     const std::uint32_t now = clock_();
     ble::Advertisement advertisement = ble::Advertisement::from(report);
     if (protocol_ && report.address == paired_.address &&

@@ -218,4 +218,35 @@ void setGauge(const Gauge& segments, float ratio, bool alert) {
     }
 }
 
+lv_obj_t* signalBars(lv_obj_t* parent, std::uint8_t level, std::uint32_t activeColor) {
+    lv_obj_t* container = lv_obj_create(parent);
+    lv_obj_remove_style_all(container);
+    lv_obj_remove_flag(container, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_set_size(container, 14, 12);
+    constexpr int kHeights[4] = {3, 6, 9, 12};
+    for (int i = 0; i < 4; ++i) {
+        lv_obj_t* b = lv_obj_create(container);
+        lv_obj_remove_style_all(b);
+        lv_obj_remove_flag(b, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+        lv_obj_set_pos(b, i * 4, 12 - kHeights[i]);
+        lv_obj_set_size(b, 2, kHeights[i]);
+        lv_obj_set_style_bg_color(b, lv_color_hex(activeColor), 0);
+        lv_obj_set_style_bg_opa(b, i < level ? LV_OPA_COVER : LV_OPA_30, 0);
+        lv_obj_set_style_radius(b, 0, 0);
+    }
+    return container;
+}
+
+void setSignalBars(lv_obj_t* widget, std::uint8_t level, std::uint32_t activeColor) {
+    if (!widget) return;
+    for (int i = 0; i < 4; ++i) {
+        lv_obj_t* b = lv_obj_get_child(widget, i);
+        if (!b) break;
+        if (activeColor != 0) {
+            lv_obj_set_style_bg_color(b, lv_color_hex(activeColor), 0);
+        }
+        lv_obj_set_style_bg_opa(b, i < level ? LV_OPA_COVER : LV_OPA_30, 0);
+    }
+}
+
 }  // namespace hmi::lcars

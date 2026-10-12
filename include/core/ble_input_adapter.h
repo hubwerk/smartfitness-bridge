@@ -74,6 +74,7 @@ public:
     void setPairedDevice(const PairedDevice& device);
     void clearPairedDevice();
     const PairedDevice& pairedDevice() const { return paired_; }
+    int pairedRssi() const { return pairedRssi_; }
     // When enabled, begin() and link losses (re)connect automatically.
     void setAutoConnect(bool enabled) { autoConnect_ = enabled; }
     bool autoConnect() const { return autoConnect_; }
@@ -119,6 +120,7 @@ private:
     Clock clock_;
     Timing timing_;
     PairedDevice paired_;
+    int pairedRssi_ = 0;
     bool autoConnect_ = false;
     std::unique_ptr<smartfitness::protocols::SourceProtocol> protocol_;
     LinkState state_ = LinkState::Idle;

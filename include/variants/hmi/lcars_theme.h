@@ -40,5 +40,7 @@ void scrollbar(lv_obj_t* container);
 void pill(lv_obj_t* object, std::uint32_t color = Lavender);
 Gauge gauge(lv_obj_t* parent);
 void setGauge(const Gauge& segments, float ratio, bool alert = false);
+lv_obj_t* signalBars(lv_obj_t* parent, std::uint8_t level, std::uint32_t activeColor = LightBlue);
+void setSignalBars(lv_obj_t* widget, std::uint8_t level, std::uint32_t activeColor = 0);
 
 }  // namespace hmi::lcars

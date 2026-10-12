@@ -103,6 +103,7 @@ private:
     void buildKeyboard();
 
     void updateDashboard();
+    void updateScanSignals();
     void updateAdjust();
     void applyAdjust();
     void confirm(ConfirmState state);
@@ -143,10 +144,15 @@ private:
         lv_obj_t* state = nullptr;
         lv_obj_t* target = nullptr;
         lv_obj_t* info = nullptr;
+        lv_obj_t* inputRow = nullptr;
+        lv_obj_t* input = nullptr;
+        lv_obj_t* signal = nullptr;
     } dash_;
 
     smartfitness::ScanDeviceView device_;
     std::vector<smartfitness::AdapterView> adapters_;
+    std::vector<lv_obj_t*> scanSignals_;
+    lv_obj_t* deviceDetailSignal_ = nullptr;
     lv_obj_t* roller_ = nullptr;
     lv_obj_t* rollerInfo_ = nullptr;
 

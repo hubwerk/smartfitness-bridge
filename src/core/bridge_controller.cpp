@@ -367,6 +367,7 @@ StatusView BridgeController::statusView() const {
         input.paired.randomAddress = config.pairedSource.addressType != 0;
         input.paired.name = config.pairedDeviceName;
         input.paired.adapter = config.pairedAdapterId;
+        input.paired.rssi = ble_ ? ble_->pairedRssi() : 0;
     }
     auto& ftms = view.ftmsOutput;
     ftms.enabled = config.ftms.output;

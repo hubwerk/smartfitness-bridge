@@ -82,6 +82,8 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
         paired["addressType"] = in.paired.randomAddress ? "random" : "public";
         paired["name"] = in.paired.name;
         paired["adapter"] = in.paired.adapter;
+        paired["rssi"] = in.paired.rssi;
+        paired["signal"] = signalLevel(in.paired.rssi);
     } else {
         input["paired"] = nullptr;
     }
@@ -118,6 +120,7 @@ std::string scanResultsJson(const ScanView& scan) {
         device["addressType"] = result.randomAddress ? "random" : "public";
         device["name"] = result.name;
         device["rssi"] = result.rssi;
+        device["signal"] = signalLevel(result.rssi);
         device["connectable"] = result.connectable;
         device["adapter"] = result.adapter;
         JsonArray services = device["services"].to<JsonArray>();

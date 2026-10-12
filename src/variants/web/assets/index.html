@@ -35,6 +35,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 #toast.bad{background:var(--bad)}#toast.ok{background:var(--ok)}.small{font-size:16px;color:var(--fg);overflow-wrap:anywhere}
 #ctl-result:not(:empty){display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:var(--light);color:#000}#ctl-result.bad{background:var(--bad)}
 .gauge{display:flex;align-items:center;gap:14px;margin:16px 0 22px;color:var(--light);text-transform:uppercase;font-size:16px}.gauge meter{flex:1;width:100%;height:14px;appearance:none;background:#000;border:2px solid var(--tan)}meter::-webkit-meter-bar{background:#000;border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--acc)}meter::-moz-meter-bar{background:var(--acc)}
+.sig-icon{display:inline-block;vertical-align:middle;margin:0 4px;color:var(--acc)}
 @media(max-width:1000px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric .v{font-size:49px}.metric:last-child .v{font-size:28px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
@@ -69,7 +70,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
  <div class="card"><div class="label">Paired device</div><div id="paired">none</div>
   <div class="row"><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
  <div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
-  <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
+  <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">Signal</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
   <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
 </section>
 <section id="ctl" role="tabpanel" aria-labelledby="tab-ctl" tabindex="0" hidden>
@@ -120,6 +121,25 @@ async function poll(id,n){ // fallback when the WebSocket result does not arrive
 function finish(res){const cb=pending[res.id];if(!cb)return;delete pending[res.id];cb(res)}
 async function run(endpoint,body,quiet){const r=await post(endpoint,body);if(r&&!quiet)toast(r.message,r.ok);return r}
 function fmt(v){return v===null||v===undefined?"–":(Math.round(v*10)/10).toString()}
+function sigLvl(r){return(!r||r>=0)?0:r>=-65?4:r>=-75?3:r>=-85?2:1}
+function sigSvg(lvl,rssi){
+ const s=document.createElementNS("http://www.w3.org/2000/svg","svg");
+ s.setAttribute("viewBox","0 0 16 14");s.setAttribute("width","16");s.setAttribute("height","14");
+ s.setAttribute("role","img");s.setAttribute("aria-label","Signal "+lvl+"/4");
+ s.classList.add("sig-icon");
+ const tip=(rssi!==undefined&&rssi!==null&&rssi<0)?(rssi+" dBm"):"No signal";
+ s.setAttribute("title",tip);
+ const t=document.createElementNS("http://www.w3.org/2000/svg","title");
+ t.textContent=tip;s.appendChild(t);
+ [[1,10,2.5,4],[5,7,2.5,7],[9,4,2.5,10],[13,0,2.5,14]].forEach(([x,y,w,h],i)=>{
+  const r=document.createElementNS("http://www.w3.org/2000/svg","rect");
+  r.setAttribute("x",x);r.setAttribute("y",y);r.setAttribute("width",w);r.setAttribute("height",h);
+  r.setAttribute("rx","0.5");r.setAttribute("fill","currentColor");
+  if(i>=lvl)r.setAttribute("opacity","0.25");
+  s.appendChild(r);
+ });
+ return s;
+}
 function renderStatus(s){
  status=s;$("conn").textContent="online";$("conn").className="pill ok";
  for(const k of["power","cadence","speed","heartRate","incline"])$("m-"+k).textContent=fmt(s.telemetry&&s.telemetry[k]);
@@ -135,7 +155,7 @@ function renderStatus(s){
  fill($("s-input"),items);
  const f=s.ftmsOutput||{};fill($("s-ftms"),[pill(f.enabled?"enabled":"disabled",f.enabled?"ok":""),pill(f.name||""),pill("profile: "+(f.profile||"bike")),pill("override: "+(f.override||"auto")),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);
  const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
- const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
+ const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",sigSvg(p.signal!==undefined?p.signal:sigLvl(p.rssi),p.rssi)," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
  $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
  $("unsaved").textContent=s.unsaved?"unsaved changes":"saved";$("fw").textContent=s.version||"";
  $("btn-scan").disabled=!i.bleAvailable;}
@@ -148,7 +168,9 @@ function renderScan(sc){
   const btn=el("button","Pair","b");btn.setAttribute("aria-label","Pair "+(d.name||d.address));btn.onclick=async()=>{if(!sel.value){toast("choose an adapter first",false);return}
    btn.disabled=true;await run("pair",{address:d.address,addressType:d.addressType,adapter:sel.value});btn.disabled=false};
   const svc=el("td",(d.services||[]).join(" "),"small"),ad=el("td"),act=el("td");ad.append(sel);act.append(btn);
-  const rssi=el("td",d.rssi);rssi.dataset.label="RSSI";svc.dataset.label="Services";ad.dataset.label="Adapter";tr.append(name,rssi,svc,ad,act);return tr}));}
+  const lvl=d.signal!==undefined?d.signal:sigLvl(d.rssi);
+  const sig=el("td");sig.dataset.label="Signal";sig.append(sigSvg(lvl,d.rssi));
+  svc.dataset.label="Services";ad.dataset.label="Adapter";tr.append(name,sig,svc,ad,act);return tr}));}
 function renderConfig(c){
  $("c-ftmsName").value=c.ftmsName||"";for(const k of["ftmsOutput","ant","simulatedTrainer"])$("c-"+k).checked=!!c[k];
  $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";
