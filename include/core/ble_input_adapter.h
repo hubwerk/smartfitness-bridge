@@ -51,7 +51,7 @@ public:
     enum class LinkState : std::uint8_t { Idle, Connecting, Ready, Backoff, Listening };
 
     static constexpr std::size_t kMaxScanResults = 24;
-    static constexpr std::uint32_t kDefaultScanMs = 15000;
+    static constexpr std::uint32_t kDefaultScanMs = 30000;
 
     BleInputAdapter(smartfitness::ble::CentralTransport& transport, Clock clock);
     BleInputAdapter(smartfitness::ble::CentralTransport& transport, Clock clock, const Timing& timing);
@@ -79,7 +79,8 @@ public:
     void setAutoConnect(bool enabled) { autoConnect_ = enabled; }
     bool autoConnect() const { return autoConnect_; }
 
-    // Scanning (results are deduplicated by address).
+    // Scanning (results are deduplicated by address; when the list is full a
+    // relevant device replaces the weakest irrelevant one, counted as dropped).
     bool startScan(std::uint32_t durationMs = kDefaultScanMs);
     bool stopScan();
     bool scanning() const { return userScan_; }

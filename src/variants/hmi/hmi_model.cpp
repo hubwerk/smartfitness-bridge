@@ -231,6 +231,8 @@ std::string scanEntryLabel(const ScanDeviceView& device) {
     return label;
 }
 
+bool scanEntryMuted(const ScanDeviceView& device) { return !device.relevant || device.name.empty(); }
+
 std::string onOff(bool value) { return tr(value ? Str::On : Str::Off); }
 
 std::uint8_t nextBrightness(std::uint8_t percent) {

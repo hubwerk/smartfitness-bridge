@@ -1416,6 +1416,40 @@ void testScanMergingAndConsolidation() {
     assert(dev->rssi == -40);
 }
 
+void testScanListKeepsRelevantDevices() {
+    Harness h;
+    assert(h.adapter.startScan());
+    // Fill the list with anonymous devices (no name, service or protocol).
+    for (std::size_t i = 0; i < BleInputAdapter::kMaxScanResults; ++i) {
+        ble::BleAddress anonymous;
+        anonymous.bytes[5] = static_cast<std::uint8_t>(0x10 + i);
+        h.central.advertise(anonymous, "", {}, {0x4C, 0x00}, -40 - static_cast<int>(i));
+    }
+    h.advance(10);
+    assert(h.adapter.scanResults().size() == BleInputAdapter::kMaxScanResults);
+    // Another anonymous device is dropped.
+    ble::BleAddress late;
+    late.bytes[5] = 0x70;
+    h.central.advertise(late, "", {}, {}, -20);
+    h.advance(10);
+    assert(!h.adapter.findResult(late) && h.adapter.droppedScanResults() == 1);
+    // A fitness device replaces the weakest anonymous entry.
+    ble::BleAddress weakest;
+    weakest.bytes[5] = static_cast<std::uint8_t>(0x10 + BleInputAdapter::kMaxScanResults - 1);
+    const ble::BleAddress bike = address("aa:00:00:00:00:71");
+    h.central.advertise(bike, "", {0x1826}, {}, -80);
+    h.advance(10);
+    assert(h.adapter.scanResults().size() == BleInputAdapter::kMaxScanResults);
+    assert(!h.adapter.findResult(weakest) && h.adapter.droppedScanResults() == 2);
+    const ScanResult* entry = h.adapter.findResult(bike);
+    assert(entry && entry->detectedAdapter == "ftms" && entry->rssi == -80 && entry->name.empty());
+    // Its scan response is merged into the same entry.
+    h.central.advertise(bike, "KICKR", {}, {}, -78);
+    h.advance(10);
+    entry = h.adapter.findResult(bike);
+    assert(entry && entry->name == "KICKR" && entry->services.size() == 1);
+}
+
 void testScanLabelHelpers() {
     // lookupCompany
     assert(lookupCompany(0x004C) == "Apple");
@@ -1494,6 +1528,7 @@ void runBleInputTests() {
     testStaleFtmsTreadmillControlSafety();
     testScanDedupAndExclusion();
     testScanMergingAndConsolidation();
+    testScanListKeepsRelevantDevices();
     testScanLabelHelpers();
     testFtmsLifecycle();
     testProtocolFailureAndControlDenied();

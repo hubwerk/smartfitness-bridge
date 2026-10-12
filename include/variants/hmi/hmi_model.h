@@ -99,6 +99,9 @@ std::string ftmsLabel(const smartfitness::FtmsOutputView& ftms);
 std::string targetLabel(const smartfitness::StatusView& status);
 // Two-line scan list entry: name (or address) / "-60 dBm  ftms".
 std::string scanEntryLabel(const smartfitness::ScanDeviceView& device);
+// Grey scan entry: irrelevant devices (sorted last) and devices without an
+// advertised name, whose label falls back to manufacturer, service or address.
+bool scanEntryMuted(const smartfitness::ScanDeviceView& device);
 std::string onOff(bool value);
 
 // ---- Settings -----------------------------------------------------------------

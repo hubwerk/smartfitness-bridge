@@ -23,12 +23,12 @@
 
 class NimbleCentral final : public smartfitness::ble::CentralTransport {
 public:
-    static constexpr std::size_t kScanQueue = 24;
+    static constexpr std::size_t kScanQueue = 48;
     static constexpr std::size_t kEventQueue = 32;
     static constexpr std::size_t kCommandQueue = 8;
     static constexpr std::uint8_t kConnectTimeoutS = 5;
     static constexpr std::uint32_t kScanWindowNormal = 37;
-    static constexpr std::uint32_t kScanWindowHighDuty = 80;
+    static constexpr std::uint32_t kScanWindowHighDuty = 90;
     static constexpr std::uint32_t kScanInterval = 97;
 
     NimbleCentral() = default;

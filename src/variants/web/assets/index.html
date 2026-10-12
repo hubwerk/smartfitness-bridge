@@ -161,7 +161,7 @@ function renderConfig(c){
  $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
  $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}
  async function loadConfig(){try{renderConfig(await(await fetch("/api/config")).json())}catch(e){toast("could not load settings",false)}}
-$("btn-scan").onclick=()=>run("scan",{seconds:15},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
+$("btn-scan").onclick=()=>run("scan",{seconds:30},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
 $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run("disconnect");$("btn-sim").onclick=()=>run("simulate");
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
 $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
