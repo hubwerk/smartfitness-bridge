@@ -25,6 +25,12 @@ constexpr std::uint32_t LightBlue = 0x99CCFF;
 constexpr std::uint32_t Blue = 0x5566FF;
 constexpr std::uint32_t Alert = 0xCC4444;
 constexpr std::size_t GaugeSegments = 24;
+// Knob focus cursor drawn around the focused widget (outline width + gap).
+// Containers of focusable widgets keep at least this much padding so the
+// cursor is never clipped.
+constexpr int FocusRingWidth = 2;
+constexpr int FocusRingGap = 1;
+constexpr int FocusRing = FocusRingWidth + FocusRingGap;
 using Gauge = std::array<lv_obj_t*, GaugeSegments>;
 
 void init(lv_display_t* display);

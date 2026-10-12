@@ -332,7 +332,7 @@ lv_obj_t* HmiUi::makeList(lv_obj_t* screen) {
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(list, 6, 0);
-    lv_obj_set_style_pad_all(list, 3, 0);
+    lv_obj_set_style_pad_all(list, lcars::FocusRing, 0);
     lv_obj_set_style_clip_corner(list, true, 0);
     lv_obj_set_style_radius(list, 18, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
@@ -390,32 +390,34 @@ void HmiUi::buildDashboard() {
     lv_obj_center(pad);
     lv_obj_add_flag(pad, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
+    // The whole round screen is the only knob target here (turn = metric,
+    // press = menu), so it gets no focus ring on the panel edge.
     lv_obj_set_style_radius(pad, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_color(pad, lv_color_white(), LV_STATE_FOCUSED);
-    lv_obj_set_style_border_width(pad, 2, LV_STATE_FOCUSED);
     lv_group_add_obj(group_, pad);
 
     dash_.segments = lcars::gauge(pad);
     header_ = lcars::frame(pad, "OPERATIONS", false);
 
+    // Stacked from top (line box y) so that no two text lines touch between
+    // the header bar (y 57..59) and the bottom gap of the gauge.
     auto label = [pad](const lv_font_t* font, lv_coord_t y, lv_color_t color) {
         lv_obj_t* obj = lv_label_create(pad);
         lv_obj_set_style_text_font(obj, font, 0);
         lv_obj_set_style_text_color(obj, color, 0);
         lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(obj, LV_ALIGN_CENTER, 0, y);
+        lv_obj_align(obj, LV_ALIGN_TOP_MID, 0, y);
         return obj;
     };
     const lv_color_t data = lv_color_hex(lcars::LightBlue);
-    dash_.state = label(&sf_antonio_16, -50, data);
+    dash_.state = label(&sf_antonio_16, 63, data);
     lv_obj_set_style_bg_opa(dash_.state, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(dash_.state, 10, 0);
     lv_obj_set_style_pad_hor(dash_.state, 8, 0);
-    dash_.name = label(&sf_antonio_16, -28, data);
-    dash_.value = label(&sf_antonio_48, 3, data);
-    dash_.unit = label(&sf_antonio_16, 30, data);
-    dash_.target = label(&sf_antonio_16, 46, lv_color_hex(lcars::Lavender));
-    dash_.info = label(&sf_antonio_16, 70, data);
+    dash_.name = label(&sf_antonio_16, 84, data);
+    dash_.value = label(&sf_antonio_48, 103, data);
+    dash_.unit = label(&sf_antonio_16, 0, data);  // placed next to the value
+    dash_.target = label(&sf_antonio_16, 148, lv_color_hex(lcars::Lavender));
+    dash_.info = label(&sf_antonio_16, 166, data);
     lv_obj_set_width(dash_.info, 148);
     lv_label_set_long_mode(dash_.info, LV_LABEL_LONG_WRAP);
 
@@ -450,6 +452,15 @@ void HmiUi::updateDashboard() {
     lv_label_set_text(dash_.name, lcars::uppercase(tr(format.name)).c_str());
     lv_label_set_text(dash_.value, formatMetric(sample, metric).c_str());
     lv_label_set_text(dash_.unit, lcars::uppercase(format.unit).c_str());
+    // Value and unit share one baseline, centered as a pair.
+    constexpr lv_coord_t kUnitGap = 4;
+    lv_obj_update_layout(dash_.unit);
+    lv_obj_update_layout(dash_.value);
+    const lv_coord_t unitWidth = lv_obj_get_width(dash_.unit);
+    const lv_coord_t shift = unitWidth > 0 ? (unitWidth + kUnitGap) / 2 : 0;
+    lv_obj_align(dash_.value, LV_ALIGN_TOP_MID, -shift, 103);
+    lv_obj_align_to(dash_.unit, dash_.value, LV_ALIGN_OUT_RIGHT_BOTTOM, kUnitGap,
+                    sf_antonio_16.base_line - sf_antonio_48.base_line);
     float ratio = 0.0F;
     if (sample.valid && format.gaugeMax > format.gaugeMin)
         ratio = (sample.value - format.gaugeMin) / (format.gaugeMax - format.gaugeMin);
@@ -562,9 +573,10 @@ void HmiUi::buildAdapterPicker() {
     lv_roller_set_options(roller_, options.c_str(), LV_ROLLER_MODE_NORMAL);
     lv_obj_set_width(roller_, 176);
     lv_obj_set_style_text_font(roller_, &sf_antonio_16, 0);
-    lv_obj_set_style_text_line_space(roller_, 13, 0);
-    lv_roller_set_visible_row_count(roller_, 2);
-    lv_obj_align(roller_, LV_ALIGN_TOP_MID, 0, 62);
+    // Odd row count: the neighbours above and below are shown in full.
+    lv_obj_set_style_text_line_space(roller_, 4, 0);
+    lv_roller_set_visible_row_count(roller_, 3);
+    lv_obj_align(roller_, LV_ALIGN_TOP_MID, 0, 60 + lcars::FocusRing);
     lv_roller_set_selected(roller_, selected, LV_ANIM_OFF);
     lcars::scrollbar(roller_);
     lv_group_add_obj(group_, roller_);
@@ -574,7 +586,7 @@ void HmiUi::buildAdapterPicker() {
     lv_label_set_long_mode(rollerInfo_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(rollerInfo_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(rollerInfo_, &sf_antonio_16, 0);
-    lv_obj_align_to(rollerInfo_, roller_, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+    lv_obj_align_to(rollerInfo_, roller_, LV_ALIGN_OUT_BOTTOM_MID, 0, lcars::FocusRing);
     auto showInfo = [this] {
         const auto index = lv_roller_get_selected(roller_);
         if (index < adapters_.size()) {
@@ -589,8 +601,9 @@ void HmiUi::buildAdapterPicker() {
 
     lv_obj_t* row = lv_obj_create(root_);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, 140, 36);
-    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -32);
+    lv_obj_set_size(row, 140 + 2 * lcars::FocusRing, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(row, lcars::FocusRing, 0);
+    lv_obj_align_to(row, rollerInfo_, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(row, 8, 0);
     lv_obj_t* pair = addButton(row, tr(Str::Pair), [this] {
@@ -644,8 +657,8 @@ void HmiUi::buildAdjust() {
 
     lv_obj_t* pad = lv_obj_create(root_);
     lv_obj_remove_style_all(pad);
-    lv_obj_set_size(pad, 120, 90);
-    lv_obj_align(pad, LV_ALIGN_CENTER, 0, -18);
+    lv_obj_set_size(pad, 120, 84);
+    lv_obj_align(pad, LV_ALIGN_TOP_MID, 0, 62);
     lv_obj_add_flag(pad, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(pad, 12, 0);
@@ -684,15 +697,16 @@ void HmiUi::buildAdjust() {
         });
         lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
     };
-    stepButton("-", LV_ALIGN_LEFT_MID, 12, -1);
-    stepButton("+", LV_ALIGN_RIGHT_MID, -12, 1);
+    // Inside the gauge ring and clear of the value pad.
+    stepButton("-", LV_ALIGN_LEFT_MID, 16, -1);
+    stepButton("+", LV_ALIGN_RIGHT_MID, -16, 1);
 
     lv_obj_t* hint = lv_label_create(root_);
     lv_label_set_text(hint, lcars::uppercase(tr(Str::HintAdjust)).c_str());
     lv_obj_set_style_text_font(hint, &sf_antonio_16, 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(lcars::Peach), 0);
-    lv_obj_align(hint, LV_ALIGN_CENTER, 0, 37);
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 147);
 
     lv_obj_t* row = lv_obj_create(root_);
     lv_obj_remove_style_all(row);
@@ -739,9 +753,10 @@ void HmiUi::buildConfirm() {
     // Cancel first: it gets the default focus.
     lv_obj_t* row = lv_obj_create(list);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, lv_pct(100), 36);
+    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(row, lcars::FocusRing, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row, 6, 0);
+    lv_obj_set_style_pad_column(row, 2 * lcars::FocusRing, 0);
     lv_obj_t* cancel = addButton(row, tr(Str::Cancel), [this] {
         resetSequence_.cancel();
         returnTo(confirm_.returnTo);
@@ -820,12 +835,14 @@ void HmiUi::buildKeyboard() {
     lv_textarea_set_one_line(textArea_, true);
     lv_textarea_set_max_length(textArea_, static_cast<std::uint32_t>(FtmsOutput::kMaxNameLength));
     lv_textarea_set_text(textArea_, config_.ftmsName.c_str());
-    lv_obj_set_width(textArea_, 180);
+    lv_obj_set_width(textArea_, 176);
+    lv_obj_set_style_pad_ver(textArea_, 4, 0);
+    lv_obj_set_style_pad_hor(textArea_, 14, 0);
     lv_obj_align(textArea_, LV_ALIGN_TOP_MID, 0, 62);
 
     lv_obj_t* keyboard = lv_keyboard_create(root_);
-    lv_obj_set_size(keyboard, 176, 106);
-    lv_obj_align(keyboard, LV_ALIGN_TOP_MID, 0, 98);
+    lv_obj_set_size(keyboard, 168, 100);
+    lv_obj_align_to(keyboard, textArea_, LV_ALIGN_OUT_BOTTOM_MID, 0, 2 + lcars::FocusRing);
     lv_obj_set_style_text_font(keyboard, &sf_antonio_16, 0);
     lv_obj_set_style_pad_all(keyboard, 2, 0);
     lv_obj_set_style_pad_gap(keyboard, 2, 0);

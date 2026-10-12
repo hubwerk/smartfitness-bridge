@@ -10,10 +10,25 @@ namespace {
 
 lv_theme_t theme;
 
+// Replaces the default theme's wide outline (4 px + 4 px gap), which got
+// clipped by lists, rows and the frame.
+void focusRing(lv_obj_t* object, lv_style_selector_t part) {
+    for (const auto state : {LV_STATE_FOCUS_KEY, LV_STATE_EDITED}) {
+        lv_obj_set_style_outline_width(object, FocusRingWidth, part | state);
+        lv_obj_set_style_outline_pad(object, FocusRingGap, part | state);
+        lv_obj_set_style_outline_opa(object, LV_OPA_COVER, part | state);
+    }
+    lv_obj_set_style_outline_color(object, lv_color_hex(Orange), part | LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_outline_color(object, lv_color_hex(LightBlue), part | LV_STATE_EDITED);
+}
+
 void apply(lv_theme_t*, lv_obj_t* object) {
     lv_obj_set_style_shadow_width(object, 0, LV_PART_MAIN);
     lv_obj_set_style_text_font(object, &sf_antonio_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(object, lv_color_hex(LightBlue), LV_PART_MAIN);
+    if (lv_obj_check_type(object, &lv_button_class) || lv_obj_check_type(object, &lv_roller_class) ||
+        lv_obj_check_type(object, &lv_textarea_class) || lv_obj_check_type(object, &lv_keyboard_class))
+        focusRing(object, LV_PART_MAIN);
     if (lv_obj_check_type(object, &lv_button_class)) pill(object);
     if (lv_obj_check_type(object, &lv_roller_class) || lv_obj_check_type(object, &lv_textarea_class)) {
         lv_obj_set_style_bg_color(object, lv_color_hex(Black), 0);
@@ -27,6 +42,7 @@ void apply(lv_theme_t*, lv_obj_t* object) {
     }
     if (lv_obj_check_type(object, &lv_keyboard_class)) {
         lv_obj_set_style_bg_color(object, lv_color_black(), 0);
+        lv_obj_set_style_radius(object, 12, 0);
         lv_obj_set_style_bg_color(object, lv_color_hex(Lavender), LV_PART_ITEMS);
         lv_obj_set_style_text_color(object, lv_color_black(), LV_PART_ITEMS);
         lv_obj_set_style_radius(object, 12, LV_PART_ITEMS);
@@ -34,6 +50,9 @@ void apply(lv_theme_t*, lv_obj_t* object) {
         lv_obj_set_style_bg_color(object, lv_color_hex(Peach), LV_PART_ITEMS | LV_STATE_PRESSED);
         lv_obj_set_style_border_color(object, lv_color_white(), LV_PART_ITEMS | LV_STATE_FOCUSED);
         lv_obj_set_style_border_width(object, 2, LV_PART_ITEMS | LV_STATE_FOCUSED);
+        // Keys sit 2 px apart: their cursor is the white border only.
+        for (const auto state : {LV_STATE_FOCUS_KEY, LV_STATE_EDITED})
+            lv_obj_set_style_outline_width(object, 0, LV_PART_ITEMS | state);
     }
 }
 
@@ -143,14 +162,15 @@ lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert) {
     lv_obj_t* header = arc(screen, 232, 12, color, 225, 315);
     bar(screen, 48, 57, 144, 3, Peach, 1);
 
+    // One line between the header arc and the bar; long titles get dots.
     lv_obj_t* label = lv_label_create(screen);
-    lv_obj_set_width(label, 158);
+    lv_obj_set_size(label, 120, lv_font_get_line_height(&sf_antonio_20));
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_label_set_text(label, uppercase(title).c_str());
     lv_obj_set_style_text_font(label, &sf_antonio_20, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(Peach), 0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(label, 41, 33);
+    lv_obj_set_pos(label, 60, 31);
     label = lv_label_create(screen);
     lv_label_set_text(label, "02-338");
     lv_obj_set_style_text_color(label, lv_color_hex(Lavender), 0);
