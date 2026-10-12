@@ -65,27 +65,78 @@ void putEnergy(Bytes& out, const Data& data) {
     out.push_back(data.energyPerMinute.value_or(kEnergyNotAvailable8));
 }
 
-// Flags are written first and patched once all fields are known.
+// Collects the fields of one data record. Each flagged field group is kept
+// as a segment so an oversized record can be split into several
+// notifications ("More Data", see splitRecords()).
 class FlagWriter {
 public:
-    explicit FlagWriter(std::size_t width) : width_(width) { out_.resize(width, 0); }
+    explicit FlagWriter(std::size_t width) : width_(width) {}
     Bytes& out() { return out_; }
-    void set(unsigned bit) { flags_ |= 1UL << bit; }
-    Bytes finish() {
-        for (std::size_t index = 0; index < width_; ++index)
-            out_[index] = static_cast<std::uint8_t>((flags_ >> (8 * index)) & 0xFFU);
-        return out_;
+    // Bit 0 is the inverted "More Data" flag: set when the first field group
+    // is absent. Other bits announce the field group written next.
+    void set(unsigned bit) {
+        if (bit == 0) moreData_ = true;
+        else segments_.push_back({bit, out_.size()});
+    }
+    // Status flag without a field (e.g. Cross Trainer movement direction).
+    void status(unsigned bit) { status_ |= 1UL << bit; }
+
+    Bytes finish() const {
+        unsigned long flags = status_ | (moreData_ ? 1UL : 0UL);
+        for (const auto& segment : segments_) flags |= 1UL << segment.bit;
+        return record(flags, out_.begin(), out_.end());
+    }
+
+    // Splits into records of at most maxLength bytes. Every record but the
+    // last sets "More Data"; the first field group closes the last record.
+    std::vector<Bytes> split(std::size_t maxLength) const {
+        const std::size_t capacity = maxLength > width_ ? maxLength - width_ : 1;
+        const std::size_t headEnd = segments_.empty() ? out_.size() : segments_.front().offset;
+        std::vector<Bytes> records;
+        unsigned long flags = 0;
+        Bytes data;
+        const auto flush = [&] {
+            records.push_back(record(status_ | 1UL | flags, data.begin(), data.end()));
+            flags = 0;
+            data.clear();
+        };
+        for (std::size_t index = 0; index < segments_.size(); ++index) {
+            const std::size_t begin = segments_[index].offset;
+            const std::size_t end = index + 1 < segments_.size() ? segments_[index + 1].offset : out_.size();
+            if (!data.empty() && data.size() + (end - begin) > capacity) flush();
+            flags |= 1UL << segments_[index].bit;
+            data.insert(data.end(), out_.begin() + static_cast<std::ptrdiff_t>(begin),
+                        out_.begin() + static_cast<std::ptrdiff_t>(end));
+        }
+        if (!data.empty() && data.size() + headEnd > capacity) flush();
+        Bytes last(out_.begin(), out_.begin() + static_cast<std::ptrdiff_t>(headEnd));
+        last.insert(last.end(), data.begin(), data.end());
+        records.push_back(record(status_ | flags | (moreData_ ? 1UL : 0UL), last.begin(), last.end()));
+        return records;
     }
 
 private:
+    struct Segment {
+        unsigned bit;
+        std::size_t offset;
+    };
+
+    Bytes record(unsigned long flags, Bytes::const_iterator begin, Bytes::const_iterator end) const {
+        Bytes result;
+        for (std::size_t index = 0; index < width_; ++index)
+            result.push_back(static_cast<std::uint8_t>((flags >> (8 * index)) & 0xFFU));
+        result.insert(result.end(), begin, end);
+        return result;
+    }
+
     std::size_t width_;
-    unsigned long flags_ = 0;
+    bool moreData_ = false;
+    unsigned long status_ = 0;
+    std::vector<Segment> segments_;
     Bytes out_;
 };
 
-}  // namespace
-
-Bytes encodeIndoorBikeData(const IndoorBikeData& data) {
+FlagWriter writeRecord(const IndoorBikeData& data) {
     FlagWriter writer(2);
     Bytes& out = writer.out();
     if (data.instantaneousSpeed) put(out, data.instantaneousSpeed);
@@ -102,10 +153,10 @@ Bytes encodeIndoorBikeData(const IndoorBikeData& data) {
     if (data.metabolicEquivalent) writer.set(10), put(out, data.metabolicEquivalent);
     if (data.elapsedTime) writer.set(11), put(out, data.elapsedTime);
     if (data.remainingTime) writer.set(12), put(out, data.remainingTime);
-    return writer.finish();
+    return writer;
 }
 
-Bytes encodeTreadmillData(const TreadmillData& data) {
+FlagWriter writeRecord(const TreadmillData& data) {
     FlagWriter writer(2);
     Bytes& out = writer.out();
     if (data.instantaneousSpeed) put(out, data.instantaneousSpeed);
@@ -125,10 +176,10 @@ Bytes encodeTreadmillData(const TreadmillData& data) {
     if (data.remainingTime) writer.set(11), put(out, data.remainingTime);
     if (any(data.forceOnBelt, data.powerOutput))
         writer.set(12), put(out, data.forceOnBelt), put(out, data.powerOutput);
-    return writer.finish();
+    return writer;
 }
 
-Bytes encodeCrossTrainerData(const CrossTrainerData& data) {
+FlagWriter writeRecord(const CrossTrainerData& data) {
     FlagWriter writer(3);
     Bytes& out = writer.out();
     if (data.instantaneousSpeed) put(out, data.instantaneousSpeed);
@@ -150,11 +201,11 @@ Bytes encodeCrossTrainerData(const CrossTrainerData& data) {
     if (data.metabolicEquivalent) writer.set(12), put(out, data.metabolicEquivalent);
     if (data.elapsedTime) writer.set(13), put(out, data.elapsedTime);
     if (data.remainingTime) writer.set(14), put(out, data.remainingTime);
-    if (data.movementBackward) writer.set(15);
-    return writer.finish();
+    if (data.movementBackward) writer.status(15);
+    return writer;
 }
 
-Bytes encodeStepClimberData(const StepClimberData& data) {
+FlagWriter writeRecord(const StepClimberData& data) {
     FlagWriter writer(2);
     Bytes& out = writer.out();
     if (any(data.floors, data.stepCount)) put(out, data.floors), put(out, data.stepCount);
@@ -167,10 +218,10 @@ Bytes encodeStepClimberData(const StepClimberData& data) {
     if (data.metabolicEquivalent) writer.set(6), put(out, data.metabolicEquivalent);
     if (data.elapsedTime) writer.set(7), put(out, data.elapsedTime);
     if (data.remainingTime) writer.set(8), put(out, data.remainingTime);
-    return writer.finish();
+    return writer;
 }
 
-Bytes encodeStairClimberData(const StairClimberData& data) {
+FlagWriter writeRecord(const StairClimberData& data) {
     FlagWriter writer(2);
     Bytes& out = writer.out();
     if (data.floors) put(out, data.floors);
@@ -184,10 +235,10 @@ Bytes encodeStairClimberData(const StairClimberData& data) {
     if (data.metabolicEquivalent) writer.set(7), put(out, data.metabolicEquivalent);
     if (data.elapsedTime) writer.set(8), put(out, data.elapsedTime);
     if (data.remainingTime) writer.set(9), put(out, data.remainingTime);
-    return writer.finish();
+    return writer;
 }
 
-Bytes encodeRowerData(const RowerData& data) {
+FlagWriter writeRecord(const RowerData& data) {
     FlagWriter writer(2);
     Bytes& out = writer.out();
     if (any(data.strokeRate, data.strokeCount)) put(out, data.strokeRate), put(out, data.strokeCount);
@@ -204,8 +255,24 @@ Bytes encodeRowerData(const RowerData& data) {
     if (data.metabolicEquivalent) writer.set(10), put(out, data.metabolicEquivalent);
     if (data.elapsedTime) writer.set(11), put(out, data.elapsedTime);
     if (data.remainingTime) writer.set(12), put(out, data.remainingTime);
-    return writer.finish();
+    return writer;
 }
+
+}  // namespace
+
+Bytes encodeIndoorBikeData(const IndoorBikeData& data) { return writeRecord(data).finish(); }
+Bytes encodeTreadmillData(const TreadmillData& data) { return writeRecord(data).finish(); }
+Bytes encodeCrossTrainerData(const CrossTrainerData& data) { return writeRecord(data).finish(); }
+Bytes encodeStepClimberData(const StepClimberData& data) { return writeRecord(data).finish(); }
+Bytes encodeStairClimberData(const StairClimberData& data) { return writeRecord(data).finish(); }
+Bytes encodeRowerData(const RowerData& data) { return writeRecord(data).finish(); }
+
+std::vector<Bytes> encodeRecords(const IndoorBikeData& data, std::size_t maxLength) { return writeRecord(data).split(maxLength); }
+std::vector<Bytes> encodeRecords(const TreadmillData& data, std::size_t maxLength) { return writeRecord(data).split(maxLength); }
+std::vector<Bytes> encodeRecords(const CrossTrainerData& data, std::size_t maxLength) { return writeRecord(data).split(maxLength); }
+std::vector<Bytes> encodeRecords(const StepClimberData& data, std::size_t maxLength) { return writeRecord(data).split(maxLength); }
+std::vector<Bytes> encodeRecords(const StairClimberData& data, std::size_t maxLength) { return writeRecord(data).split(maxLength); }
+std::vector<Bytes> encodeRecords(const RowerData& data, std::size_t maxLength) { return writeRecord(data).split(maxLength); }
 
 // ---------------------------------------------------------------------------
 // Output mapping: core metrics -> profile fields
@@ -395,6 +462,18 @@ std::uint16_t machineDataUuid(MachineProfile profile) {
     }
 }
 
+std::vector<Bytes> encodeMachineDataRecords(MachineProfile profile, const TrainerState& state, std::size_t maxLength) {
+    switch (profile) {
+        case MachineProfile::Treadmill: return encodeRecords(treadmillDataFrom(state), maxLength);
+        case MachineProfile::CrossTrainer: return encodeRecords(crossTrainerDataFrom(state), maxLength);
+        case MachineProfile::StepClimber: return encodeRecords(stepClimberDataFrom(state), maxLength);
+        case MachineProfile::StairClimber: return encodeRecords(stairClimberDataFrom(state), maxLength);
+        case MachineProfile::Rower: return encodeRecords(rowerDataFrom(state), maxLength);
+        case MachineProfile::IndoorBike:
+        default: return encodeRecords(indoorBikeDataFrom(state), maxLength);
+    }
+}
+
 Bytes encodeMachineData(MachineProfile profile, const TrainerState& state) {
     switch (profile) {
         case MachineProfile::Treadmill: return encodeTreadmillData(treadmillDataFrom(state));
@@ -446,7 +525,8 @@ Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile prof
     if (climber && has({Metric::PositiveElevationGain})) features |= kFeatureElevationGain;
     if (treadmill && has({Metric::Pace, Metric::AveragePace})) features |= kFeaturePace;
     if (rower && has({Metric::Pace, Metric::Speed})) features |= kFeaturePace;
-    if ((cross || climber) && has({Metric::Cadence, Metric::StepCount})) features |= kFeatureStepCount;
+    if (cross && has({Metric::Cadence})) features |= kFeatureStepCount;
+    if (climber && has({Metric::Cadence, Metric::StepCount, Metric::Floors})) features |= kFeatureStepCount;
     if ((bike || cross || rower) && has({Metric::Resistance})) features |= kFeatureResistanceLevel;
     if ((cross || profile == MachineProfile::StairClimber) && has({Metric::StrideCount}))
         features |= kFeatureStrideCount;

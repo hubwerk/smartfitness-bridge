@@ -280,7 +280,8 @@ void FtmsOutput::handleControlPoint(const PendingWrite& write) {
 
 void FtmsOutput::publishBikeData() {
     if (!connected_) return;
-    auto payload = ftms::encodeMachineData(profile_, trainerState());
+    const TrainerState state = trainerState();
+    auto payload = ftms::encodeMachineData(profile_, state);
     auto& data = machineData_[static_cast<std::size_t>(profile_) % machineData_.size()];
     const std::uint32_t timestamp = now();
     const std::uint32_t elapsed = timestamp - lastBikeDataMs_;
@@ -289,6 +290,7 @@ void FtmsOutput::publishBikeData() {
         if (payload == data && elapsed < kBikeDataMaxIntervalMs) return;
     }
     data = std::move(payload);
+    machineRecords_ = ftms::encodeMachineDataRecords(profile_, state);
     lastBikeDataMs_ = timestamp;
     bikeDataSent_ = true;
     transportNotifyMachineData();
@@ -432,9 +434,11 @@ void FtmsOutput::transportApplyProfile() {
 
 void FtmsOutput::transportNotifyMachineData() {
     if (!transport_) return;
-    const auto index = static_cast<std::size_t>(profile_) % machineData_.size();
-    transport_->machineData[index]->setValue(machineData_[index]);
-    transport_->machineData[index]->notify();
+    auto* characteristic = transport_->machineData[static_cast<std::size_t>(profile_) % machineData_.size()];
+    for (const auto& record : machineRecords_) {
+        characteristic->setValue(record);
+        characteristic->notify();
+    }
 }
 
 void FtmsOutput::transportNotifyTrainingStatus() {

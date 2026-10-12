@@ -239,6 +239,20 @@ Bytes encodeStepClimberData(const StepClimberData& data);
 Bytes encodeStairClimberData(const StairClimberData& data);
 Bytes encodeRowerData(const RowerData& data);
 
+// Default ATT_MTU (23) minus the notification header: the largest
+// notification every client can receive.
+constexpr std::size_t kMaxNotificationPayload = 20;
+
+// Same record split into notifications of at most maxLength bytes, as FTMS
+// requires for oversized records: all but the last set "More Data" (bit 0)
+// and the first field group closes the record in the last notification.
+std::vector<Bytes> encodeRecords(const IndoorBikeData& data, std::size_t maxLength = kMaxNotificationPayload);
+std::vector<Bytes> encodeRecords(const TreadmillData& data, std::size_t maxLength = kMaxNotificationPayload);
+std::vector<Bytes> encodeRecords(const CrossTrainerData& data, std::size_t maxLength = kMaxNotificationPayload);
+std::vector<Bytes> encodeRecords(const StepClimberData& data, std::size_t maxLength = kMaxNotificationPayload);
+std::vector<Bytes> encodeRecords(const StairClimberData& data, std::size_t maxLength = kMaxNotificationPayload);
+std::vector<Bytes> encodeRecords(const RowerData& data, std::size_t maxLength = kMaxNotificationPayload);
+
 // Return false (and leave out empty) when the payload is truncated for the
 // flags it announces.
 bool decodeIndoorBikeData(const std::uint8_t* data, std::size_t length, IndoorBikeData& out);
@@ -263,6 +277,9 @@ RowerData rowerDataFrom(const TrainerState& state);
 std::uint16_t machineDataUuid(MachineProfile profile);
 // Data notification for the profile, built from the core state.
 Bytes encodeMachineData(MachineProfile profile, const TrainerState& state);
+// The same data as notifications that fit maxLength (see encodeRecords()).
+std::vector<Bytes> encodeMachineDataRecords(MachineProfile profile, const TrainerState& state,
+                                            std::size_t maxLength = kMaxNotificationPayload);
 
 // True when FTMS lets the profile accept the control (independent of the
 // source's capabilities, which the core still enforces).

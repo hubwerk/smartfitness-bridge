@@ -56,6 +56,9 @@ public:
     const smartfitness::ftms::Bytes& lastTreadmillData() const;
     // Last data notification of the given machine profile's characteristic.
     const smartfitness::ftms::Bytes& lastMachineData(smartfitness::MachineProfile profile) const;
+    // Notifications sent for the last data record (several when it exceeds
+    // ftms::kMaxNotificationPayload).
+    const std::vector<smartfitness::ftms::Bytes>& lastMachineDataNotifications() const { return machineRecords_; }
     const smartfitness::ftms::Bytes& lastControlResponse() const;
     const smartfitness::ftms::Bytes& lastMachineStatus() const;
     const smartfitness::ftms::Bytes& feature() const;
@@ -117,6 +120,8 @@ private:
     smartfitness::ftms::Bytes feature_;
     // Indexed by MachineProfile.
     std::array<smartfitness::ftms::Bytes, smartfitness::kMachineProfileCount> machineData_{};
+    // machineData_ of the current profile split into notifications ("More Data").
+    std::vector<smartfitness::ftms::Bytes> machineRecords_;
     smartfitness::ftms::Bytes response_;
     smartfitness::ftms::Bytes status_;
     Clock clock_;

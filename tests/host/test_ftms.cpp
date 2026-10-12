@@ -533,9 +533,356 @@ void testTreadmillOutput() {
     assert(!output.clientConnected() && !output.controlGranted());
 }
 
+bool near(const MetricSample& sample, float expected) {
+    return sample.valid && std::fabs(sample.value - expected) < 0.01F;
+}
+
+// Encodes, decodes back into the profile struct (re-encoding must be
+// identical), rejects the truncated payload and returns the mapped metrics.
+template <typename Data, typename Encode, typename Decode>
+ftms::MachineData roundTrip(const Data& data, Encode encode, Decode decode) {
+    const Bytes payload = encode(data);
+    Data raw;
+    assert(decode(payload.data(), payload.size(), raw));
+    assert(encode(raw) == payload);
+    if (payload.size() > 3) assert(!decode(payload.data(), payload.size() - 1, raw));
+    ftms::MachineData mapped;
+    assert(decode(payload.data(), payload.size(), mapped));
+    return mapped;
+}
+
+std::size_t validCount(const ftms::MachineData& data) {
+    std::size_t count = 0;
+    for (std::size_t index = 0; index < kMetricCount; ++index) count += data[static_cast<Metric>(index)].valid;
+    return count;
+}
+
+template <typename Data>
+void fillCommon(Data& data) {
+    data.totalEnergy = 50;
+    data.energyPerHour = 600;
+    data.energyPerMinute = 10;
+    data.heartRate = 130;
+    data.metabolicEquivalent = 85;
+    data.elapsedTime = 300;
+    data.remainingTime = 600;
+}
+
+void checkCommon(const ftms::MachineData& data) {
+    assert(near(data.totalEnergy, 50) && near(data.energyPerHour, 600) && near(data.energyPerMinute, 10));
+    assert(near(data.heartRate, 130) && near(data.metabolicEquivalent, 8.5F));
+    assert(near(data.elapsed, 300) && near(data.remainingTime, 600));
+}
+
+void testAllProfileCodecs() {
+    const auto bikeEncode = [](const ftms::IndoorBikeData& d) { return ftms::encodeIndoorBikeData(d); };
+    const auto bikeDecode = [](const std::uint8_t* d, std::size_t n, auto& out) { return ftms::decodeIndoorBikeData(d, n, out); };
+    ftms::IndoorBikeData bike;
+    bike.instantaneousSpeed = 2500;
+    bike.averageSpeed = 2400;
+    bike.instantaneousCadence = 161;
+    bike.averageCadence = 150;
+    bike.totalDistance = 12345;
+    bike.resistanceLevel = 12;
+    bike.instantaneousPower = 250;
+    bike.averagePower = 230;
+    fillCommon(bike);
+    auto data = roundTrip(bike, bikeEncode, bikeDecode);
+    assert(near(data.speed, 25) && near(data.averageSpeed, 24) && near(data.cadence, 80.5F));
+    assert(near(data.averageCadence, 75) && near(data.distance, 12345) && near(data.resistance, 12));
+    assert(near(data.power, 250) && near(data.averagePower, 230));
+    checkCommon(data);
+    assert(validCount(data) == 15);
+
+    const auto treadmillEncode = [](const ftms::TreadmillData& d) { return ftms::encodeTreadmillData(d); };
+    const auto treadmillDecode = [](const std::uint8_t* d, std::size_t n, auto& out) { return ftms::decodeTreadmillData(d, n, out); };
+    ftms::TreadmillData treadmill;
+    treadmill.instantaneousSpeed = 1200;
+    treadmill.averageSpeed = 1000;
+    treadmill.totalDistance = 5000;
+    treadmill.inclination = 25;
+    treadmill.rampAngleSetting = 14;
+    treadmill.positiveElevationGain = 105;
+    treadmill.negativeElevationGain = 50;
+    treadmill.instantaneousPace = 2;  // 0.2 km/min = 12 km/h
+    treadmill.averagePace = 1;
+    treadmill.forceOnBelt = -30;
+    treadmill.powerOutput = 180;
+    fillCommon(treadmill);
+    data = roundTrip(treadmill, treadmillEncode, treadmillDecode);
+    assert(near(data.speed, 12) && near(data.averageSpeed, 10) && near(data.distance, 5000));
+    assert(near(data.incline, 2.5F) && near(data.rampAngle, 1.4F));
+    assert(near(data.positiveElevationGain, 10.5F) && near(data.negativeElevationGain, 5));
+    assert(near(data.pace, 150) && near(data.averagePace, 300));  // s per 500 m
+    assert(near(data.forceOnBelt, -30) && near(data.power, 180));
+    checkCommon(data);
+
+    const auto crossEncode = [](const ftms::CrossTrainerData& d) { return ftms::encodeCrossTrainerData(d); };
+    const auto crossDecode = [](const std::uint8_t* d, std::size_t n, auto& out) { return ftms::decodeCrossTrainerData(d, n, out); };
+    ftms::CrossTrainerData cross;
+    cross.instantaneousSpeed = 1000;
+    cross.averageSpeed = 900;
+    cross.totalDistance = 2000;
+    cross.stepPerMinute = 60;
+    cross.averageStepRate = 55;
+    cross.strideCount = 1234;
+    cross.positiveElevationGain = 10;
+    cross.negativeElevationGain = 5;
+    cross.inclination = 25;
+    cross.rampAngleSetting = 14;
+    cross.resistanceLevel = 55;
+    cross.instantaneousPower = 150;
+    cross.averagePower = 140;
+    cross.movementBackward = true;
+    fillCommon(cross);
+    data = roundTrip(cross, crossEncode, crossDecode);
+    assert(ftms::encodeCrossTrainerData(cross)[1] & 0x80);  // movement direction (bit 15)
+    assert(near(data.speed, 10) && near(data.averageSpeed, 9) && near(data.distance, 2000));
+    assert(near(data.cadence, 60) && near(data.averageCadence, 55) && near(data.strideCount, 123.4F));
+    assert(near(data.positiveElevationGain, 10) && near(data.negativeElevationGain, 5));
+    assert(near(data.incline, 2.5F) && near(data.rampAngle, 1.4F) && near(data.resistance, 5.5F));
+    assert(near(data.power, 150) && near(data.averagePower, 140));
+    checkCommon(data);
+
+    const auto stepEncode = [](const ftms::StepClimberData& d) { return ftms::encodeStepClimberData(d); };
+    const auto stepDecode = [](const std::uint8_t* d, std::size_t n, auto& out) { return ftms::decodeStepClimberData(d, n, out); };
+    ftms::StepClimberData step;
+    step.floors = 12;
+    step.stepCount = 345;
+    step.stepPerMinute = 70;
+    step.averageStepRate = 65;
+    step.positiveElevationGain = 30;
+    fillCommon(step);
+    data = roundTrip(step, stepEncode, stepDecode);
+    assert(near(data.floors, 12) && near(data.stepCount, 345) && near(data.cadence, 70));
+    assert(near(data.averageCadence, 65) && near(data.positiveElevationGain, 30));
+    assert(!data.power.valid && !data.speed.valid);
+    checkCommon(data);
+
+    const auto stairEncode = [](const ftms::StairClimberData& d) { return ftms::encodeStairClimberData(d); };
+    const auto stairDecode = [](const std::uint8_t* d, std::size_t n, auto& out) { return ftms::decodeStairClimberData(d, n, out); };
+    ftms::StairClimberData stair;
+    stair.floors = 8;
+    stair.stepPerMinute = 50;
+    stair.averageStepRate = 45;
+    stair.positiveElevationGain = 24;
+    stair.strideCount = 400;
+    fillCommon(stair);
+    data = roundTrip(stair, stairEncode, stairDecode);
+    assert(near(data.floors, 8) && near(data.cadence, 50) && near(data.averageCadence, 45));
+    assert(near(data.positiveElevationGain, 24) && near(data.strideCount, 400));
+    checkCommon(data);
+
+    const auto rowerEncode = [](const ftms::RowerData& d) { return ftms::encodeRowerData(d); };
+    const auto rowerDecode = [](const std::uint8_t* d, std::size_t n, auto& out) { return ftms::decodeRowerData(d, n, out); };
+    ftms::RowerData rower;
+    rower.strokeRate = 48;
+    rower.strokeCount = 300;
+    rower.averageStrokeRate = 46;
+    rower.totalDistance = 1000;
+    rower.instantaneousPace = 120;
+    rower.averagePace = 125;
+    rower.instantaneousPower = 200;
+    rower.averagePower = 190;
+    rower.resistanceLevel = 7;
+    fillCommon(rower);
+    data = roundTrip(rower, rowerEncode, rowerDecode);
+    assert(near(data.cadence, 24) && near(data.strokeCount, 300) && near(data.averageCadence, 23));
+    assert(near(data.distance, 1000) && near(data.pace, 120) && near(data.averagePace, 125));
+    assert(near(data.speed, 15) && near(data.averageSpeed, 14.4F));
+    assert(near(data.power, 200) && near(data.averagePower, 190) && near(data.resistance, 7));
+    checkCommon(data);
+
+    // Only transmitted fields become metrics: a single field yields exactly one.
+    ftms::RowerData sparse;
+    sparse.heartRate = 99;
+    data = roundTrip(sparse, rowerEncode, rowerDecode);
+    assert(validCount(data) == 1 && near(data.heartRate, 99));
+    ftms::StairClimberData floorsOnly;
+    floorsOnly.floors = 3;
+    data = roundTrip(floorsOnly, stairEncode, stairDecode);
+    assert(validCount(data) == 1 && near(data.floors, 3));
+
+    // Energy fields not available are sent as 0xFFFF / 0xFF and decode as absent.
+    ftms::IndoorBikeData energy;
+    energy.totalEnergy = 42;
+    assert(ftms::encodeIndoorBikeData(energy) == (Bytes{0x01, 0x01, 42, 0, 0xFF, 0xFF, 0xFF}));
+    data = roundTrip(energy, bikeEncode, bikeDecode);
+    assert(validCount(data) == 1 && near(data.totalEnergy, 42));
+    assert(!data.energyPerHour.valid && !data.energyPerMinute.valid);
+
+    // Mapping by profile.
+    const Bytes stepFrame{0, 0, 5, 0, 0x64, 0};
+    assert(ftms::decodeMachineData(MachineProfile::StepClimber, stepFrame.data(), stepFrame.size(), data));
+    assert(near(data.floors, 5) && near(data.stepCount, 100) && validCount(data) == 2);
+    for (std::size_t index = 0; index < kMachineProfileCount; ++index) {
+        const auto profile = static_cast<MachineProfile>(index);
+        static const std::uint16_t uuids[] = {0x2AD2, 0x2ACD, 0x2ACE, 0x2AD1, 0x2ACF, 0x2AD0};
+        static const std::uint8_t typeBits[] = {0x20, 0x01, 0x02, 0x10, 0x04, 0x08};
+        assert(ftms::machineDataUuid(profile) == uuids[index]);
+        assert(ftms::encodeAdvertisingServiceData(profile) == (Bytes{0x01, typeBits[index], 0x00}));
+    }
+}
+
+void testMoreDataSplitting() {
+    ftms::RowerData rower;
+    rower.strokeRate = 48;
+    rower.strokeCount = 300;
+    rower.averageStrokeRate = 46;
+    rower.totalDistance = 1000;
+    rower.instantaneousPace = 120;
+    rower.averagePace = 125;
+    rower.instantaneousPower = 200;
+    rower.averagePower = 190;
+    rower.resistanceLevel = 7;
+    fillCommon(rower);
+    const Bytes full = ftms::encodeRowerData(rower);
+    assert(full.size() > ftms::kMaxNotificationPayload);
+    const auto records = ftms::encodeRecords(rower);
+    assert(records.size() >= 2);
+    ftms::MachineData merged;
+    ftms::MachineData expected;
+    assert(ftms::decodeRowerData(full.data(), full.size(), expected));
+    for (std::size_t index = 0; index < records.size(); ++index) {
+        const Bytes& record = records[index];
+        assert(record.size() <= ftms::kMaxNotificationPayload);
+        // "More Data" on every record but the last, which carries the stroke fields.
+        assert(((record[0] & 1) != 0) == (index + 1 < records.size()));
+        ftms::MachineData part;
+        assert(ftms::decodeRowerData(record.data(), record.size(), part));
+        for (std::size_t metric = 0; metric < kMetricCount; ++metric) {
+            const auto key = static_cast<Metric>(metric);
+            if (part[key].valid) {
+                assert(!merged[key].valid);  // every field is sent exactly once
+                merged[key] = part[key];
+            }
+        }
+    }
+    for (std::size_t metric = 0; metric < kMetricCount; ++metric) {
+        const auto key = static_cast<Metric>(metric);
+        assert(merged[key].valid == expected[key].valid && merged[key].value == expected[key].value);
+    }
+    // Records that fit are sent unchanged.
+    ftms::IndoorBikeData bike;
+    bike.instantaneousSpeed = 2500;
+    bike.instantaneousPower = 100;
+    assert(ftms::encodeRecords(bike) == std::vector<Bytes>{ftms::encodeIndoorBikeData(bike)});
+    assert(ftms::encodeRecords(ftms::StepClimberData()) == (std::vector<Bytes>{Bytes{1, 0}}));
+    ftms::CrossTrainerData backward;
+    backward.movementBackward = true;
+    backward.instantaneousSpeed = 500;
+    fillCommon(backward);
+    backward.averageSpeed = 400;
+    backward.totalDistance = 10;
+    backward.instantaneousPower = 1;
+    for (const auto& record : ftms::encodeRecords(backward, 12)) {
+        assert(record.size() <= 12 && (record[1] & 0x80));  // status flag in every record
+    }
+}
+
+class FakeMachine final : public BtDeviceAdapter {
+public:
+    explicit FakeMachine(MachineProfile machine) : machine_(machine) {}
+    void begin() override {}
+    void loop() override { emitTelemetry(value); }
+    bool scanAndConnect() override { value.connected = true; return true; }
+    void disconnect() override { value.connected = false; }
+    bool isConnected() const override { return value.connected; }
+    bool trainerDetected() const override { return false; }
+    MachineProfile profile() const override { return machine_; }
+    FitnessTelemetry telemetry() const override { return value; }
+    TrainerCapabilities capabilities() const override {
+        TrainerCapabilities result;
+        for (std::size_t index = 0; index < kMetricCount; ++index) result.setMetric(static_cast<Metric>(index), true);
+        return result;
+    }
+    bool apply(const ControlRequest&) override { return false; }
+    FitnessTelemetry value;
+
+private:
+    MachineProfile machine_;
+};
+
+void testNativeProfileOutput() {
+    for (std::size_t index = 0; index < kMachineProfileCount; ++index) {
+        const auto profile = static_cast<MachineProfile>(index);
+        FakeMachine adapter(profile);
+        adapter.value.cadence = 30;
+        adapter.value.heartRate = 140;
+        adapter.value.totalEnergy = 77;
+        AntOutput ant;
+        FtmsOutput output;
+        BridgeCore bridge;
+        std::uint32_t clock = 10000;
+        output.setClock([&] { return clock; });
+        bridge.attach(adapter, ant, output);
+        bridge.begin();
+        assert(bridge.scanAndConnect());
+        bridge.loop();
+        assert(output.profile() == profile);
+        output.notifyClientConnected();
+        bridge.loop();
+        const Bytes& payload = output.lastMachineData(profile);
+        assert(!payload.empty());
+        for (std::size_t other = 0; other < kMachineProfileCount; ++other)
+            if (other != index && other != static_cast<std::size_t>(MachineProfile::IndoorBike))
+                assert(output.lastMachineData(static_cast<MachineProfile>(other)).empty());
+        ftms::MachineData data;
+        assert(ftms::decodeMachineData(profile, payload.data(), payload.size(), data));
+        assert(near(data.heartRate, 140) && near(data.totalEnergy, 77));
+        // Never transmitted by the machine, so never sent (or decoded) as 0.
+        assert(!data.power.valid && !data.distance.valid && !data.elapsed.valid);
+        assert(!data.energyPerHour.valid && !data.metabolicEquivalent.valid);
+        if (profile != MachineProfile::Treadmill) assert(near(data.cadence, 30));
+        for (const auto& record : output.lastMachineDataNotifications())
+            assert(record.size() <= ftms::kMaxNotificationPayload);
+    }
+}
+
+void testProfileControlsAndFeatures() {
+    using P = MachineProfile;
+    assert(ftms::profileAcceptsControl(P::Treadmill, Control::Speed));
+    assert(ftms::profileAcceptsControl(P::CrossTrainer, Control::Speed));
+    assert(!ftms::profileAcceptsControl(P::IndoorBike, Control::Speed));
+    assert(!ftms::profileAcceptsControl(P::Rower, Control::Incline));
+    assert(!ftms::profileAcceptsControl(P::StepClimber, Control::Incline));
+    assert(!ftms::profileAcceptsControl(P::Treadmill, Control::Power));
+    for (P profile : {P::IndoorBike, P::CrossTrainer, P::Rower, P::StepClimber, P::StairClimber})
+        assert(ftms::profileAcceptsControl(profile, Control::Resistance) &&
+               ftms::profileAcceptsControl(profile, Control::Power));
+    // Speed target on a rower is refused; resistance is accepted.
+    ftms::ControlPointCommand command;
+    const Bytes speed{2, 0x52, 3};
+    assert(ftms::decodeControlPoint(speed.data(), speed.size(), command, P::Rower));
+    assert(command.status == ResultCode::NotSupported && !command.hasRequest);
+    const Bytes resistance{4, 50};
+    assert(ftms::decodeControlPoint(resistance.data(), resistance.size(), command, P::StairClimber));
+    assert(command.status == ResultCode::Success && command.hasRequest &&
+           command.request.control == Control::Resistance);
+    // Feature bits only announce fields the profile's data can carry.
+    TrainerCapabilities capabilities;
+    capabilities.setMetric(Metric::Floors, true);
+    capabilities.setMetric(Metric::Pace, true);
+    capabilities.setMetric(Metric::Cadence, true);
+    const auto stepFeature = ftms::encodeFeature(capabilities, P::StepClimber);
+    const auto rowerFeature = ftms::encodeFeature(capabilities, P::Rower);
+    ftms::Features step;
+    ftms::Features row;
+    assert(ftms::decodeFeature(stepFeature.data(), stepFeature.size(), step));
+    assert(ftms::decodeFeature(rowerFeature.data(), rowerFeature.size(), row));
+    assert(step.machine & ftms::kFeatureStepCount);
+    assert(!(step.machine & ftms::kFeaturePace));
+    assert(row.machine & ftms::kFeaturePace);
+    assert(row.machine & ftms::kFeatureCadence);
+}
+
 }  // namespace
 
 void runFtmsTests() {
+    testAllProfileCodecs();
+    testMoreDataSplitting();
+    testNativeProfileOutput();
+    testProfileControlsAndFeatures();
     testTreadmillCodec();
     testTreadmillOutput();
     testFtmsClientAddress();
