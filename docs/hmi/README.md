@@ -54,9 +54,10 @@ peach on black. Error indicators also include text, not colour alone.
 
 ### Shapes and states
 
-- HMI: header-only arc follows the top circular edge, with rounded pill
-  endcaps, uppercase title and a thin peach separator. There is
-  no elbow, vertical sidebar or bottom frame.
+- HMI: the header is a filled orange pill band behind the uppercase title,
+  which is drawn inverse (black), like the dashboard state pill. There is no
+  top arc, elbow, vertical sidebar or bottom frame, so the gauge ring runs
+  uninterrupted across the top.
 - Web: intentionally retains the swept elbow, title bar and desktop sidebar
   (responsive navigation pills on phones). This HMI revision does not change it.
 - Navigation/action pills: solid fills, rounded endcaps, right-aligned labels.
@@ -73,7 +74,7 @@ peach on black. Error indicators also include text, not colour alone.
   inner border only. The dashboard, whose whole circle is the only knob
   target, draws no ring on the panel edge.
   Pressed: golden colour swap. Disabled: dimmed and non-actionable.
-- HMI red alert colours only the header arc for disconnected/stale status,
+- HMI red alert colours only the header band for disconnected/stale status,
   command rejection, speed confirmation and factory reset. The scrollbar and
   telemetry gauge retain their normal colours. Stop/destructive action pills
   keep their existing semantic red. No blinking is required.
@@ -83,11 +84,12 @@ peach on black. Error indicators also include text, not colour alone.
 ### Round-display adaptation
 
 The dashboard and adjustment gauges follow the circular edge with 24 separated
-arc segments. The frame is confined to the header on every HMI screen.
+arc segments, fully visible along the top. The frame is confined to the
+header band on every HMI screen.
 Lists gain 18 px of width and are centred inside the circle; corners are not
 used for essential labels/actions. Long device names also wrap in the detail body;
-the header title is a single line between the header arc and the separator
-(long titles end in an ellipsis). Dashboard readouts are stacked without
+the header title is a single line inside the header band (long titles end in
+an ellipsis). Dashboard readouts are stacked without
 touching lines (the unit sits on the value's baseline), the adapter roller
 shows three complete rows, and the adjustment +/- helpers stay inside the
 gauge ring.
