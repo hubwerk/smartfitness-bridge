@@ -56,17 +56,6 @@ void apply(lv_theme_t*, lv_obj_t* object) {
     }
 }
 
-void bar(lv_obj_t* parent, int x, int y, int width, int height, std::uint32_t color, int radius) {
-    lv_obj_t* object = lv_obj_create(parent);
-    lv_obj_remove_style_all(object);
-    lv_obj_remove_flag(object, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
-    lv_obj_set_pos(object, x, y);
-    lv_obj_set_size(object, width, height);
-    lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(object, lv_color_hex(color), 0);
-    lv_obj_set_style_radius(object, radius, 0);
-}
-
 lv_obj_t* arc(lv_obj_t* parent, int size, int width, std::uint32_t color, int start, int end) {
     lv_obj_t* object = lv_arc_create(parent);
     lv_obj_remove_style_all(object);
@@ -158,19 +147,27 @@ void pill(lv_obj_t* object, std::uint32_t color) {
 }
 
 lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert) {
-    const auto color = alert ? Alert : Orange;
-    lv_obj_t* header = arc(screen, 232, 12, color, 225, 315);
-    bar(screen, 48, 57, 144, 3, Peach, 1);
+    // Filled header band (inside the gauge ring) with the title in inverse,
+    // like the state pill; the ring stays free along its whole length.
+    lv_obj_t* header = lv_obj_create(screen);
+    lv_obj_remove_style_all(header);
+    lv_obj_remove_flag(header, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_set_pos(header, 56, 30);
+    lv_obj_set_size(header, 128, 28);
+    lv_obj_set_style_bg_opa(header, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(header, lv_color_hex(alert ? Alert : Orange), 0);
+    lv_obj_set_style_radius(header, LV_RADIUS_CIRCLE, 0);
 
-    // One line between the header arc and the bar; long titles get dots.
-    lv_obj_t* label = lv_label_create(screen);
-    lv_obj_set_size(label, 120, lv_font_get_line_height(&sf_antonio_20));
+    // One line inside the band; long titles get dots.
+    lv_obj_t* label = lv_label_create(header);
+    lv_obj_set_size(label, 108, lv_font_get_line_height(&sf_antonio_20));
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_label_set_text(label, uppercase(title).c_str());
     lv_obj_set_style_text_font(label, &sf_antonio_20, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(Peach), 0);
+    lv_obj_set_style_text_color(label, lv_color_black(), 0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(label, 60, 31);
+    // Centers the cap height (not the line box) in the band.
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, -1);
     return header;
 }
 
