@@ -12,6 +12,10 @@
 #include "ble_input_adapter.h"
 #include "nimble_central.h"
 
+#if defined(SF_VARIANT_HMI)
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+#endif
+
 SimulatedDeviceAdapter simulationAdapter;
 NimbleCentral bleCentral;
 BleInputAdapter bleInput(bleCentral, [] { return static_cast<std::uint32_t>(millis()); });
