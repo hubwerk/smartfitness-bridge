@@ -155,11 +155,22 @@ void testStatusTexts() {
     ScanDeviceView device;
     device.address = "aa:00:00:00:00:22";
     device.rssi = -61;
-    assert(scanEntryLabel(device) == "aa:00:00:00:00:22\n-61 dBm  ?");
+    assert(scanEntryLabel(device) == "aa:00:00:00:00:22\n?");
     device.name = "WalkingPad";
     device.adapter = "walkingpad-r1";
-    assert(scanEntryLabel(device) == "WalkingPad\n-61 dBm  walkingpad-r1");
+    assert(scanEntryLabel(device) == "WalkingPad\nwalkingpad-r1");
     assert(onOff(true) == "on" && onOff(false) == "off");
+
+    assert(signalLevel(0) == 0);
+    assert(signalLevel(5) == 0);
+    assert(signalLevel(-50) == 4);
+    assert(signalLevel(-65) == 4);
+    assert(signalLevel(-66) == 3);
+    assert(signalLevel(-75) == 3);
+    assert(signalLevel(-76) == 2);
+    assert(signalLevel(-85) == 2);
+    assert(signalLevel(-86) == 1);
+    assert(signalLevel(-100) == 1);
 }
 
 void testSettings() {

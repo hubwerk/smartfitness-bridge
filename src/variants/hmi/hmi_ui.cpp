@@ -61,7 +61,10 @@ void HmiUi::setStatus(const StatusView& status) {
     if (screen_ == Screen::Dashboard && dash_.value) updateDashboard();
 }
 
-void HmiUi::setScan(const ScanView& scan) { scan_ = scan; }
+void HmiUi::setScan(const ScanView& scan) {
+    scan_ = scan;
+    updateScanSignals();
+}
 
 void HmiUi::setConfig(const ConfigView& config) { config_ = config; }
 
@@ -222,7 +225,7 @@ std::string HmiUi::signature() const {
                    status_.input.paired.adapter + std::to_string(status_.input.bleSelected) +
                    std::to_string(config_.simulatedTrainer);
             for (const auto& device : scan_.devices)
-                sig += "|" + device.address + device.name + device.adapter + std::to_string(device.rssi);
+                sig += "|" + device.address + device.name + device.adapter;
             break;
         case Screen::Control:
             sig += std::to_string(static_cast<int>(status_.state)) + std::to_string(status_.canControl) +
@@ -275,6 +278,8 @@ void HmiUi::build(bool keepFocus) {
     defaultFocus_ = 0;
     lv_group_remove_all_objs(group_);
     callbacks_.clear();
+    scanSignals_.clear();
+    deviceDetailSignal_ = nullptr;
     dash_ = {};
     roller_ = rollerInfo_ = adjustValue_ = textArea_ = nullptr;
     adjustSegments_ = {};
@@ -421,6 +426,20 @@ void HmiUi::buildDashboard() {
     lv_obj_set_width(dash_.info, 148);
     lv_label_set_long_mode(dash_.info, LV_LABEL_LONG_WRAP);
 
+    dash_.inputRow = lv_obj_create(pad);
+    lv_obj_remove_style_all(dash_.inputRow);
+    lv_obj_set_size(dash_.inputRow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(dash_.inputRow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(dash_.inputRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(dash_.inputRow, 4, 0);
+    lv_obj_align(dash_.inputRow, LV_ALIGN_TOP_MID, 0, 184);
+
+    dash_.input = lv_label_create(dash_.inputRow);
+    lv_obj_set_style_text_font(dash_.input, &sf_antonio_16, 0);
+    lv_obj_set_style_text_color(dash_.input, data, 0);
+
+    dash_.signal = lcars::signalBars(dash_.inputRow, 0, lcars::LightBlue);
+
     bind(pad, LV_EVENT_KEY, [this](lv_event_t* event) {
         const std::uint32_t key = lv_event_get_key(event);
         if (key == LV_KEY_RIGHT || key == LV_KEY_DOWN) cycleMetric(1);
@@ -471,9 +490,17 @@ void HmiUi::updateDashboard() {
     lv_obj_set_style_text_color(dash_.state, lv_color_black(), 0);
     lv_label_set_text(dash_.target, lcars::uppercase(targetLabel(status_)).c_str());
     const std::string info = std::string(profileLabel(status_.input.profile)) + " | " +
-                             (status_.ftmsOutput.client ? "APP LINK" : ftmsLabel(status_.ftmsOutput)) +
-                             "\n" + (status_.input.bleSelected ? "BLE " + status_.input.link : "SIMULATION");
+                             (status_.ftmsOutput.client ? "APP LINK" : ftmsLabel(status_.ftmsOutput));
     lv_label_set_text(dash_.info, lcars::uppercase(info).c_str());
+
+    const std::string input = status_.input.bleSelected ? "BLE " + status_.input.link : "SIMULATION";
+    lv_label_set_text(dash_.input, lcars::uppercase(input).c_str());
+    if (status_.input.bleSelected) {
+        lv_obj_remove_flag(dash_.signal, LV_OBJ_FLAG_HIDDEN);
+        lcars::setSignalBars(dash_.signal, signalLevel(status_.input.paired.rssi), lcars::LightBlue);
+    } else {
+        lv_obj_add_flag(dash_.signal, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // --- menu -------------------------------------------------------------------
@@ -535,8 +562,14 @@ void HmiUi::buildDevices() {
     addLabel(list, results, &sf_antonio_20);
     if (scan_.devices.empty()) addLabel(list, tr(Str::NoResults));
     for (std::size_t index = 0; index < scan_.devices.size(); ++index) {
-        lcars::pill(addButton(list, scanEntryLabel(scan_.devices[index]),
-                             [this, index] { openDevice(index); }), lcars::Violet);
+        lv_obj_t* btn = addButton(list, scanEntryLabel(scan_.devices[index]),
+                                  [this, index] { openDevice(index); });
+        lcars::pill(btn, lcars::Violet);
+        lv_obj_t* lbl = lv_obj_get_child(btn, 0);
+        if (lbl) lv_obj_set_style_pad_right(lbl, 20, 0);
+        lv_obj_t* sig = lcars::signalBars(btn, signalLevel(scan_.devices[index].rssi), lcars::Black);
+        lv_obj_align(sig, LV_ALIGN_RIGHT_MID, 0, 0);
+        scanSignals_.push_back(sig);
     }
     addButton(list, tr(Str::Back), [this] { back(); });
 }
@@ -545,7 +578,22 @@ void HmiUi::buildDeviceDetail() {
     makeScreen(device_.name.empty() ? device_.address : device_.name);
     lv_obj_t* list = makeList(root_);
     if (!device_.name.empty()) addLabel(list, device_.name);
-    std::string info = device_.address + "\n" + std::to_string(device_.rssi) + " dBm\n" + tr(Str::Adapter) + ": " +
+
+    lv_obj_t* row = lv_obj_create(list);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 8, 0);
+
+    lv_obj_t* addr = lv_label_create(row);
+    lv_label_set_text(addr, lcars::uppercase(device_.address).c_str());
+    lv_obj_set_style_text_font(addr, &sf_antonio_16, 0);
+    lv_obj_set_style_text_color(addr, lv_color_hex(lcars::LightBlue), 0);
+
+    deviceDetailSignal_ = lcars::signalBars(row, signalLevel(device_.rssi), lcars::LightBlue);
+
+    std::string info = std::string(tr(Str::Adapter)) + ": " +
                        (device_.adapter.empty() ? std::string(tr(Str::Unknown))
                                                 : device_.adapter + " (" + tr(Str::Detected) + ")");
     addLabel(list, info);
@@ -853,6 +901,22 @@ void HmiUi::buildKeyboard() {
         returnTo(Screen::Settings);
     });
     bind(keyboard, LV_EVENT_CANCEL, [this](lv_event_t*) { back(); });
+}
+
+void HmiUi::updateScanSignals() {
+    if (screen_ == Screen::Devices) {
+        for (std::size_t i = 0; i < scanSignals_.size() && i < scan_.devices.size(); ++i) {
+            lcars::setSignalBars(scanSignals_[i], signalLevel(scan_.devices[i].rssi), lcars::Black);
+        }
+    } else if (screen_ == Screen::DeviceDetail && deviceDetailSignal_) {
+        for (const auto& d : scan_.devices) {
+            if (d.address == device_.address) {
+                device_.rssi = d.rssi;
+                lcars::setSignalBars(deviceDetailSignal_, signalLevel(device_.rssi), lcars::LightBlue);
+                break;
+            }
+        }
+    }
 }
 
 }  // namespace hmi
