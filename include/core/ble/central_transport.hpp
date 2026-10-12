@@ -76,7 +76,8 @@ public:
     virtual bool begin() = 0;
     // Active scan; durationMs == 0 scans until stopScan(). With duplicates
     // every advertisement is reported (needed for broadcast-only devices).
-    virtual bool startScan(std::uint32_t durationMs, bool duplicates) = 0;
+    // highDuty uses a larger scan window during user-initiated pairing scans.
+    virtual bool startScan(std::uint32_t durationMs, bool duplicates, bool highDuty = false) = 0;
     // Also cancels a pending connection, but never closes a Ready link.
     // False reports enqueue failure even when out-of-band cancellation ran.
     virtual bool stopScan() = 0;

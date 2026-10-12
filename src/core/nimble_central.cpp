@@ -54,6 +54,7 @@ struct NimbleCentral::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimB
 
     // Called by NimBLE when a timed scan ends or stop() is called.
     static void scanComplete(NimBLEScanResults) {
+        NimBLEDevice::getScan()->setWindow(kScanWindowNormal);
         if (gCentral && gCentral->scanning_.exchange(false))
             gCentral->pushEvent(ble::CentralEventType::ScanComplete, 0);
     }
@@ -88,8 +89,8 @@ bool NimbleCentral::begin() {
 
     NimBLEScan* scan = NimBLEDevice::getScan();
     scan->setActiveScan(true);
-    scan->setInterval(97);
-    scan->setWindow(37);  // leave radio time for the peripheral role and Wi-Fi coexistence
+    scan->setInterval(kScanInterval);
+    scan->setWindow(kScanWindowNormal);  // leave radio time for the peripheral role and Wi-Fi coexistence
     scan->setMaxResults(0);  // results are only delivered through the callback
 
     impl_->client = NimBLEDevice::createClient();
@@ -120,11 +121,12 @@ bool NimbleCentral::send(const Cmd& cmd) {
     return false;
 }
 
-bool NimbleCentral::startScan(std::uint32_t durationMs, bool duplicates) {
+bool NimbleCentral::startScan(std::uint32_t durationMs, bool duplicates, bool highDuty) {
     Cmd cmd;
     cmd.op = Op::StartScan;
     cmd.durationMs = durationMs;
     cmd.duplicates = duplicates;
+    cmd.highDuty = highDuty;
     std::lock_guard<std::mutex> lock(commandMutex_);
     cmd.session = scanGeneration_ + 1;
     const bool wasScanning = scanning_.exchange(true);
@@ -150,7 +152,10 @@ bool NimbleCentral::stopScan() {
     }
     cmd.session = ++scanGeneration_;  // invalidate scan starts waiting behind a connect
     const bool wasScanning = scanning_.exchange(false);
-    if (impl_ && NimBLEDevice::getScan()->isScanning()) NimBLEDevice::getScan()->stop();
+    if (impl_ && NimBLEDevice::getScan()->isScanning()) {
+        NimBLEDevice::getScan()->stop();
+        NimBLEDevice::getScan()->setWindow(kScanWindowNormal);
+    }
     if (wasScanning) pushEvent(ble::CentralEventType::ScanComplete, 0);
     return send(cmd);
 }
@@ -237,12 +242,15 @@ void NimbleCentral::doStartScan(const Cmd& cmd) {
         scanning_ = false;  // a restart is not a completed scan: suppress the event
         scan->stop();
     }
+    scan->setInterval(kScanInterval);
+    scan->setWindow(cmd.highDuty ? kScanWindowHighDuty : kScanWindowNormal);
     scan->setAdvertisedDeviceCallbacks(impl_, cmd.duplicates);
     scan->setDuplicateFilter(!cmd.duplicates);
     // NimBLE-Arduino 1.4.x takes seconds; 0 scans until stopped.
     const std::uint32_t seconds = cmd.durationMs / 1000 + (cmd.durationMs % 1000 != 0);
     scanning_ = true;
     if (!scan->start(seconds, Impl::scanComplete, false)) {
+        scan->setWindow(kScanWindowNormal);
         if (scanning_.exchange(false)) pushEvent(ble::CentralEventType::ScanComplete, 0);
         return;
     }
@@ -280,6 +288,7 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         NimBLEScan* scan = NimBLEDevice::getScan();
         if (scan->isScanning()) {
             scan->stop();
+            scan->setWindow(kScanWindowNormal);
             if (scanning_.exchange(false)) pushEvent(ble::CentralEventType::ScanComplete, 0);
         }
     }

@@ -20,12 +20,13 @@ public:
     };
 
     bool begin() override { return true; }
-    bool startScan(std::uint32_t durationMs, bool duplicates) override {
+    bool startScan(std::uint32_t durationMs, bool duplicates, bool highDuty = false) override {
         ++scanStarts;
         if (!acceptScan) { ++commandDrops; return false; }
         scanning_ = true;
         lastScanDuration = durationMs;
         lastScanDuplicates = duplicates;
+        lastScanHighDuty = highDuty;
         return true;
     }
     bool stopScan() override {
@@ -111,6 +112,7 @@ public:
     int scanStops = 0;
     std::uint32_t lastScanDuration = 0;
     bool lastScanDuplicates = false;
+    bool lastScanHighDuty = false;
     ble::BleAddress own;
     std::vector<ConnectCall> connects;
     std::vector<std::uint32_t> disconnects;
