@@ -535,7 +535,7 @@ void HmiUi::buildDevices() {
     addLabel(list, results, &sf_antonio_20);
     if (scan_.devices.empty()) addLabel(list, tr(Str::NoResults));
     for (std::size_t index = 0; index < scan_.devices.size(); ++index) {
-        lcars::pill(addButton(list, "02-" + std::to_string(338 + index) + "\n" + scanEntryLabel(scan_.devices[index]),
+        lcars::pill(addButton(list, scanEntryLabel(scan_.devices[index]),
                              [this, index] { openDevice(index); }), lcars::Violet);
     }
     addButton(list, tr(Str::Back), [this] { back(); });
@@ -566,7 +566,7 @@ void HmiUi::buildAdapterPicker() {
     std::uint32_t selected = 0;
     for (std::size_t index = 0; index < adapters_.size(); ++index) {
         if (index) options += "\n";
-        options += "02-" + std::to_string(338 + index) + " " + lcars::uppercase(adapters_[index].id);
+        options += lcars::uppercase(adapters_[index].id);
         if (device_.adapter == adapters_[index].id) selected = static_cast<std::uint32_t>(index);
     }
     roller_ = lv_roller_create(root_);

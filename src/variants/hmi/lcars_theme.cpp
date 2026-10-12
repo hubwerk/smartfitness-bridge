@@ -171,10 +171,6 @@ lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert) {
     lv_obj_set_style_text_color(label, lv_color_hex(Peach), 0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(label, 60, 31);
-    label = lv_label_create(screen);
-    lv_label_set_text(label, "02-338");
-    lv_obj_set_style_text_color(label, lv_color_hex(Lavender), 0);
-    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 15);
     return header;
 }
 
