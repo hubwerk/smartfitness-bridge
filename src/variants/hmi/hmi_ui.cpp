@@ -507,7 +507,7 @@ void HmiUi::buildDevices() {
     } else {
         addButton(list, tr(Str::Scan), [this] {
             Command scan = makeCommand(CommandType::Scan);
-            scan.durationMs = 10000;
+            scan.durationMs = 15000;
             submit(scan);
         });
     }
@@ -535,14 +535,17 @@ void HmiUi::buildDevices() {
     addLabel(list, results, &sf_antonio_20);
     if (scan_.devices.empty()) addLabel(list, tr(Str::NoResults));
     for (std::size_t index = 0; index < scan_.devices.size(); ++index) {
-        lcars::pill(addButton(list, scanEntryLabel(scan_.devices[index]),
-                             [this, index] { openDevice(index); }), lcars::Violet);
+        const auto& dev = scan_.devices[index];
+        const std::uint32_t color = dev.relevant ? lcars::Violet : lcars::Gray;
+        lcars::pill(addButton(list, scanEntryLabel(dev),
+                             [this, index] { openDevice(index); }), color);
     }
     addButton(list, tr(Str::Back), [this] { back(); });
 }
 
 void HmiUi::buildDeviceDetail() {
-    makeScreen(device_.name.empty() ? device_.address : device_.name);
+    const std::string title = !device_.label.empty() ? device_.label : (device_.name.empty() ? device_.address : device_.name);
+    makeScreen(title);
     lv_obj_t* list = makeList(root_);
     if (!device_.name.empty()) addLabel(list, device_.name);
     std::string info = device_.address + "\n" + std::to_string(device_.rssi) + " dBm\n" + tr(Str::Adapter) + ": " +

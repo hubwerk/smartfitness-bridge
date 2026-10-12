@@ -33,6 +33,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}.row label{min-width:180px;color:var(--light)}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--tan);color:#000;padding:12px 24px;border-radius:24px;display:none;max-width:90%;z-index:2}
 #toast.bad{background:var(--bad)}#toast.ok{background:var(--ok)}.small{font-size:16px;color:var(--fg);overflow-wrap:anywhere}
+.gray{color:#888888}tr.gray td{color:#888888}tr.gray select,tr.gray button.b{opacity:.8}
 #ctl-result:not(:empty){display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:var(--light);color:#000}#ctl-result.bad{background:var(--bad)}
 .gauge{display:flex;align-items:center;gap:14px;margin:16px 0 22px;color:var(--light);text-transform:uppercase;font-size:16px}.gauge meter{flex:1;width:100%;height:14px;appearance:none;background:#000;border:2px solid var(--tan)}meter::-webkit-meter-bar{background:#000;border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--acc)}meter::-moz-meter-bar{background:var(--acc)}
 @media(max-width:1000px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.status-grid{grid-template-columns:1fr}}
@@ -141,11 +142,15 @@ function renderStatus(s){
  $("btn-scan").disabled=!i.bleAvailable;}
 function renderScan(sc){
  scan=sc;$("scan-state").textContent=(sc.scanning?"scanning… ":"")+sc.devices.length+" device(s)"+(sc.dropped?" ("+sc.dropped+" not listed)":"");
- fill($("scan-body"),sc.devices.slice().sort((a,b)=>b.rssi-a.rssi).map(d=>{
-  const tr=el("tr"),name=el("td");name.append(el("div",d.name||"(no name)"),el("div",d.address+" ("+d.addressType+")","small"));
-  const sel=el("select");sel.setAttribute("aria-label","Adapter for "+(d.name||d.address));sel.append(new Option("– choose –",""));
+ const score=d=>d.adapter?2:(d.relevant?1:0);
+ fill($("scan-body"),sc.devices.slice().sort((a,b)=>(score(b)-score(a))||(b.rssi-a.rssi)).map(d=>{
+  const isFallback=!d.name;
+  const displayName=d.name||d.label||"(no name)";
+  const tr=el("tr",null,!d.relevant?"gray":""),name=el("td");
+  name.append(el("div",displayName,(!d.relevant||isFallback)?"gray":""),el("div",d.address+" ("+d.addressType+")","small"));
+  const sel=el("select");sel.setAttribute("aria-label","Adapter for "+(displayName||d.address));sel.append(new Option("– choose –",""));
   for(const a of sc.adapters){const o=new Option(a.label+(a.id===d.adapter?" (detected)":""),a.id);if(a.id===d.adapter)o.selected=true;sel.append(o)}
-  const btn=el("button","Pair","b");btn.setAttribute("aria-label","Pair "+(d.name||d.address));btn.onclick=async()=>{if(!sel.value){toast("choose an adapter first",false);return}
+  const btn=el("button","Pair","b");btn.setAttribute("aria-label","Pair "+(displayName||d.address));btn.onclick=async()=>{if(!sel.value){toast("choose an adapter first",false);return}
    btn.disabled=true;await run("pair",{address:d.address,addressType:d.addressType,adapter:sel.value});btn.disabled=false};
   const svc=el("td",(d.services||[]).join(" "),"small"),ad=el("td"),act=el("td");ad.append(sel);act.append(btn);
   const rssi=el("td",d.rssi);rssi.dataset.label="RSSI";svc.dataset.label="Services";ad.dataset.label="Adapter";tr.append(name,rssi,svc,ad,act);return tr}));}
@@ -156,7 +161,7 @@ function renderConfig(c){
  $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
  $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}
  async function loadConfig(){try{renderConfig(await(await fetch("/api/config")).json())}catch(e){toast("could not load settings",false)}}
-$("btn-scan").onclick=()=>run("scan",{seconds:10},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
+$("btn-scan").onclick=()=>run("scan",{seconds:15},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
 $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run("disconnect");$("btn-sim").onclick=()=>run("simulate");
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
 $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}

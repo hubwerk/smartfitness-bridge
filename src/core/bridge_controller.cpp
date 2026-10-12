@@ -4,6 +4,8 @@
 #include "ftms_output.h"
 #include "ble_input_adapter.h"
 #include "protocols/registry.hpp"
+#include "scan_label.h"
+#include <algorithm>
 #include <cstdio>
 #include <optional>
 #include <utility>
@@ -397,8 +399,21 @@ ScanView BridgeController::scanView() const {
             device.connectable = result.connectable;
             device.adapter = result.detectedAdapter;
             for (const auto& uuid : result.services) device.services.push_back(uuid.toString());
+            device.label = scanDeviceLabel(result.name, result.manufacturerData, result.services, result.address);
+            device.relevant = isRelevantDevice(result.name, result.detectedAdapter, result.services);
             view.devices.push_back(std::move(device));
         }
+        auto score = [](const ScanDeviceView& d) -> int {
+            if (!d.adapter.empty()) return 2;
+            if (d.relevant) return 1;
+            return 0;
+        };
+        std::sort(view.devices.begin(), view.devices.end(), [&score](const ScanDeviceView& a, const ScanDeviceView& b) {
+            const int scoreA = score(a);
+            const int scoreB = score(b);
+            if (scoreA != scoreB) return scoreA > scoreB;
+            return a.rssi > b.rssi;
+        });
     }
     return view;
 }

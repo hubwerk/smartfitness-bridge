@@ -224,7 +224,8 @@ std::string targetLabel(const StatusView& status) {
 }
 
 std::string scanEntryLabel(const ScanDeviceView& device) {
-    std::string label = device.name.empty() ? device.address : device.name;
+    const std::string& primary = !device.label.empty() ? device.label : (device.name.empty() ? device.address : device.name);
+    std::string label = primary;
     label += "\n" + std::to_string(device.rssi) + " dBm  ";
     label += device.adapter.empty() ? std::string("?") : device.adapter;
     return label;

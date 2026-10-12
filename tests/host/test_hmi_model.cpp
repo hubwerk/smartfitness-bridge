@@ -156,7 +156,12 @@ void testStatusTexts() {
     device.address = "aa:00:00:00:00:22";
     device.rssi = -61;
     assert(scanEntryLabel(device) == "aa:00:00:00:00:22\n-61 dBm  ?");
+    device.label = "Apple";
+    device.relevant = false;
+    assert(scanEntryLabel(device) == "Apple\n-61 dBm  ?");
     device.name = "WalkingPad";
+    device.label = "WalkingPad";
+    device.relevant = true;
     device.adapter = "walkingpad-r1";
     assert(scanEntryLabel(device) == "WalkingPad\n-61 dBm  walkingpad-r1");
     assert(onOff(true) == "on" && onOff(false) == "off");

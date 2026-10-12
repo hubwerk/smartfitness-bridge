@@ -117,6 +117,8 @@ std::string scanResultsJson(const ScanView& scan) {
         device["address"] = result.address;
         device["addressType"] = result.randomAddress ? "random" : "public";
         device["name"] = result.name;
+        device["label"] = result.label;
+        device["relevant"] = result.relevant;
         device["rssi"] = result.rssi;
         device["connectable"] = result.connectable;
         device["adapter"] = result.adapter;

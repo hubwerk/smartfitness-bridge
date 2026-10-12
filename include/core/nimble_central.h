@@ -27,13 +27,16 @@ public:
     static constexpr std::size_t kEventQueue = 32;
     static constexpr std::size_t kCommandQueue = 8;
     static constexpr std::uint8_t kConnectTimeoutS = 5;
+    static constexpr std::uint32_t kScanWindowNormal = 37;
+    static constexpr std::uint32_t kScanWindowHighDuty = 80;
+    static constexpr std::uint32_t kScanInterval = 97;
 
     NimbleCentral() = default;
     NimbleCentral(const NimbleCentral&) = delete;
     NimbleCentral& operator=(const NimbleCentral&) = delete;
 
     bool begin() override;
-    bool startScan(std::uint32_t durationMs, bool duplicates) override;
+    bool startScan(std::uint32_t durationMs, bool duplicates, bool highDuty = false) override;
     bool stopScan() override;
     bool scanning() const override { return scanning_.load(); }
     bool connect(std::uint32_t session, const smartfitness::ble::BleAddress& address,
@@ -60,6 +63,7 @@ private:
         std::uint32_t session = 0;
         std::uint32_t durationMs = 0;
         bool duplicates = false;
+        bool highDuty = false;
         smartfitness::ble::BleAddress address;
         smartfitness::ble::ConnectPlan plan;
         smartfitness::ble::GattWrite write;
