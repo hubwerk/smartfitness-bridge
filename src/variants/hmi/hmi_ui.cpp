@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "ble_input_adapter.h"
 #include "ftms_output.h"
 
 using namespace smartfitness;
@@ -507,7 +508,7 @@ void HmiUi::buildDevices() {
     } else {
         addButton(list, tr(Str::Scan), [this] {
             Command scan = makeCommand(CommandType::Scan);
-            scan.durationMs = 15000;
+            scan.durationMs = BleInputAdapter::kDefaultScanMs;
             submit(scan);
         });
     }
@@ -536,7 +537,7 @@ void HmiUi::buildDevices() {
     if (scan_.devices.empty()) addLabel(list, tr(Str::NoResults));
     for (std::size_t index = 0; index < scan_.devices.size(); ++index) {
         const auto& dev = scan_.devices[index];
-        const std::uint32_t color = dev.relevant ? lcars::Violet : lcars::Gray;
+        const std::uint32_t color = scanEntryMuted(dev) ? lcars::Gray : lcars::Violet;
         lcars::pill(addButton(list, scanEntryLabel(dev),
                              [this, index] { openDevice(index); }), color);
     }

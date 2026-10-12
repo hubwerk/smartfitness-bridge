@@ -73,7 +73,7 @@ so it does not independently lock the core to 2.0.17.
 ### Consequences
 - The connection budget is not multi-client FTMS support: advertising currently
   stops with one client, and only one input is selected (no sensor aggregation).
-- Queues are bounded: 24 central scan reports, 32 events, 8 worker commands,
+- Queues are bounded: 48 central scan reports, 32 events, 8 worker commands,
   8 FTMS writes, 8 API jobs. Overflow can drop work.
 - The central worker has a 6144-byte stack, pinned to core 1. Wi-Fi/FTMS load,
   scanning, reconnect latency and runtime heap/PSRAM headroom require hardware tests.

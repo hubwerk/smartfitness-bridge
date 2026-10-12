@@ -612,18 +612,25 @@ ScanView scanView() {
     ScanView scan;
     scan.scanning = true;
     scan.bleAvailable = true;
-    auto device = [](const char* address, const char* name, int rssi, const char* adapter) {
+    // As built by BridgeController::scanView(): one entry per address, label
+    // falls back to manufacturer/service, irrelevant devices sorted last.
+    auto device = [](const char* address, const char* name, int rssi, const char* adapter, const char* label,
+                     bool relevant) {
         ScanDeviceView view;
         view.address = address;
         view.name = name;
         view.rssi = rssi;
         view.adapter = adapter;
+        view.label = label;
+        view.relevant = relevant;
         return view;
     };
-    scan.devices = {device("aa:00:00:00:00:22", "WalkingPad", -58, "walkingpad-r1"),
-                    device("aa:00:00:00:00:21", "KICKR CORE", -64, "ftms"),
-                    device("aa:00:00:00:00:30", "I_TL", -71, "ifit-treadmill"),
-                    device("aa:00:00:00:00:31", "", -83, "")};
+    scan.devices = {device("aa:00:00:00:00:22", "WalkingPad", -58, "walkingpad-r1", "WalkingPad", true),
+                    device("aa:00:00:00:00:21", "KICKR CORE", -64, "ftms", "KICKR CORE", true),
+                    device("aa:00:00:00:00:30", "I_TL", -71, "ifit-treadmill", "I_TL", true),
+                    device("aa:00:00:00:00:32", "", -75, "", "Heart Rate", true),
+                    device("aa:00:00:00:00:31", "", -60, "", "Apple", false),
+                    device("aa:00:00:00:00:33", "", -83, "", "aa:00:00:00:00:33", false)};
     return scan;
 }
 

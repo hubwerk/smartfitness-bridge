@@ -287,6 +287,11 @@ Wi-Fi/AP edits (including factory reset) require a restart to change the running
 1. Wake the equipment, enable its pairing mode, and disconnect competing apps.
 2. Open **Devices → Scan**; select a result by name/address, RSSI, services, and
    detected adapter. Optionally override the adapter, then choose **Pair**.
+   The pairing scan runs 30 s with a high-duty scan window (90 of 97 ms) and
+   duplicate reports; advertisements and scan responses are merged into one
+   entry per address. Entries without an advertised name show the manufacturer
+   (from manufacturer data) or the advertised service in grey; devices with no
+   name, no known service and no detected protocol are grey and listed last.
 3. Pairing saves the source and enables BLE input immediately. Watch the Dashboard
    link state and metrics; a successful pairing command means “connecting”, not
    that the equipment has already connected. **Connect**, **Disconnect**, **Unpair**
@@ -735,8 +740,8 @@ Normalized units: speed in km/h, cadence in rpm, power in watts, heart rate in b
 | NimBLE connections | Compile-time maximum **3**: one BLE input, one FTMS output client, one spare |
 | Source selection | One source, not sensor aggregation; Keiser is advertisement-only |
 | FTMS clients | **One**; advertising stops while connected |
-| Scan results | 24 deduplicated entries |
-| Central queues | 24 scan reports; 32 events (lifecycle events can evict notifications); 8 worker operations |
+| Scan results | 24 deduplicated entries (a relevant device replaces the weakest irrelevant one when full) |
+| Central queues | 48 scan reports; 32 events (lifecycle events can evict notifications); 8 worker operations |
 | Protocol write outbox | 16 pending GATT writes |
 | FTMS Control Point queue | 8 writes, 20 bytes per write; full queue drops a write |
 | API | 8 jobs; up to 2 processed/loop; 16 cached results; body ≤ 1024 bytes |

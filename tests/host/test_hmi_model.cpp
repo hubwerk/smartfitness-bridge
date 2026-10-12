@@ -159,11 +159,16 @@ void testStatusTexts() {
     device.label = "Apple";
     device.relevant = false;
     assert(scanEntryLabel(device) == "Apple\n-61 dBm  ?");
+    assert(scanEntryMuted(device));
+    device.label = "FTMS";
+    device.relevant = true;  // known service, but no advertised name
+    assert(scanEntryMuted(device));
     device.name = "WalkingPad";
     device.label = "WalkingPad";
     device.relevant = true;
     device.adapter = "walkingpad-r1";
     assert(scanEntryLabel(device) == "WalkingPad\n-61 dBm  walkingpad-r1");
+    assert(!scanEntryMuted(device));
     assert(onOff(true) == "on" && onOff(false) == "off");
 }
 

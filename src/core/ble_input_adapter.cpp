@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "protocols/registry.hpp"
+#include "scan_label.h"
 
 using namespace smartfitness;
 
@@ -332,11 +333,24 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     }
     if (!entry) {
         if (results_.size() >= kMaxScanResults) {
+            // A full list keeps fitness devices: a relevant newcomer replaces
+            // the weakest entry without name, known service or protocol.
+            ScanResult* weakest = nullptr;
+            if (isRelevantDevice(advertisement.name, protocols::detectProtocol(advertisement) ? "detected" : "",
+                                 advertisement.services)) {
+                for (auto& result : results_) {
+                    if (isRelevantDevice(result.name, result.detectedAdapter, result.services)) continue;
+                    if (!weakest || result.rssi < weakest->rssi) weakest = &result;
+                }
+            }
             ++droppedResults_;
-            return;
+            if (!weakest) return;
+            *weakest = ScanResult{};
+            entry = weakest;
+        } else {
+            results_.emplace_back();
+            entry = &results_.back();
         }
-        results_.emplace_back();
-        entry = &results_.back();
         entry->address = report.address;
         entry->connectable = report.connectable;
     } else {
