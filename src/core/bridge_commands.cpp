@@ -102,7 +102,7 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
     if (key == "ftms-profile") {
         FtmsOutputProfile profile;
         if (!parseFtmsOutputProfile(value, profile)) {
-            error = "profile must be auto, bike, treadmill, cross-trainer or rower";
+            error = "profile must be auto, bike, treadmill, cross-trainer, rower, step-climber or stair-climber";
             return false;
         }
         command.type = CommandType::FtmsProfile;

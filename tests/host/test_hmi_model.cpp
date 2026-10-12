@@ -183,7 +183,9 @@ void testSettings() {
     assert(!deserialize(serialize(settings), untouched) && untouched == HmiSettings{});
 
     assert(nextFtmsProfile(FtmsOutputProfile::Auto) == FtmsOutputProfile::IndoorBike);
-    assert(nextFtmsProfile(FtmsOutputProfile::Rower) == FtmsOutputProfile::Auto);
+    assert(nextFtmsProfile(FtmsOutputProfile::Rower) == FtmsOutputProfile::StepClimber);
+    assert(nextFtmsProfile(FtmsOutputProfile::StepClimber) == FtmsOutputProfile::StairClimber);
+    assert(nextFtmsProfile(FtmsOutputProfile::StairClimber) == FtmsOutputProfile::Auto);
     assert(ftmsNamePresets().front() == FtmsOutput::kDefaultName);
     for (const auto& name : ftmsNamePresets())
         assert(!name.empty() && name.size() <= FtmsOutput::kMaxNameLength && ConfigStore::isValidFtmsName(name));

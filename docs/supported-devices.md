@@ -10,10 +10,11 @@ ties keep the first registered match. Pairing can override detection with a
 registered id. Names are case-sensitive unless explicitly noted below.
 
 The **FTMS output profile** column describes effective output with the `auto`
-setting. A persisted override uses `auto|bike|treadmill|cross-trainer|rower`.
-Cross-trainer and rower inputs retain their active input type in status, but
-currently emit bike fallback; full output for those types is deferred to the
-follow-up below. An override never adds missing source control capabilities.
+setting. A persisted override uses
+`auto|bike|treadmill|cross-trainer|rower|step-climber|stair-climber`. Every
+profile is sent natively with its own FTMS data characteristic (see
+[FTMS machine profiles and data fields](#ftms-machine-profiles-and-data-fields)).
+An override never adds missing source control capabilities.
 
 | Id (priority) | Device / profile | Match rule | Metrics | Control | Source / attribution | Test status | FTMS output profile |
 |---|---|---|---|---|---|---|---|
@@ -24,24 +25,24 @@ follow-up below. An override never adds missing source control capabilities.
 | `yesoul` (70) | Yesoul bike | Name starts `YESOUL`, case-insensitive `YS_G1M_`, or manufacturer prefix `7d 02 01 05 00 ff ff` | Cadence, power, resistance; speed derived from cadence; decoded distance not forwarded | None (upstream read-only behavior) | qdomyos-zwift `src/devices/yesoulbike/yesoulbike.cpp`; `yesoul_keiser.hpp/.cpp` | Host frame/init/detection tests; hardware unverified | `bike` |
 | `ifit-bike` (85) | BLE iFit / NordicTrack / ProForm bike | `I_EB`, `I_SB`, or case-insensitive `_IFIT_BIKE` name layout; FTMS preferred unless proprietary service required | Power, cadence, resistance; speed/incline only on profiles reporting them | Normalized resistance; incline only on compatible Studio profiles | `src/devices/proformbike/proformbike.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` |
 | `ifit-treadmill` (85) | BLE iFit / NordicTrack / ProForm treadmill | `I_TL`, `I_IT`, or case-insensitive `_IFIT TREADMILL` layout; FTMS preferred unless proprietary service required | Speed, incline when reported | Bounded speed and incline; Cadence LT has no incline control | `src/devices/proformtreadmill/proformtreadmill.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
-| `ifit-freestride` (85) | BLE ProForm FreeStride | Case-insensitive `I_FS` prefix | Speed, cadence, power, resistance as reported | None in upstream FreeStride path | `src/devices/proformelliptical/proformelliptical.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` fallback (`cross-trainer` input) |
-| `ifit-elliptical` (85) | BLE NordicTrack elliptical | Case-insensitive `I_EL` prefix | Cadence/speed/resistance; incline/power/HR only in profiles with those fields | Normalized resistance; incline only on compatible profiles | `src/devices/nordictrackelliptical/nordictrackelliptical.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` fallback (`cross-trainer` input) |
-| `ifit-el-trainer` (85) | BLE ProForm elliptical trainer | Case-insensitive `I_VE` prefix | Speed, cadence, resistance as reported | Normalized resistance | `src/devices/proformellipticaltrainer/proformellipticaltrainer.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` fallback (`cross-trainer` input) |
+| `ifit-freestride` (85) | BLE ProForm FreeStride | Case-insensitive `I_FS` prefix | Speed, cadence, power, resistance as reported | None in upstream FreeStride path | `src/devices/proformelliptical/proformelliptical.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `cross-trainer` |
+| `ifit-elliptical` (85) | BLE NordicTrack elliptical | Case-insensitive `I_EL` prefix | Cadence/speed/resistance; incline/power/HR only in profiles with those fields | Normalized resistance; incline only on compatible profiles | `src/devices/nordictrackelliptical/nordictrackelliptical.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `cross-trainer` |
+| `ifit-el-trainer` (85) | BLE ProForm elliptical trainer | Case-insensitive `I_VE` prefix | Speed, cadence, resistance as reported | Normalized resistance | `src/devices/proformellipticaltrainer/proformellipticaltrainer.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `cross-trainer` |
 | `bowflex-t216` (85) | Bowflex T216 BLE treadmill | Case-insensitive `BOWFLEX T` prefix | Speed and incline; variant-specific frame layouts | None; upstream buttons cannot remotely set these targets | `src/devices/bowflext216treadmill/bowflext216treadmill.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` (read-only) |
 | `schwinn-170` (85) | Schwinn 170/270 BLE bike | Case-insensitive `SCHWINN 170/270` prefix; no FTMS | Speed, power, crank-derived cadence, resistance | None | `src/devices/schwinn170bike/schwinn170bike.cpp`; `ifit_bowflex.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` |
-| `ifit-model-1` … `ifit-model-97` (0, manual) | Explicit iFit / Bowflex / Schwinn firmware profiles | Manual pairing override only; model labels are shown in the UI, and the exact inventory is below | Profile-specific metrics described above | Profile-specific controls; FreeStride/Bowflex/Schwinn remain read-only | Same pinned files as the corresponding family; every init/poll transcript host-tested | host-tested, not hardware-verified | 1–23 `bike`; 24–83 `treadmill`; 84–90 `bike` fallback (`cross-trainer`); 91–96 read-only `treadmill`; 97 `bike` |
+| `ifit-model-1` … `ifit-model-97` (0, manual) | Explicit iFit / Bowflex / Schwinn firmware profiles | Manual pairing override only; model labels are shown in the UI, and the exact inventory is below | Profile-specific metrics described above | Profile-specific controls; FreeStride/Bowflex/Schwinn remain read-only | Same pinned files as the corresponding family; every init/poll transcript host-tested | host-tested, not hardware-verified | 1–23 `bike`; 24–83 `treadmill`; 84–90 `cross-trainer`; 91–96 read-only `treadmill`; 97 `bike` |
 | `tacx-fec` (80) | Tacx Neo / Flux | Case-insensitive `TACX NEO` / `TACX FLUX` or custom service `6e40fec1-b5a3-f393-e0a9-e50e24dcca9e`; no FTMS | CPS power, CPS/CSC cadence and wheel-derived speed, optional HR | Target power and simulated grade via BLE FE-C tunnel; upstream resistance emulation maps 0–100% to 0–10% grade, not a physical brake level | `src/devices/tacxneo2/tacxneo2.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` |
 | `elite-legacy` (80) | Elite legacy trainers | Case-insensitive `ELITETRAINER`, exact `KU` / `QD` / `RM`, or custom service `347b0001-7635-408b-8918-8ff3949ce592`; no FTMS | CPS power, CPS/CSC cadence and wheel-derived speed, optional HR | Power, brake resistance, simulation grade after timed proprietary initialization | `src/devices/stagesbike/stagesbike.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` |
 | `elite-dr` (80) | Elite DR variant | Exact case-insensitive `DR`; no FTMS | CPS/CSC/HR as available | Power and brake resistance; no simulation grade | `src/devices/stagesbike/stagesbike.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` |
 | `elite-misuro` (70) | Elite Misuro B+ | Case-insensitive `MISURO B+` prefix; no FTMS | CPS/CSC/HR as available | None; no brake motor claimed | `src/devices/stagesbike/stagesbike.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` |
 | `wahoo-legacy` (80) | Wahoo KICKR without FTMS | Case-insensitive `KICKR SNAP`, `KICKR BIKE`, `KICKR ROLLR`, `KICKR CORE`, `KICKR MOVE `, `WAHOO KICKR`; excludes RUN/Headwind; no FTMS | CPS power, CPS/CSC cadence and wheel-derived speed, optional HR | Power, normalized brake resistance, simulation grade after acknowledged unlock/init | `src/devices/wahookickrsnapbike/wahookickrsnapbike.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` |
-| `concept2-pm5` (80) | Concept2 PM5 rower | Case-insensitive `PM5` prefix with `ROW` suffix, or unnamed rowing service `ce060030-43e5-11e4-916c-0800200c9a66`; excludes Ski/Bike names and FTMS | Rowing speed, stroke rate (mapped to cadence), power, HR as available; individual or multiplexed status notifications | None; mechanical damper is not a controllable brake | Concept2 rowing characteristic layouts in `src/devices/concept2skierg/concept2skierg.cpp`, `src/devices/ftmsrower/ftmsrower.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `bike` fallback (`rower` input) |
+| `concept2-pm5` (80) | Concept2 PM5 rower | Case-insensitive `PM5` prefix with `ROW` suffix, or unnamed rowing service `ce060030-43e5-11e4-916c-0800200c9a66`; excludes Ski/Bike names and FTMS | Rowing speed, stroke rate (mapped to cadence), power, HR, elapsed time, distance, pace / average pace (s/500 m), stroke count as available; individual or multiplexed status notifications | None; mechanical damper is not a controllable brake | Concept2 rowing characteristic layouts in `src/devices/concept2skierg/concept2skierg.cpp`, `src/devices/ftmsrower/ftmsrower.cpp`; `trainers_rower.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `rower` |
 | `horizon-tm`, `horizon-paragon` (80) | Horizon custom BLE / Paragon X | Case-insensitive Horizon/YPTM/HZ_T101/HZ_7.0AT/AFG SPORT/WLT2541 layouts; `PARAGON X` / `JFTMPARAGON` selects Paragon; no FTMS | Speed, incline | Speed/incline within model limits; connection never starts belt | `src/devices/horizontreadmill/horizontreadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `spirit-treadmill`, `spirit-xt485`, `spirit-xt800` (80) | Spirit XT385 / XT485 / XT800/900 | Case-insensitive corresponding `XT385`, `XT485`, `XT800` / `XT900` prefixes; no FTMS | Speed, incline as reported | Status-driven speed buttons; incline only on XT385; stops stepping on stale status or target crossing | `src/devices/spirittreadmill/spirittreadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `sole-treadmill`, `sole-f63`, `sole-f65`, `sole-tt8` (80) | Sole F80/F85/F89/S77/ST90/TRX7.5 / F63 / F65 / TT8 | Case-insensitive corresponding upstream model prefixes; no FTMS | Speed (mph converted to km/h), incline, HR | Status-driven speed/incline buttons; no unsolicited belt start | `src/devices/solef80treadmill/solef80treadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `walkingpad-r1`, `walkingpad-flat`, `walkingpad-re` (80) | Kingsmith / WalkingPad R1 Pro, A1/C2, RE | Case-insensitive upstream R1/KS prefixes; `RE` exact; excludes R2 names and FTMS-only variants | Speed | Speed only; flat walking variants capped at 6 km/h, R1 at 10 km/h; no incline | `src/devices/kingsmithr1protreadmill/kingsmithr1protreadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `walkingpad-r2`, `walkingpad-g1`, `walkingpad-g1b`, `wp2-c*-s*` (90) | Kingsmith R2 / X21 / K12 / G1 / MXG | Case-insensitive upstream `KS-ST-K12PRO`, `KS-R1AC`, `KS-HC-R1AA/AC`, X21, MXG, G1 prefixes; advertised custom services select UUID variant; nondefault cipher overrides are manual; no FTMS | Speed, step rate if reported | Speed only; G1 capped at 6 km/h; no incline | `src/devices/kingsmithr2treadmill/kingsmithr2treadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
-| `ftms` (50) | FTMS bike, treadmill, cross trainer, rower | Advertised Fitness Machine Service `0x1826` | Indoor Bike `0x2AD2`, Treadmill `0x2ACD`, Cross Trainer `0x2ACE`, Rower `0x2AD1`: speed/cadence/power/HR/incline and actual distance/elapsed time where present; resistance decoded internally | Feature-gated power, resistance, incline, speed; Request Control handshake; power/resistance/incline honor supplied ranges; grade via bike simulation if needed. Speed is available via console/API and treadmill FTMS output | Local Bluetooth FTMS codec and `ftms_source.hpp` / `src/core/ftms_source.cpp` | Host byte-layout, feature/range/control tests; hardware unverified | Derived from input data characteristic/service data: `bike` or `treadmill`; `cross-trainer`/`rower` use `bike` fallback |
+| `ftms` (50) | FTMS bike, treadmill, cross trainer, step climber, stair climber, rower | Advertised Fitness Machine Service `0x1826` | Indoor Bike `0x2AD2`, Treadmill `0x2ACD`, Cross Trainer `0x2ACE`, Step Climber `0x2ACF`, Stair Climber `0x2AD0`, Rower `0x2AD1`: every FTMS data field of the profile, only when the machine sends it (see field table below) | Feature-gated power, resistance, incline, speed; Request Control handshake; power/resistance/incline honor supplied ranges; grade via bike simulation if needed. Speed is available via console/API and treadmill FTMS output | Local Bluetooth FTMS codec and `ftms_source.hpp` / `src/core/ftms_source.cpp` | Host byte-layout, feature/range/control tests; hardware unverified | Derived from input data characteristic/service data: `bike`, `treadmill`, `cross-trainer`, `step-climber`, `stair-climber` or `rower` |
 | `cps` (40) | Cycling Power sensor | Service `0x1818` | Power, cadence derived from crank revolution/event deltas | None | Local Bluetooth CPS codec; `sensor_sources.hpp`, `src/core/sensor_sources.cpp`, `src/core/sensor_codec.cpp` | Host power/crank/wraparound tests; hardware unverified | `bike` |
 | `csc` (30) | Cycling Speed and Cadence sensor | Service `0x1816` | Speed (fixed **2.105 m** wheel circumference), cadence from wheel/crank deltas | None | Local Bluetooth CSC codec; sensor sources/codec | Host wheel/crank/wraparound tests; hardware unverified | `bike` |
 | `hrs` (20) | Heart Rate monitor | Service `0x180D` | Heart rate, 8- or 16-bit measurement | None | Local Bluetooth HRS codec; sensor sources/codec | Host 8/16-bit parser tests; hardware unverified | `bike` |
@@ -164,7 +165,7 @@ above; all entries are **host-tested, not hardware-verified**.
 | 66–72 | Treadmill | `treadmill` | `proform_treadmill_705_cst`, `proform_treadmill_705_cst_V78_239`, `proform_treadmill_705_cst_V80_44`, `proform_treadmill_8_0`, `proform_treadmill_8_7`, `proform_treadmill_995i`, `proform_treadmill_9_0` |
 | 73–79 | Treadmill | `treadmill` | `proform_treadmill_c700`, `proform_treadmill_c960i`, `proform_treadmill_cadence_lt`, `proform_treadmill_carbon_tls`, `proform_treadmill_cst_505_pftl59420_0`, `proform_treadmill_l6_0s`, `proform_treadmill_se` |
 | 80–83 | Treadmill | `treadmill` | `proform_treadmill_sport_3_0`, `proform_treadmill_sport_70`, `proform_treadmill_sport_8_5`, `proform_treadmill_z1300i` |
-| 84–90 | Cross-trainer / ellipticals | `bike` fallback (`cross-trainer` input) | `proformelliptical` (FreeStride), `nordictrackelliptical`, `nordictrack_elliptical_c7_5`, `proform_hybrid_trainer_xt`, `proformellipticaltrainer`, `nordictrack_se7i`, `nordictrack_elliptical_s700` |
+| 84–90 | Cross-trainer / ellipticals | `cross-trainer` | `proformelliptical` (FreeStride), `nordictrackelliptical`, `nordictrack_elliptical_c7_5`, `proform_hybrid_trainer_xt`, `proformellipticaltrainer`, `nordictrack_se7i`, `nordictrack_elliptical_s700` |
 | 91–96 | Bowflex treadmill | `treadmill` (read-only) | `bowflex-t216`, `bowflex-t216-alt`, `bowflex-t6`, `bowflex-btx116`, `bowflex-t8j`, `bowflex-t128` |
 | 97 | Schwinn bike | `bike` (read-only) | `schwinn-170` |
 
@@ -191,17 +192,19 @@ not claims that every model can use every cipher.
   variants and other Domyos initialization variants are not implemented.
 - Only one input is selected: CPS, CSC and HRS are alternative sources, not
   additional sensors merged with a trainer.
-- Resistance/gear is stored in protocol samples, but the public bridge metric
-  set has no resistance metric: Dashboard/API expose the **control target**,
-  not a live resistance measurement. Actual FTMS-supplied distance and elapsed
-  time are forwarded when present; vendor totals are not synthesized and elapsed
-  time is never inferred from connection uptime.
+- Every metric is optional: a value the device does not send stays absent
+  (`null` in the API, `--` on displays) and is never stored, forwarded or
+  re-encoded as `0`. Resistance is the device's own level (FTMS / vendor
+  scale) and differs from the normalized 0–100 % resistance **control target**.
+  Vendor totals are not synthesized and elapsed time is never inferred from
+  connection uptime.
 - “Controllable” in the registry is a possibility, not a runtime guarantee:
   source subscription/init/Feature/Request Control must succeed first. Estimated
   vendor power/speed is not a calibrated physical measurement.
-- Automatic FTMS output uses treadmill data for all treadmill adapters, including
-  read-only Bowflex variants; bikes and standalone sensors use bike data.
-  Cross-trainer/rower output uses the documented bike fallback.
+- Automatic FTMS output uses the input's machine profile: treadmill data for all
+  treadmill adapters (including read-only Bowflex variants), cross trainer data
+  for ellipticals, rower data for rowers; bikes and standalone sensors use bike
+  data.
   CPS/HRS here are **inputs only**, not Garmin-compatible output services.
 - Treadmill FTMS speed/incline commands remain capability-gated and obey core
   bounds (speed 0–100 km/h, incline −20–25%) plus each adapter's tighter limits.
@@ -210,19 +213,84 @@ not claims that every model can use every cipher.
   returns Operation Failed because there is no safe source start primitive;
   Stop/Pause requires an accepted speed-zero command or returns Operation Failed.
   The FTMS input handshake sends automatic Start/Resume only for confirmed bike
-  inputs, not ambiguous bike fallback or treadmills/cross-trainers/rowers; stale treadmill
+  inputs, not ambiguous machines or other profiles; stale treadmill
   telemetry disables controls until fresh data restores readiness.
   Disconnect/stale data never send stop/speed; physical controls and the safety
   key remain primary. See [FTMS output](../README.md#ftms-output-bluetooth-le).
 
-### Deferred machine-profile output follow-up
+## FTMS machine profiles and data fields
 
-Full Cross Trainer Data (`0x2ACE`) and Rower Data (`0x2AD1`) output is explicitly
-deferred. Follow-up work must implement profile-specific data/feature/status
-encoding and control semantics, preserve visible active input versus effective
-output profiles, and validate packet layouts plus real equipment/client behavior.
-Until then, these inputs expose `cross-trainer`/`rower` in status and effective
-output `bike`; they do not advertise unsupported native machine output.
+Input (`ftms` adapter) and output (FTMS server) use the same per-profile codec
+(`include/core/ftms/ftms_codec.hpp`). Each profile struct holds every field of
+its FTMS data characteristic as `std::optional` in the **native wire type**
+(e.g. `uint16` 0.01 km/h, `sint16` 0.1 %, `uint24` m), so a field the machine
+does not send is absent instead of 0. Decoding maps only present fields onto
+bridge metrics (normalized units below); encoding sets only the flags of
+present fields. Energy sub-fields that are unavailable are sent as the FTMS
+"not available" values (`0xFFFF`/`0xFF`) and decode as absent. The second
+member of an FTMS field pair that shares one flag (e.g. inclination + ramp
+angle) is sent as 0 only when the pair is required by the spec and the bridge
+has no value; ramp angle is derived from inclination and rower pace from speed
+when missing.
+
+Records longer than 20 bytes (default ATT MTU) are split into several
+notifications as FTMS requires: all but the last set "More Data", and the
+first field group (e.g. instantaneous speed / stroke rate) closes the record.
+
+### Profile ↔ machine type
+
+| Machine type | Data characteristic | Service-data type bit | Config / API name |
+|---|---|---|---|
+| Indoor bike | `0x2AD2` | 5 | `bike` |
+| Treadmill | `0x2ACD` | 0 | `treadmill` |
+| Cross trainer / elliptical | `0x2ACE` | 1 | `cross-trainer` |
+| Step climber | `0x2ACF` | 2 | `step-climber` |
+| Stair climber | `0x2AD0` | 3 | `stair-climber` |
+| Rower | `0x2AD1` | 4 | `rower` |
+
+Protocol → profile: vendor bikes, trainers and CPS/CSC/HRS sensors → `bike`;
+treadmill protocols (iFit/Bowflex/Horizon/Spirit/Sole/WalkingPad) → `treadmill`;
+iFit FreeStride / ellipticals (`ifit-freestride`, `ifit-elliptical`,
+`ifit-el-trainer`, manual models 84–90) → `cross-trainer`; Concept2 PM5 →
+`rower`; generic `ftms` → the data characteristic/service data the machine
+exposes, including step and stair climbers.
+
+### Data fields per profile
+
+Metric units: speed km/h, distance m, cadence 1/min (pedal, step or stroke
+rate), power W, heart rate bpm, incline %, ramp angle °, elevation m, energy
+kcal (per hour / per minute), MET, time s, pace s/500 m, force N; counts are
+unitless.
+
+| FTMS field (type, resolution) | Bike | Treadmill | Cross trainer | Step climber | Stair climber | Rower | Bridge metric |
+|---|---|---|---|---|---|---|---|
+| Instantaneous speed (uint16, 0.01 km/h) | ✓ | ✓ | ✓ | | | | `speed` |
+| Average speed (uint16, 0.01 km/h) | ✓ | ✓ | ✓ | | | | `averageSpeed` |
+| Instantaneous cadence (uint16, 0.5 rpm) | ✓ | | | | | | `cadence` |
+| Average cadence (uint16, 0.5 rpm) | ✓ | | | | | | `averageCadence` |
+| Step per minute / average step rate (uint16, 1) | | | ✓ | ✓ | ✓ | | `cadence` / `averageCadence` |
+| Stroke rate / average stroke rate (uint8, 0.5) | | | | | | ✓ | `cadence` / `averageCadence` |
+| Stroke count (uint16) | | | | | | ✓ | `strokeCount` |
+| Total distance (uint24, 1 m) | ✓ | ✓ | ✓ | | | ✓ | `distance` |
+| Inclination (sint16, 0.1 %) + ramp angle (sint16, 0.1 °) | | ✓ | ✓ | | | | `incline`, `rampAngle` |
+| Positive / negative elevation gain (uint16; treadmill 0.1 m, others 1 m) | | ✓ | ✓ | ✓ (positive) | ✓ (positive) | | `positiveElevationGain` / `negativeElevationGain` |
+| Instantaneous / average pace (treadmill uint8 0.1 km/min; rower uint16 s/500 m) | | ✓ | | | | ✓ | `pace` / `averagePace` (rower: also `speed` / `averageSpeed`) |
+| Floors (uint16) | | | | ✓ | ✓ | | `floors` |
+| Step count (uint16) | | | | ✓ | | | `stepCount` |
+| Stride count (uint16; cross trainer 0.1, stair climber 1) | | | ✓ | | ✓ | | `strideCount` |
+| Resistance level (sint16; cross trainer 0.1, others 1) | ✓ | | ✓ | | | ✓ | `resistance` |
+| Instantaneous / average power (sint16, 1 W) | ✓ | | ✓ | | | ✓ | `power` / `averagePower` |
+| Force on belt (sint16, 1 N) + power output (sint16, 1 W) | | ✓ | | | | | `forceOnBelt`, `power` |
+| Total energy / per hour (uint16) / per minute (uint8) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `totalEnergy`, `energyPerHour`, `energyPerMinute` |
+| Heart rate (uint8, 1 bpm) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `heartRate` |
+| Metabolic equivalent (uint8, 0.1) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `metabolicEquivalent` |
+| Elapsed / remaining time (uint16, 1 s) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `elapsed`, `remainingTime` |
+| Movement direction (cross trainer flag bit 15) | | | ✓ | | | | decoded, not a metric |
+
+Control targets per output profile: speed (treadmill, cross trainer),
+inclination (bike via simulation, treadmill, cross trainer), resistance and
+power (all profiles except treadmill). The Feature characteristic only
+announces fields the selected profile can carry and the source supports.
 
 For the extension steps (`SourceProtocol`, precise registry priorities, byte-sample
 host tests and attribution headers), see [adding new protocols](../README.md#supported-devices-and-new-protocols).

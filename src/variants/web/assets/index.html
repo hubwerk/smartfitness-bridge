@@ -55,6 +55,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
   <div class="card metric"><div class="label">Incline</div><span class="v" id="m-incline">–</span> <span class="u">%</span></div>
   <div class="card metric"><div class="label">Target</div><span class="v" id="m-target">–</span></div>
  </div>
+ <div class="card"><div class="label">Further metrics (only values sent by the device)</div><div id="m-extra" class="small">–</div></div>
  <div class="gauge"><label for="power-gauge">Power / 500 W</label><meter id="power-gauge" min="0" max="500" value="0">0 W</meter></div>
  <div class="status-grid">
  <div class="card"><div class="label">Bridge</div><div id="s-bridge"></div></div>
@@ -84,8 +85,8 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
  <div class="card"><div class="label">Outputs</div>
   <div class="row"><label for="c-ftmsName">FTMS output name</label><input id="c-ftmsName" maxlength="20"></div>
   <div class="row"><label for="c-ftmsOutput">FTMS output</label><input id="c-ftmsOutput" type="checkbox"></div>
-  <div class="row"><label for="c-ftmsOutputProfile">FTMS output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option></select></div>
-  <p class="small">Cross trainer and rower currently use indoor bike output. The dashboard shows the effective profile.</p>
+  <div class="row"><label for="c-ftmsOutputProfile">FTMS output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option><option value="step-climber">Step climber</option><option value="stair-climber">Stair climber</option></select></div>
+  <p class="small">Every profile is sent with its native FTMS data characteristic. The dashboard shows the effective profile.</p>
   <div class="row"><label for="c-ant">ANT+ FE-C</label><input id="c-ant" type="checkbox"><span class="pill warn">requires hardware (not implemented)</span></div>
   <div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div></div>
  <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
@@ -122,6 +123,7 @@ function fmt(v){return v===null||v===undefined?"–":(Math.round(v*10)/10).toStr
 function renderStatus(s){
  status=s;$("conn").textContent="online";$("conn").className="pill ok";
  for(const k of["power","cadence","speed","heartRate","incline"])$("m-"+k).textContent=fmt(s.telemetry&&s.telemetry[k]);
+ const main=["power","cadence","speed","heartRate","incline"],extra=Object.entries(s.telemetry||{}).filter(([k,v])=>!main.includes(k)&&Number.isFinite(v)).map(([k,v])=>k+": "+fmt(v));$("m-extra").textContent=extra.length?extra.join(" · "):"–";
  const power=s.telemetry&&s.telemetry.power;$("power-gauge").value=Number.isFinite(power)?Math.max(0,Math.min(500,power)):0;$("power-gauge").textContent=fmt(power)+" W";
  $("m-target").textContent=s.target?s.target.control+" "+fmt(s.target.value):"–";
  fill($("s-bridge"),[pill(s.state,["disconnected","error","fault"].includes(s.state)?"bad":"ok"),pill(s.trainer?"trainer":"no trainer",s.trainer?"ok":""),pill(s.canControl?"control ready":"no control",s.canControl?"ok":""),

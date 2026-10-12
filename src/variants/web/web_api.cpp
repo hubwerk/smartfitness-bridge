@@ -214,7 +214,7 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
             }
             if (!optionalText(object, "ftmsOutputProfile", text, present, error)) return false;
             if (!parseFtmsOutputProfile(text, profile)) {
-                error = "profile must be auto, bike, treadmill, cross-trainer or rower";
+                error = "profile must be auto, bike, treadmill, cross-trainer, rower, step-climber or stair-climber";
                 return false;
             }
             Command command = simple(CommandType::FtmsProfile);

@@ -54,6 +54,11 @@ public:
     // Last payloads handed to the transport (diagnostics and host tests).
     const smartfitness::ftms::Bytes& lastIndoorBikeData() const;
     const smartfitness::ftms::Bytes& lastTreadmillData() const;
+    // Last data notification of the given machine profile's characteristic.
+    const smartfitness::ftms::Bytes& lastMachineData(smartfitness::MachineProfile profile) const;
+    // Notifications sent for the last data record (several when it exceeds
+    // ftms::kMaxNotificationPayload).
+    const std::vector<smartfitness::ftms::Bytes>& lastMachineDataNotifications() const { return machineRecords_; }
     const smartfitness::ftms::Bytes& lastControlResponse() const;
     const smartfitness::ftms::Bytes& lastMachineStatus() const;
     const smartfitness::ftms::Bytes& feature() const;
@@ -75,6 +80,7 @@ private:
     void drainControlPoint();
     void handleControlPoint(const PendingWrite& write);
     void publishBikeData();
+    void clearSessionData();
     void updateTrainingStatus();
     void startAdvertising();
     void stopAdvertising();
@@ -90,8 +96,7 @@ private:
     void transportApplyName();
     void transportSetFeature();
     void transportApplyProfile();
-    void transportNotifyBikeData();
-    void transportNotifyTreadmillData();
+    void transportNotifyMachineData();
     void transportNotifyTrainingStatus();
     void transportIndicateResponse();
     void transportNotifyStatus();
@@ -113,8 +118,10 @@ private:
     bool trainingStatusSent_ = false;
     smartfitness::ftms::TrainingStatus trainingStatus_ = smartfitness::ftms::TrainingStatus::Idle;
     smartfitness::ftms::Bytes feature_;
-    smartfitness::ftms::Bytes bikeData_;
-    smartfitness::ftms::Bytes treadmillData_;
+    // Indexed by MachineProfile.
+    std::array<smartfitness::ftms::Bytes, smartfitness::kMachineProfileCount> machineData_{};
+    // machineData_ of the current profile split into notifications ("More Data").
+    std::vector<smartfitness::ftms::Bytes> machineRecords_;
     smartfitness::ftms::Bytes response_;
     smartfitness::ftms::Bytes status_;
     Clock clock_;

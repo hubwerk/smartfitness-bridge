@@ -219,7 +219,7 @@ bool ConfigStore::isValidApPassword(const std::string& password) {
 
 bool ConfigStore::isValid(const BridgeConfig& config) {
     if (static_cast<std::uint8_t>(config.ftmsOutputProfile) >
-        static_cast<std::uint8_t>(smartfitness::FtmsOutputProfile::Rower)) return false;
+        static_cast<std::uint8_t>(smartfitness::FtmsOutputProfile::StairClimber)) return false;
     if (!isValidFtmsName(config.ftmsName)) return false;
     if (!isValidAdapterId(config.pairedAdapterId) || !isValidSsid(config.wifiSsid) ||
         !isValidPassword(config.wifiPassword, true) || !isValidApPassword(config.apPassword))

@@ -39,7 +39,7 @@ void SimulatedDeviceAdapter::setTrainer(bool trainer) {
     if (trainer_ == trainer) return;
     trainer_ = trainer;
     telemetry_.trainerDetected = trainerDetected();
-    telemetry_.targetPower = 0;
+    telemetry_.targetPower.reset();
     emitTelemetry(telemetry_);
 }
 

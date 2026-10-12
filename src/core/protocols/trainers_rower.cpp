@@ -289,6 +289,9 @@ void Concept2Pm5Source::onNotify(std::size_t index, const std::uint8_t* data, st
         if (length < minimum) return;
     }
     if (page == 0x31) {
+        // General status: elapsed time (0.01 s) and distance (0.1 m), UINT24.
+        sample_.elapsed = {static_cast<float>(data[0] | data[1] << 8 | data[2] << 16) * 0.01F, true};
+        sample_.distance = {static_cast<float>(data[3] | data[4] << 8 | data[5] << 16) * 0.1F, true};
         active_ = data[9] != 0;
         if (multiplex && length >= 19) sample_.resistance = {static_cast<float>(data[18]), true};
         if (!active_) {
@@ -301,8 +304,12 @@ void Concept2Pm5Source::onNotify(std::size_t index, const std::uint8_t* data, st
         sample_.cadence = {active_ ? static_cast<float>(data[5]) : 0, true};
         if (data[6] != 0xff) sample_.heartRate = {static_cast<float>(data[6]), true};
         else sample_.heartRate.valid = false;
+        // Current and average pace per 500 m (0.01 s), when the frame carries them.
+        if (length >= 9) sample_.pace = {active_ ? u16(data + 7) * 0.01F : 0, true};
+        if (length >= 11) sample_.averagePace = {u16(data + 9) * 0.01F, true};
     } else {
         sample_.power = {active_ ? static_cast<float>(u16(data + 3)) : 0, true};
+        sample_.strokeCount = {static_cast<float>(u16(data + 7)), true};
     }
     touch(nowMs);
 }

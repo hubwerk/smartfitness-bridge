@@ -1,6 +1,7 @@
 #pragma once
 
-// FTMS (0x1826) input: Indoor Bike / Treadmill / Cross Trainer / Rower data,
+// FTMS (0x1826) input: Indoor Bike / Treadmill / Cross Trainer / Step Climber /
+// Stair Climber / Rower data (every field, mapped onto core metrics),
 // Feature and supported-range reads, Control Point with Request Control,
 // target power/resistance/inclination/speed and indoor bike simulation.
 
@@ -39,7 +40,12 @@ public:
     const ftms::SupportedRange& resistanceRange() const { return resistanceRange_; }
 
     // Subscription and read indices used by plan().
-    enum Subscription : std::uint8_t { SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubCount };
+    // Step/Stair Climber follow the Control Point so earlier indices stay stable.
+    enum Subscription : std::uint8_t {
+        SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubStepClimber, SubStairClimber, SubCount
+    };
+    static constexpr std::uint32_t kDataSubscriptions = (1U << SubBike) | (1U << SubTreadmill) |
+        (1U << SubCrossTrainer) | (1U << SubRower) | (1U << SubStepClimber) | (1U << SubStairClimber);
     enum Read : std::uint8_t { ReadFeature, ReadResistanceRange, ReadInclinationRange, ReadPowerRange, ReadCount };
 
     static constexpr std::uint32_t kControlTimeoutMs = 3000;

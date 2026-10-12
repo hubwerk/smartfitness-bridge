@@ -211,6 +211,20 @@ void testPm5() {
     Bytes power{0, 0, 0, 0xfa, 0, 0, 0, 1, 0};
     notify(source, 2, power, 1200);
     assert(source.sample().power.value == 250);
+    // Optional rowing fields: only what the PM5 actually sent becomes valid.
+    assert(source.sample().strokeCount.valid && source.sample().strokeCount.value == 1);
+    assert(!source.sample().pace.valid && !source.sample().averagePace.valid);
+    Bytes timed(10);
+    timed[0] = 0x10;  // 100.00 s
+    timed[1] = 0x27;
+    timed[3] = 0xe8;  // 100.0 m
+    timed[4] = 0x03;
+    timed[9] = 1;
+    notify(source, 0, timed, 1210);
+    assert(near(source.sample().elapsed.value, 100.0F) && near(source.sample().distance.value, 100.0F));
+    Bytes paced{0, 0, 0, 0xe8, 3, 24, 140, 0x10, 0x27, 0x20, 0x4e};
+    notify(source, 1, paced, 1220);
+    assert(near(source.sample().pace.value, 100.0F) && near(source.sample().averagePace.value, 200.0F));
     additional[6] = 0xff;
     notify(source, 1, additional, 1300);
     assert(!source.sample().heartRate.valid);

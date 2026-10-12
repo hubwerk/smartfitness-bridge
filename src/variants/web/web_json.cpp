@@ -36,6 +36,11 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
     addMetric(telemetry, "incline", status, Metric::Incline);
     addMetric(telemetry, "distance", status, Metric::Distance);
     addMetric(telemetry, "elapsed", status, Metric::ElapsedTime);
+    // Further FTMS metrics are only listed when the device actually sends them.
+    for (std::size_t index = static_cast<std::size_t>(Metric::Resistance); index < kMetricCount; ++index) {
+        const auto metric = static_cast<Metric>(index);
+        if (status.metric(metric).valid) addMetric(telemetry, metricKey(metric), status, metric);
+    }
     document["deviceName"] = status.deviceName;
     document["trainer"] = status.trainer;
     document["canControl"] = status.canControl;

@@ -19,16 +19,8 @@
 namespace smartfitness {
 namespace protocols {
 
-struct SourceSample {
-    MetricSample elapsed;     // s
-    MetricSample speed;       // km/h
-    MetricSample cadence;     // rpm
-    MetricSample power;       // W
-    MetricSample heartRate;   // bpm
-    MetricSample incline;     // %
-    MetricSample resistance;  // device level as reported by the machine
-    MetricSample distance;    // total metres reported by the machine
-};
+// Latest value of every metric; fields the device never sent stay invalid.
+using SourceSample = MetricSet;
 
 class SourceProtocol {
 public:
