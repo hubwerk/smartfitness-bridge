@@ -49,14 +49,13 @@ page grows **5,334 → 17,522 bytes (+12,188 B)**; the font payload contributes
 **10,299 B** of that compressed asset.
 
 UI labels are displayed uppercase; editable names and underlying device/adapter
-identifiers retain their values. Numeric codes such as `02-338` are decoration,
-not commands or IDs. Text on bright fills is black; body data is light blue or
+identifiers retain their values. Text on bright fills is black; body data is light blue or
 peach on black. Error indicators also include text, not colour alone.
 
 ### Shapes and states
 
 - HMI: header-only arc follows the top circular edge, with rounded pill
-  endcaps, uppercase title, numeric code and a thin peach separator. There is
+  endcaps, uppercase title and a thin peach separator. There is
   no elbow, vertical sidebar or bottom frame.
 - Web: intentionally retains the swept elbow, title bar and desktop sidebar
   (responsive navigation pills on phones). This HMI revision does not change it.
