@@ -304,12 +304,17 @@ void CrowPanelHal::setLedRing(bool enabled, const Rgb& color) {
 HmiSettings CrowPanelHal::loadSettings() {
     HmiSettings settings;
     Preferences prefs;
-    if (!prefs.begin("sfhmi", true)) return settings;
+    if (!prefs.begin("sfhmi", false)) return settings;
+    if (!prefs.isKey("ui")) {
+        prefs.end();
+        return settings;
+    }
     const std::size_t length = prefs.getBytesLength("ui");
     if (length > 0 && length <= 16) {
         std::vector<std::uint8_t> data(length);
-        prefs.getBytes("ui", data.data(), length);
-        deserialize(data, settings);  // keeps the defaults when invalid
+        if (prefs.getBytes("ui", data.data(), length) == length) {
+            deserialize(data, settings);  // keeps the defaults when invalid
+        }
     }
     prefs.end();
     return settings;

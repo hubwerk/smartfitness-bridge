@@ -2,6 +2,20 @@
 // (BLE input, BridgeCore, FTMS output, configuration, Serial console) and
 // hands over to the selected variant through variant::begin()/variant::loop().
 #include <Arduino.h>
+
+#if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
+#include <nvs_flash.h>
+
+// Allocate 24 KB stack for Arduino loopTask (LVGL 9 requires ~10 KB peak during rendering).
+#if defined(SET_LOOP_TASK_STACK_SIZE)
+SET_LOOP_TASK_STACK_SIZE(24 * 1024);
+#else
+extern "C" size_t getArduinoLoopTaskStackSize(void) {
+    return 24 * 1024;
+}
+#endif
+#endif
+
 #include "variant.h"
 #include "bridge/bridge_core.hpp"
 #include "ant_output.h"
@@ -42,6 +56,18 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
     Serial.printf("SmartFitness Bridge %s (%s variant) starting...\n", SMARTFITNESS_VERSION, variant::name());
+
+#if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
+    esp_err_t nvsErr = nvs_flash_init();
+    if (nvsErr == ESP_ERR_NVS_NO_FREE_PAGES || nvsErr == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        Serial.println("[NVS] truncating/re-initializing corrupted partition...");
+        nvs_flash_erase();
+        nvsErr = nvs_flash_init();
+    }
+    if (nvsErr != ESP_OK) {
+        Serial.printf("[NVS] init failed: 0x%x\n", nvsErr);
+    }
+#endif
 
     // Load the persisted configuration before outputs are enabled (controller.begin applies it).
     switch (configStore.begin()) {
