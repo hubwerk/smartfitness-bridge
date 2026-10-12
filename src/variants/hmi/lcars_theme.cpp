@@ -159,18 +159,26 @@ void pill(lv_obj_t* object, std::uint32_t color) {
 
 lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert) {
     const auto color = alert ? Alert : Orange;
-    lv_obj_t* header = arc(screen, 232, 12, color, 225, 315);
+    lv_obj_t* header = lv_obj_create(screen);
+    lv_obj_remove_style_all(header);
+    lv_obj_remove_flag(header, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_set_size(header, 124, 26);
+    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 28);
+    lv_obj_set_style_bg_opa(header, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(header, lv_color_hex(color), 0);
+    lv_obj_set_style_radius(header, LV_RADIUS_CIRCLE, 0);
+
     bar(screen, 48, 57, 144, 3, Peach, 1);
 
-    // One line between the header arc and the bar; long titles get dots.
-    lv_obj_t* label = lv_label_create(screen);
-    lv_obj_set_size(label, 120, lv_font_get_line_height(&sf_antonio_20));
+    // Centered inverted headline inside the header pill; long titles get dots.
+    lv_obj_t* label = lv_label_create(header);
+    lv_obj_set_size(label, 108, lv_font_get_line_height(&sf_antonio_20));
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_label_set_text(label, uppercase(title).c_str());
     lv_obj_set_style_text_font(label, &sf_antonio_20, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(Peach), 0);
+    lv_obj_set_style_text_color(label, lv_color_black(), 0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(label, 60, 31);
+    lv_obj_center(label);
     return header;
 }
 

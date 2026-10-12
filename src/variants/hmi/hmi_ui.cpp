@@ -246,7 +246,7 @@ void HmiUi::update() {
         const bool alert = screen_ == Screen::Confirm || status_.input.stale ||
                            status_.state == RuntimeState::Disconnected ||
                            (toastAlert_ && !lv_obj_has_flag(toast_, LV_OBJ_FLAG_HIDDEN));
-        lv_obj_set_style_arc_color(header_, lv_color_hex(alert ? lcars::Alert : lcars::Orange), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(header_, lv_color_hex(alert ? lcars::Alert : lcars::Orange), 0);
     }
     if (inputBusy()) return;
     if (navigatePending_) {

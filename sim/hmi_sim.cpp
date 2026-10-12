@@ -535,14 +535,12 @@ void shot(const char* name, bool checkFocus = true) {
         for (std::uint32_t i = 0; i < lv_obj_get_child_count(lv_screen_active()); ++i) {
             auto* child = lv_obj_get_child(lv_screen_active(), static_cast<int>(i));
             if (lv_obj_check_type(child, &lv_arc_class)) {
-                if (lv_arc_get_bg_angle_start(child) == 225) {
-                    assert(lv_color_to_u32(lv_obj_get_style_arc_color(child, LV_PART_MAIN)) ==
-                           lv_color_to_u32(lv_color_hex(lcars::Alert)));
-                } else {
-                    assert(lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN));
-                }
+                assert(lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN));
             }
         }
+        auto* header = lv_obj_get_child(lv_screen_active(), 0);
+        assert(lv_color_to_u32(lv_obj_get_style_bg_color(header, 0)) ==
+               lv_color_to_u32(lv_color_hex(lcars::Alert)));
     }
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(nullptr);
