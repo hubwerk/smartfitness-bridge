@@ -223,7 +223,7 @@ std::string HmiUi::signature() const {
                    status_.input.paired.adapter + std::to_string(status_.input.bleSelected) +
                    std::to_string(config_.simulatedTrainer);
             for (const auto& device : scan_.devices)
-                sig += "|" + device.address + device.name + device.adapter + std::to_string(device.rssi);
+                sig += "|" + device.address + device.name + device.adapter + std::to_string(signalLevel(device.rssi));
             break;
         case Screen::Control:
             sig += std::to_string(static_cast<int>(status_.state)) + std::to_string(status_.canControl) +
@@ -538,8 +538,14 @@ void HmiUi::buildDevices() {
     for (std::size_t index = 0; index < scan_.devices.size(); ++index) {
         const auto& dev = scan_.devices[index];
         const std::uint32_t color = scanEntryMuted(dev) ? lcars::Gray : lcars::Violet;
-        lcars::pill(addButton(list, scanEntryLabel(dev),
-                             [this, index] { openDevice(index); }), color);
+        lv_obj_t* entry = addButton(list, scanEntryLabel(dev), [this, index] { openDevice(index); });
+        lcars::pill(entry, color);
+        // Signal pictogram in the widened left padding, clear of the text.
+        constexpr lv_coord_t kIconGap = 6;
+        const lv_coord_t padLeft = lv_obj_get_style_pad_left(entry, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(entry, padLeft + lcars::SignalBarsWidth + kIconGap, 0);
+        lv_obj_align(lcars::signalBars(entry, signalLevel(dev.rssi), lcars::Black), LV_ALIGN_LEFT_MID,
+                     -(lcars::SignalBarsWidth + kIconGap), 0);
     }
     addButton(list, tr(Str::Back), [this] { back(); });
 }
@@ -549,10 +555,11 @@ void HmiUi::buildDeviceDetail() {
     makeScreen(title);
     lv_obj_t* list = makeList(root_);
     if (!device_.name.empty()) addLabel(list, device_.name);
-    std::string info = device_.address + "\n" + std::to_string(device_.rssi) + " dBm\n" + tr(Str::Adapter) + ": " +
+    addLabel(list, device_.address);
+    lcars::signalBars(list, signalLevel(device_.rssi), lcars::LightBlue);
+    addLabel(list, std::string(tr(Str::Adapter)) + ": " +
                        (device_.adapter.empty() ? std::string(tr(Str::Unknown))
-                                                : device_.adapter + " (" + tr(Str::Detected) + ")");
-    addLabel(list, info);
+                                                : device_.adapter + " (" + tr(Str::Detected) + ")"));
     if (!device_.adapter.empty()) {
         addButton(list, tr(Str::Pair), [this] {
             Command pair;

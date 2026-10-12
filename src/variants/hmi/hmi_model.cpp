@@ -226,9 +226,16 @@ std::string targetLabel(const StatusView& status) {
 std::string scanEntryLabel(const ScanDeviceView& device) {
     const std::string& primary = !device.label.empty() ? device.label : (device.name.empty() ? device.address : device.name);
     std::string label = primary;
-    label += "\n" + std::to_string(device.rssi) + " dBm  ";
+    label += "\n";
     label += device.adapter.empty() ? std::string("?") : device.adapter;
     return label;
+}
+
+int signalLevel(int rssi) {
+    if (rssi >= -60) return 4;
+    if (rssi >= -70) return 3;
+    if (rssi >= -80) return 2;
+    return 1;
 }
 
 bool scanEntryMuted(const ScanDeviceView& device) { return !device.relevant || device.name.empty(); }

@@ -66,6 +66,10 @@ peach on black. Error indicators also include text, not colour alone.
   use the larger preset pills when possible.
 - Data: large central digits, small unit, labelled secondary/status readouts;
   blue segments fill an arc (HMI) or a linear gauge (web).
+- Signal strength (HMI): a 4-bar pictogram (`lcars::signalBars`) replaces the
+  numeric RSSI in scan results (black on the pill, left of the label) and device
+  details (light blue). Bars lit: ≥ −60 dBm 4, ≥ −70 dBm 3, ≥ −80 dBm 2, else 1;
+  unlit bars stay visible at 30 % opacity so the level reads by shape.
 - Focus: brighter selection with a white outline, including `:focus-visible`.
   On the HMI the knob cursor is a 2 px white inner border plus a 2 px orange
   ring 1 px outside the focused pill/roller/keyboard (light blue while
