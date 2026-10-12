@@ -31,7 +31,7 @@ There are no gradients, shadows, textured materials or external web resources.
 | Light blue | `#99CCFF` | Telemetry and readouts |
 | Blue | `#5566FF` | Data accents |
 | Alert | `#CC4444` | Failure, disconnect, stale data, stop and destructive actions |
-| White | `#FFFFFF` | Keyboard/knob focus outline |
+| White | `#FFFFFF` | Keyboard/knob focus border; web `:focus-visible` outline |
 
 ### Typography and licence
 
@@ -67,6 +67,12 @@ peach on black. Error indicators also include text, not colour alone.
 - Data: large central digits, small unit, labelled secondary/status readouts;
   blue segments fill an arc (HMI) or a linear gauge (web).
 - Focus: brighter selection with a white outline, including `:focus-visible`.
+  On the HMI the knob cursor is a 2 px white inner border plus a 2 px orange
+  ring 1 px outside the focused pill/roller/keyboard (light blue while
+  editing). Lists, button rows and the roller keep 3 px of padding
+  (`lcars::FocusRing`) so the ring is never clipped. Keyboard keys use the
+  inner border only. The dashboard, whose whole circle is the only knob
+  target, draws no ring on the panel edge.
   Pressed: golden colour swap. Disabled: dimmed and non-actionable.
 - HMI red alert colours only the header arc for disconnected/stale status,
   command rejection, speed confirmation and factory reset. The scrollbar and
@@ -80,7 +86,12 @@ peach on black. Error indicators also include text, not colour alone.
 The dashboard and adjustment gauges follow the circular edge with 24 separated
 arc segments. The frame is confined to the header on every HMI screen.
 Lists gain 18 px of width and are centred inside the circle; corners are not
-used for essential labels/actions. Long device names also wrap in the detail body.
+used for essential labels/actions. Long device names also wrap in the detail body;
+the header title is a single line between the header arc and the separator
+(long titles end in an ellipsis). Dashboard readouts are stacked without
+touching lines (the unit sits on the value's baseline), the adapter roller
+shows three complete rows, and the adjustment +/- helpers stay inside the
+gauge ring.
 Scrollable lists and the adapter/model roller have a **left curved scrollbar**:
 a dim lavender 4 px track and orange 6 px thumb follow the left circular edge.
 Thumb length represents the visible fraction (minimum 8° for very long content);
@@ -208,7 +219,11 @@ bash scripts/update_hmi_docs.sh --check
 
 The script renders the actual LVGL sources and runs the knob-only walkthrough
 plus theme/font, curved-scrollbar visibility/position/resize/lifecycle/roller
-and round-safe focus-target assertions. The web script routes
+and round-safe focus-target assertions. A geometric layout check on every
+screenshot (and on every dashboard metric of every machine profile at its
+widest value) fails if the focus ring is clipped, if drawn elements or text
+ink overlap each other or the LCARS arcs, if a roller row is cut, or if
+anything leaves the round panel. The web script routes
 the actual HTML and deterministic API/WebSocket fixtures inside the browser
 (no external server or hardware) and uses the pinned Chromium version.
 It checks keyboard navigation, mobile overflow, result alerts and absence of

@@ -77,6 +77,12 @@ void checkLcars() {
     // Disable transitions so this assertion checks the settled focus style.
     lv_obj_set_style_transition(button, nullptr, LV_STATE_FOCUSED);
     assert(lv_obj_get_style_border_width(button, LV_PART_MAIN) == 2);
+    for (const auto state : {LV_STATE_FOCUS_KEY, LV_STATE_EDITED}) {
+        lv_style_value_t width{}, pad{};
+        assert(lv_obj_get_local_style_prop(button, LV_STYLE_OUTLINE_WIDTH, &width, LV_PART_MAIN | state) == LV_STYLE_RES_FOUND);
+        assert(lv_obj_get_local_style_prop(button, LV_STYLE_OUTLINE_PAD, &pad, LV_PART_MAIN | state) == LV_STYLE_RES_FOUND);
+        assert(width.num + pad.num == lcars::FocusRing);
+    }
     lv_obj_delete(button);
     std::printf("LCARS palette, focus, and Latin-1 fonts passed\n");
 }
@@ -245,6 +251,275 @@ void writePng(const std::string& path) {
 
 std::string g_outDir = "screenshots";
 
+// --- layout check -------------------------------------------------------------
+// Geometric checks on the rendered object tree: the focus cursor must never be
+// clipped, drawn elements and text must not overlap each other or the LCARS
+// arcs, and everything has to stay on the round panel.
+
+struct Element {
+    lv_obj_t* obj;
+    lv_area_t full;     // drawn extent (incl. outline / text ink)
+    lv_area_t visible;  // after clipping by the ancestors
+    std::string name;
+};
+
+struct Ring {
+    lv_obj_t* obj;
+    float cx, cy, outer, inner, start, span, cap;
+};
+
+bool isAncestor(lv_obj_t* ancestor, lv_obj_t* obj) {
+    for (obj = lv_obj_get_parent(obj); obj; obj = lv_obj_get_parent(obj))
+        if (obj == ancestor) return true;
+    return false;
+}
+
+bool intersects(const lv_area_t& a, const lv_area_t& b) {
+    return a.x1 <= b.x2 && b.x1 <= a.x2 && a.y1 <= b.y2 && b.y1 <= a.y2;
+}
+
+bool empty(const lv_area_t& a) { return a.x1 > a.x2 || a.y1 > a.y2; }
+
+bool sameArea(const lv_area_t& a, const lv_area_t& b) {
+    return a.x1 == b.x1 && a.y1 == b.y1 && a.x2 == b.x2 && a.y2 == b.y2;
+}
+
+std::string describe(lv_obj_t* obj) {
+    std::string name = lv_obj_check_type(obj, &lv_label_class)      ? "label"
+                       : lv_obj_check_type(obj, &lv_button_class)   ? "button"
+                       : lv_obj_check_type(obj, &lv_roller_class)   ? "roller"
+                       : lv_obj_check_type(obj, &lv_textarea_class) ? "textarea"
+                       : lv_obj_check_type(obj, &lv_keyboard_class) ? "keyboard"
+                                                                    : "obj";
+    lv_obj_t* label = lv_obj_check_type(obj, &lv_label_class) ? obj : nullptr;
+    for (std::uint32_t i = 0; !label && i < lv_obj_get_child_count(obj); ++i) {
+        lv_obj_t* child = lv_obj_get_child(obj, static_cast<int>(i));
+        if (lv_obj_check_type(child, &lv_label_class)) label = child;
+    }
+    if (label) {
+        std::string text = lv_label_get_text(label);
+        for (auto& c : text)
+            if (c == '\n') c = ' ';
+        name += " '" + text.substr(0, 28) + "'";
+    }
+    return name;
+}
+
+// Vertical extent of the glyphs (not the line box) of a label.
+lv_area_t textInk(lv_obj_t* label) {
+    lv_area_t coords{};
+    lv_obj_get_coords(label, &coords);
+    const char* text = lv_label_get_text(label);
+    const lv_font_t* font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+    const int lineSpace = lv_obj_get_style_text_line_space(label, LV_PART_MAIN);
+    const int letterSpace = lv_obj_get_style_text_letter_space(label, LV_PART_MAIN);
+    const int line = lv_font_get_line_height(font);
+    int top = line, bottom = 0;
+    for (const char* c = text; *c; ++c) {
+        if (*c == '\n' || *c == ' ') continue;
+        lv_font_glyph_dsc_t glyph{};
+        if (!lv_font_get_glyph_dsc(font, &glyph, static_cast<std::uint8_t>(*c), 0)) continue;
+        const int baseline = line - font->base_line;
+        top = std::min(top, baseline - glyph.ofs_y - glyph.box_h);
+        bottom = std::max(bottom, baseline - glyph.ofs_y);
+    }
+    if (top >= bottom) return {1, 1, 0, 0};
+    const int content = lv_obj_get_content_width(label);
+    lv_point_t size{};
+    lv_text_get_size(&size, text, font, letterSpace, lineSpace, content, LV_TEXT_FLAG_NONE);
+    const int lines = std::max(1, (lv_obj_get_content_height(label) + lineSpace) / (line + lineSpace));
+    lv_area_t ink{};
+    const int left = coords.x1 + lv_obj_get_style_pad_left(label, LV_PART_MAIN);
+    const auto align = lv_obj_get_style_text_align(label, LV_PART_MAIN);
+    const int width = std::min<int>(size.x, content);
+    ink.x1 = align == LV_TEXT_ALIGN_CENTER  ? left + (content - width) / 2
+             : align == LV_TEXT_ALIGN_RIGHT ? left + content - width
+                                            : left;
+    ink.x2 = ink.x1 + width - 1;
+    ink.y1 = coords.y1 + lv_obj_get_style_pad_top(label, LV_PART_MAIN) + top;
+    ink.y2 = coords.y1 + lv_obj_get_style_pad_top(label, LV_PART_MAIN) + (lines - 1) * (line + lineSpace) + bottom - 1;
+    return ink;
+}
+
+void collect(lv_obj_t* obj, std::vector<Element>& elements, std::vector<Ring>& rings) {
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(obj); ++i) {
+        lv_obj_t* child = lv_obj_get_child(obj, static_cast<int>(i));
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) continue;
+        collect(child, elements, rings);
+    }
+    if (lv_obj_get_parent(obj) == nullptr) return;  // screen / layer
+    lv_area_t full{};
+    lv_obj_get_coords(obj, &full);
+    if (lv_obj_check_type(obj, &lv_arc_class)) {
+        Ring ring{obj, 0, 0, 0, 0, 0, 0, 0};
+        ring.cx = (full.x1 + full.x2 + 1) / 2.0F;
+        ring.cy = (full.y1 + full.y2 + 1) / 2.0F;
+        ring.outer = lv_area_get_width(&full) / 2.0F;
+        float width = static_cast<float>(lv_obj_get_style_arc_width(obj, LV_PART_MAIN));
+        if (lv_obj_get_style_arc_opa(obj, LV_PART_INDICATOR) > LV_OPA_TRANSP)
+            width = std::max<float>(width, static_cast<float>(lv_obj_get_style_arc_width(obj, LV_PART_INDICATOR)));
+        ring.inner = ring.outer - width;
+        ring.start = static_cast<float>(lv_arc_get_bg_angle_start(obj));
+        ring.span = static_cast<float>(lv_arc_get_bg_angle_end(obj)) - ring.start;
+        if (ring.span < 0) ring.span += 360.0F;
+        ring.cap = lv_obj_get_style_arc_rounded(obj, LV_PART_MAIN)
+                       ? std::asin(width / 2.0F / (ring.outer - width / 2.0F)) * 180.0F / 3.14159265F
+                       : 0.0F;
+        rings.push_back(ring);
+        return;
+    }
+    lv_obj_t* parent = lv_obj_get_parent(obj);
+    if (lv_obj_check_type(obj, &lv_label_class)) {
+        // Roller options are checked row by row in checkRoller().
+        if (lv_obj_check_type(parent, &lv_roller_class)) return;
+        if (lv_obj_get_style_bg_opa(obj, LV_PART_MAIN) == LV_OPA_TRANSP) full = textInk(obj);
+    } else {
+        const bool drawn = lv_obj_get_style_bg_opa(obj, LV_PART_MAIN) > LV_OPA_TRANSP ||
+                           (lv_obj_get_style_border_width(obj, LV_PART_MAIN) > 0 &&
+                            lv_obj_get_style_border_opa(obj, LV_PART_MAIN) > LV_OPA_TRANSP);
+        if (!drawn) return;  // transparent layout container
+    }
+    if (empty(full)) return;
+    const int outline = lv_obj_get_style_outline_width(obj, LV_PART_MAIN);
+    if (outline > 0 && lv_obj_get_style_outline_opa(obj, LV_PART_MAIN) > LV_OPA_TRANSP)
+        lv_area_increase(&full, outline + lv_obj_get_style_outline_pad(obj, LV_PART_MAIN),
+                         outline + lv_obj_get_style_outline_pad(obj, LV_PART_MAIN));
+    Element element{obj, full, full, describe(obj)};
+    for (lv_obj_t* ancestor = parent; ancestor; ancestor = lv_obj_get_parent(ancestor)) {
+        lv_area_t clip{};
+        lv_obj_get_coords(ancestor, &clip);
+        element.visible = {std::max(element.visible.x1, clip.x1), std::max(element.visible.y1, clip.y1),
+                           std::min(element.visible.x2, clip.x2), std::min(element.visible.y2, clip.y2)};
+        if (empty(element.visible)) break;
+    }
+    if (!empty(element.visible)) elements.push_back(element);
+}
+
+// A partially visible element is fine only inside a scrolled list and only
+// when it does not carry the focus cursor.
+bool scrolledAway(lv_obj_t* obj) {
+    if (lv_obj_has_state(obj, LV_STATE_FOCUSED)) return false;
+    for (lv_obj_t* ancestor = lv_obj_get_parent(obj); ancestor; ancestor = lv_obj_get_parent(ancestor)) {
+        if (lv_obj_get_scroll_top(ancestor) + lv_obj_get_scroll_bottom(ancestor) > 0) return true;
+        if (lv_obj_has_state(ancestor, LV_STATE_FOCUSED)) return false;
+    }
+    return false;
+}
+
+bool onPanel(const lv_area_t& area, int radius) {
+    const float inset = static_cast<float>(radius) * (1.0F - 0.7071F);
+    for (const float x : {area.x1 + inset, area.x2 + 1 - inset}) {
+        for (const float y : {area.y1 + inset, area.y2 + 1 - inset}) {
+            const float dx = x - kSize / 2.0F;
+            const float dy = y - kSize / 2.0F;
+            if (dx * dx + dy * dy > kSize * kSize / 4.0F + 0.5F) return false;
+        }
+    }
+    return true;
+}
+
+bool touchesRing(const lv_area_t& area, int radius, const Ring& ring) {
+    auto inside = [&ring](float x, float y) {
+        const float dx = x - ring.cx;
+        const float dy = y - ring.cy;
+        const float distance = std::sqrt(dx * dx + dy * dy);
+        if (distance < ring.inner || distance > ring.outer) return false;
+        float angle = std::atan2(dy, dx) * 180.0F / 3.14159265F;
+        float offset = std::fmod(angle - ring.start + ring.cap + 720.0F, 360.0F);
+        return offset <= ring.span + 2 * ring.cap;
+    };
+    // Outline of the rounded rectangle.
+    const float r = static_cast<float>(radius);
+    const float left = area.x1 + r, right = area.x2 + 1 - r, top = area.y1 + r, bottom = area.y2 + 1 - r;
+    for (float x = left; x <= right; x += 1.0F)
+        if (inside(x, static_cast<float>(area.y1)) || inside(x, static_cast<float>(area.y2 + 1))) return true;
+    for (float y = top; y <= bottom; y += 1.0F)
+        if (inside(static_cast<float>(area.x1), y) || inside(static_cast<float>(area.x2 + 1), y)) return true;
+    for (int step = 0; step <= 90 && radius > 0; ++step) {
+        const float angle = static_cast<float>(step) * 3.14159265F / 180.0F;
+        const float dx = r * std::cos(angle), dy = r * std::sin(angle);
+        if (inside(right + dx, bottom + dy) || inside(left - dx, bottom + dy) || inside(right + dx, top - dy) ||
+            inside(left - dx, top - dy))
+            return true;
+    }
+    return false;
+}
+
+int checkRoller(lv_obj_t* roller, const char* screen) {
+    int issues = 0;
+    lv_obj_t* label = lv_obj_get_child(roller, 0);
+    const lv_font_t* font = lv_obj_get_style_text_font(roller, LV_PART_MAIN);
+    const int line = lv_font_get_line_height(font);
+    const int step = line + lv_obj_get_style_text_line_space(roller, LV_PART_MAIN);
+    // Children are clipped by the roller's border box, not its padding.
+    lv_area_t box{};
+    lv_obj_get_coords(roller, &box);
+    const int border = lv_obj_get_style_border_width(roller, LV_PART_MAIN);
+    lv_area_increase(&box, -border, -border);
+    lv_area_t text{};
+    lv_obj_get_coords(label, &text);
+    for (std::uint32_t row = 0; row < lv_roller_get_option_count(roller); ++row) {
+        const int top = text.y1 + static_cast<int>(row) * step;
+        const int bottom = top + line - 1;
+        if (bottom < box.y1 || top > box.y2) continue;
+        if (top < box.y1 || bottom > box.y2) {
+            std::printf("  %s: roller row %u cut (%d..%d outside %d..%d)\n", screen, row, top, bottom, box.y1, box.y2);
+            ++issues;
+        }
+    }
+    return issues;
+}
+
+void checkLayout(const char* screen) {
+    std::vector<Element> elements;
+    std::vector<Ring> rings;
+    collect(lv_screen_active(), elements, rings);
+    const std::size_t screenElements = elements.size();
+    collect(lv_layer_top(), elements, rings);
+    int issues = 0;
+    for (std::size_t i = 0; i < elements.size(); ++i) {
+        const Element& a = elements[i];
+        if (!sameArea(a.full, a.visible) && !scrolledAway(a.obj)) {
+            std::printf("  %s: %s clipped (%d,%d %d,%d visible %d,%d %d,%d)\n", screen, a.name.c_str(), a.full.x1,
+                        a.full.y1, a.full.x2, a.full.y2, a.visible.x1, a.visible.y1, a.visible.x2, a.visible.y2);
+            ++issues;
+        }
+        const bool text = lv_obj_check_type(a.obj, &lv_label_class) &&
+                          lv_obj_get_style_bg_opa(a.obj, LV_PART_MAIN) == LV_OPA_TRANSP;
+        const int radius =
+            text ? 0
+                 : std::min<int>(lv_obj_get_style_radius(a.obj, LV_PART_MAIN),
+                                 std::min(lv_area_get_width(&a.visible), lv_area_get_height(&a.visible)) / 2);
+        if (!onPanel(a.visible, radius)) {
+            std::printf("  %s: %s leaves the round panel (%d,%d %d,%d r%d)\n", screen, a.name.c_str(), a.visible.x1,
+                        a.visible.y1, a.visible.x2, a.visible.y2, radius);
+            ++issues;
+        }
+        for (const Ring& ring : rings) {
+            if (isAncestor(ring.obj, a.obj) || isAncestor(a.obj, ring.obj)) continue;
+            if (i >= screenElements) continue;  // toast overlays are temporary
+            if (touchesRing(a.visible, radius, ring)) {
+                std::printf("  %s: %s overlaps arc %.0f..%.0f\n", screen, a.name.c_str(), ring.start,
+                            ring.start + ring.span);
+                ++issues;
+                break;
+            }
+        }
+        for (std::size_t j = i + 1; j < screenElements; ++j) {
+            const Element& b = elements[j];
+            if (isAncestor(a.obj, b.obj) || isAncestor(b.obj, a.obj)) continue;
+            if (intersects(a.visible, b.visible)) {
+                std::printf("  %s: %s overlaps %s\n", screen, a.name.c_str(), b.name.c_str());
+                ++issues;
+            }
+        }
+        if (lv_obj_check_type(a.obj, &lv_roller_class)) issues += checkRoller(a.obj, screen);
+    }
+    if (issues) std::printf("layout check %s: %d issue(s)\n", screen, issues);
+    assert(issues == 0);
+}
+
+
 void shot(const char* name, bool checkFocus = true) {
     pump(400);  // let animations (scroll on focus) settle
     bool hasScrollbar = false;
@@ -284,6 +559,7 @@ void shot(const char* name, bool checkFocus = true) {
             }
         }
     }
+    checkLayout(name);
     writePng(g_outDir + "/" + name + ".png");
 }
 
@@ -365,6 +641,29 @@ ConfigView configView() {
     config.antRequiresHardware = true;
     config.unsaved = true;
     return config;
+}
+
+// Every dashboard metric of every machine profile at its widest value.
+void checkDashboardMetrics() {
+    g_ui.navigate(Screen::Dashboard);
+    for (std::size_t p = 0; p < kMachineProfileCount; ++p) {
+        auto status = bikeStatus();
+        status.input.profile = static_cast<MachineProfile>(p);
+        for (std::size_t m = 0; m < kMetricCount; ++m) {
+            const MetricFormat& format = metricFormat(static_cast<Metric>(m));
+            const float widest = std::fabs(format.gaugeMin) > format.gaugeMax ? format.gaugeMin : format.gaugeMax;
+            setMetric(status, static_cast<Metric>(m), widest * 1.999F);
+        }
+        g_ui.setStatus(status);
+        pump(100);
+        for (std::size_t i = 0; i < dashboardMetrics(status.input.profile).size(); ++i) {
+            turn(1);
+            pump(50);
+            const std::string name = "dashboard-" + std::to_string(p) + "-" + std::to_string(i);
+            checkLayout(name.c_str());
+        }
+    }
+    std::printf("dashboard layout of all profiles and metrics passed\n");
 }
 
 bool lastCommand(CommandType type) { return !g_commands.empty() && g_commands.back().type == type; }
@@ -523,12 +822,13 @@ int main(int argc, char** argv) {
     pump(400);
     auto* list = currentList();
     lv_anim_delete(list, nullptr);
+    // No off-screen focus rectangle in the swipe-position screenshots.
+    lv_obj_remove_state(lv_group_get_focused(lv_indev_get_group(g_knob)),
+                        static_cast<lv_state_t>(LV_STATE_FOCUSED | LV_STATE_FOCUS_KEY));
     lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
-    shot("21-devices-scroll-top");
+    shot("21-devices-scroll-top", false);
     const int range = lv_obj_get_scroll_top(list) + lv_obj_get_scroll_bottom(list);
     assert(range > 0);
-    // No off-screen focus rectangle in the swipe-position screenshots.
-    lv_obj_remove_state(lv_group_get_focused(lv_indev_get_group(g_knob)), LV_STATE_FOCUSED);
     lv_obj_scroll_to_y(list, range / 2, LV_ANIM_OFF);
     shot("22-devices-scroll-middle", false);
     lv_obj_scroll_to_y(list, range, LV_ANIM_OFF);
@@ -543,6 +843,8 @@ int main(int argc, char** argv) {
     assert(std::string(lv_label_get_text(name)) == longScan.devices[0].name);
     assert(lv_obj_get_width(name) <= lv_obj_get_content_width(list));
     assert(lv_obj_get_height(name) > lv_font_get_line_height(&sf_antonio_16));
+    checkLayout("device-detail-long-name");
+    checkDashboardMetrics();
     std::printf("hmi simulator done\n");
     return 0;
 }
