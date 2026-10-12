@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 #include "bridge/bridge_core.hpp"
 
@@ -24,6 +25,12 @@ constexpr std::uint16_t kSupportedPowerRangeUuid = 0x2AD8;
 constexpr std::uint16_t kControlPointUuid = 0x2AD9;
 constexpr std::uint16_t kMachineStatusUuid = 0x2ADA;
 
+constexpr std::uint16_t kTreadmillDataUuid = 0x2ACD;
+constexpr std::uint16_t kCrossTrainerDataUuid = 0x2ACE;
+constexpr std::uint16_t kStepClimberDataUuid = 0x2ACF;
+constexpr std::uint16_t kStairClimberDataUuid = 0x2AD0;
+constexpr std::uint16_t kRowerDataUuid = 0x2AD1;
+
 // Indoor Bike Data flags (bit 0 "More Data" is inverted: 0 means speed is present).
 constexpr std::uint16_t kBikeFlagMoreData = 1U << 0;
 constexpr std::uint16_t kBikeFlagCadence = 1U << 2;
@@ -31,15 +38,32 @@ constexpr std::uint16_t kBikeFlagPower = 1U << 6;
 constexpr std::uint16_t kBikeFlagHeartRate = 1U << 9;
 
 // Fitness Machine Features field.
+constexpr std::uint32_t kFeatureAverageSpeed = 1U << 0;
 constexpr std::uint32_t kFeatureCadence = 1U << 1;
+constexpr std::uint32_t kFeatureTotalDistance = 1U << 2;
 constexpr std::uint32_t kFeatureInclination = 1U << 3;
+constexpr std::uint32_t kFeatureElevationGain = 1U << 4;
+constexpr std::uint32_t kFeaturePace = 1U << 5;
+constexpr std::uint32_t kFeatureStepCount = 1U << 6;
+constexpr std::uint32_t kFeatureResistanceLevel = 1U << 7;
+constexpr std::uint32_t kFeatureStrideCount = 1U << 8;
+constexpr std::uint32_t kFeatureExpendedEnergy = 1U << 9;
 constexpr std::uint32_t kFeatureHeartRate = 1U << 10;
+constexpr std::uint32_t kFeatureMetabolicEquivalent = 1U << 11;
+constexpr std::uint32_t kFeatureElapsedTime = 1U << 12;
+constexpr std::uint32_t kFeatureRemainingTime = 1U << 13;
 constexpr std::uint32_t kFeaturePower = 1U << 14;
+constexpr std::uint32_t kFeaturePowerAndForce = 1U << 15;
 // Target Setting Features field.
+constexpr std::uint32_t kTargetSpeed = 1U << 0;
 constexpr std::uint32_t kTargetInclination = 1U << 1;
 constexpr std::uint32_t kTargetResistance = 1U << 2;
 constexpr std::uint32_t kTargetPower = 1U << 3;
 constexpr std::uint32_t kTargetIndoorBikeSimulation = 1U << 13;
+
+// Expended Energy sub-fields use these values for "data not available".
+constexpr std::uint16_t kEnergyNotAvailable16 = 0xFFFF;
+constexpr std::uint8_t kEnergyNotAvailable8 = 0xFF;
 
 enum class OpCode : std::uint8_t {
     RequestControl = 0x00,
@@ -79,27 +103,170 @@ enum class TrainingStatus : std::uint8_t {
     ManualMode = 0x0D
 };
 
+// ---------------------------------------------------------------------------
+// Machine data characteristics. Every FTMS field of each profile is modelled
+// with its native wire type and resolution; a field is std::nullopt when the
+// device did not send it (flag clear, or the FTMS "not available" value) so
+// it is never mistaken for 0.
+//
+// Some FTMS fields share one flag. When encoding, a group is sent if any of
+// its members is present; a missing companion is sent as the "not available"
+// value where FTMS defines one (expended energy) and as 0 otherwise.
+// ---------------------------------------------------------------------------
+
+// 0x2AD2, 16-bit flags.
 struct IndoorBikeData {
-    MetricSample speed;      // km/h
-    MetricSample cadence;    // rpm
-    MetricSample power;      // W
-    MetricSample heartRate;  // bpm
+    std::optional<std::uint16_t> instantaneousSpeed;    // 0.01 km/h (flag bit 0 inverted)
+    std::optional<std::uint16_t> averageSpeed;          // 0.01 km/h
+    std::optional<std::uint16_t> instantaneousCadence;  // 0.5 rpm
+    std::optional<std::uint16_t> averageCadence;        // 0.5 rpm
+    std::optional<std::uint32_t> totalDistance;         // m, UINT24
+    std::optional<std::int16_t> resistanceLevel;        // unitless, 1
+    std::optional<std::int16_t> instantaneousPower;     // W
+    std::optional<std::int16_t> averagePower;           // W
+    std::optional<std::uint16_t> totalEnergy;           // kcal
+    std::optional<std::uint16_t> energyPerHour;         // kcal
+    std::optional<std::uint8_t> energyPerMinute;        // kcal
+    std::optional<std::uint8_t> heartRate;              // bpm
+    std::optional<std::uint8_t> metabolicEquivalent;    // 0.1 MET
+    std::optional<std::uint16_t> elapsedTime;           // s
+    std::optional<std::uint16_t> remainingTime;         // s
 };
 
+// 0x2ACD, 16-bit flags.
 struct TreadmillData {
-    MetricSample speed;      // km/h
-    MetricSample incline;    // %, ramp angle derived from grade
-    MetricSample heartRate;  // bpm
-    MetricSample distance;   // m
-    MetricSample elapsed;    // seconds, only when supplied by the input
+    std::optional<std::uint16_t> instantaneousSpeed;     // 0.01 km/h (flag bit 0 inverted)
+    std::optional<std::uint16_t> averageSpeed;           // 0.01 km/h
+    std::optional<std::uint32_t> totalDistance;          // m, UINT24
+    std::optional<std::int16_t> inclination;             // 0.1 %   } one flag
+    std::optional<std::int16_t> rampAngleSetting;        // 0.1 deg }
+    std::optional<std::uint16_t> positiveElevationGain;  // 0.1 m } one flag
+    std::optional<std::uint16_t> negativeElevationGain;  // 0.1 m }
+    std::optional<std::uint8_t> instantaneousPace;       // 0.1 km/min
+    std::optional<std::uint8_t> averagePace;             // 0.1 km/min
+    std::optional<std::uint16_t> totalEnergy;            // kcal
+    std::optional<std::uint16_t> energyPerHour;          // kcal
+    std::optional<std::uint8_t> energyPerMinute;         // kcal
+    std::optional<std::uint8_t> heartRate;               // bpm
+    std::optional<std::uint8_t> metabolicEquivalent;     // 0.1 MET
+    std::optional<std::uint16_t> elapsedTime;            // s
+    std::optional<std::uint16_t> remainingTime;          // s
+    std::optional<std::int16_t> forceOnBelt;             // N } one flag
+    std::optional<std::int16_t> powerOutput;             // W }
 };
 
-TreadmillData treadmillDataFrom(const TrainerState& state);
-Bytes encodeTreadmillData(const TreadmillData& data);
+// 0x2ACE, 24-bit flags.
+struct CrossTrainerData {
+    std::optional<std::uint16_t> instantaneousSpeed;     // 0.01 km/h (flag bit 0 inverted)
+    std::optional<std::uint16_t> averageSpeed;           // 0.01 km/h
+    std::optional<std::uint32_t> totalDistance;          // m, UINT24
+    std::optional<std::uint16_t> stepPerMinute;          // 1/min } one flag
+    std::optional<std::uint16_t> averageStepRate;        // 1/min }
+    std::optional<std::uint16_t> strideCount;            // 0.1
+    std::optional<std::uint16_t> positiveElevationGain;  // m } one flag
+    std::optional<std::uint16_t> negativeElevationGain;  // m }
+    std::optional<std::int16_t> inclination;             // 0.1 %   } one flag
+    std::optional<std::int16_t> rampAngleSetting;        // 0.1 deg }
+    std::optional<std::int16_t> resistanceLevel;         // 0.1
+    std::optional<std::int16_t> instantaneousPower;      // W
+    std::optional<std::int16_t> averagePower;            // W
+    std::optional<std::uint16_t> totalEnergy;            // kcal
+    std::optional<std::uint16_t> energyPerHour;          // kcal
+    std::optional<std::uint8_t> energyPerMinute;         // kcal
+    std::optional<std::uint8_t> heartRate;               // bpm
+    std::optional<std::uint8_t> metabolicEquivalent;     // 0.1 MET
+    std::optional<std::uint16_t> elapsedTime;            // s
+    std::optional<std::uint16_t> remainingTime;          // s
+    bool movementBackward = false;                       // flag bit 15 (no field)
+};
 
-// Uses only samples the core marked valid (connected and supported by the device).
-IndoorBikeData indoorBikeDataFrom(const TrainerState& state);
+// 0x2ACF, 16-bit flags.
+struct StepClimberData {
+    std::optional<std::uint16_t> floors;                 // } flag bit 0 inverted
+    std::optional<std::uint16_t> stepCount;              // }
+    std::optional<std::uint16_t> stepPerMinute;          // 1/min
+    std::optional<std::uint16_t> averageStepRate;        // 1/min
+    std::optional<std::uint16_t> positiveElevationGain;  // m
+    std::optional<std::uint16_t> totalEnergy;            // kcal
+    std::optional<std::uint16_t> energyPerHour;          // kcal
+    std::optional<std::uint8_t> energyPerMinute;         // kcal
+    std::optional<std::uint8_t> heartRate;               // bpm
+    std::optional<std::uint8_t> metabolicEquivalent;     // 0.1 MET
+    std::optional<std::uint16_t> elapsedTime;            // s
+    std::optional<std::uint16_t> remainingTime;          // s
+};
+
+// 0x2AD0, 16-bit flags.
+struct StairClimberData {
+    std::optional<std::uint16_t> floors;                 // flag bit 0 inverted
+    std::optional<std::uint16_t> stepPerMinute;          // 1/min
+    std::optional<std::uint16_t> averageStepRate;        // 1/min
+    std::optional<std::uint16_t> positiveElevationGain;  // m
+    std::optional<std::uint16_t> strideCount;            // 1
+    std::optional<std::uint16_t> totalEnergy;            // kcal
+    std::optional<std::uint16_t> energyPerHour;          // kcal
+    std::optional<std::uint8_t> energyPerMinute;         // kcal
+    std::optional<std::uint8_t> heartRate;               // bpm
+    std::optional<std::uint8_t> metabolicEquivalent;     // 0.1 MET
+    std::optional<std::uint16_t> elapsedTime;            // s
+    std::optional<std::uint16_t> remainingTime;          // s
+};
+
+// 0x2AD1, 16-bit flags.
+struct RowerData {
+    std::optional<std::uint8_t> strokeRate;            // 0.5 /min } flag bit 0 inverted
+    std::optional<std::uint16_t> strokeCount;          // 1        }
+    std::optional<std::uint8_t> averageStrokeRate;     // 0.5 /min
+    std::optional<std::uint32_t> totalDistance;        // m, UINT24
+    std::optional<std::uint16_t> instantaneousPace;    // s per 500 m
+    std::optional<std::uint16_t> averagePace;          // s per 500 m
+    std::optional<std::int16_t> instantaneousPower;    // W
+    std::optional<std::int16_t> averagePower;          // W
+    std::optional<std::int16_t> resistanceLevel;       // unitless, 1
+    std::optional<std::uint16_t> totalEnergy;          // kcal
+    std::optional<std::uint16_t> energyPerHour;        // kcal
+    std::optional<std::uint8_t> energyPerMinute;       // kcal
+    std::optional<std::uint8_t> heartRate;             // bpm
+    std::optional<std::uint8_t> metabolicEquivalent;   // 0.1 MET
+    std::optional<std::uint16_t> elapsedTime;          // s
+    std::optional<std::uint16_t> remainingTime;        // s
+};
+
 Bytes encodeIndoorBikeData(const IndoorBikeData& data);
+Bytes encodeTreadmillData(const TreadmillData& data);
+Bytes encodeCrossTrainerData(const CrossTrainerData& data);
+Bytes encodeStepClimberData(const StepClimberData& data);
+Bytes encodeStairClimberData(const StairClimberData& data);
+Bytes encodeRowerData(const RowerData& data);
+
+// Return false (and leave out empty) when the payload is truncated for the
+// flags it announces.
+bool decodeIndoorBikeData(const std::uint8_t* data, std::size_t length, IndoorBikeData& out);
+bool decodeTreadmillData(const std::uint8_t* data, std::size_t length, TreadmillData& out);
+bool decodeCrossTrainerData(const std::uint8_t* data, std::size_t length, CrossTrainerData& out);
+bool decodeStepClimberData(const std::uint8_t* data, std::size_t length, StepClimberData& out);
+bool decodeStairClimberData(const std::uint8_t* data, std::size_t length, StairClimberData& out);
+bool decodeRowerData(const std::uint8_t* data, std::size_t length, RowerData& out);
+
+// Output mapping: core metrics (normalized units, see bridge/metric.hpp) to
+// the profile's fields. Only samples the core marked valid are used; derived
+// companions are filled where FTMS needs them (ramp angle from inclination,
+// rower pace from speed).
+IndoorBikeData indoorBikeDataFrom(const TrainerState& state);
+TreadmillData treadmillDataFrom(const TrainerState& state);
+CrossTrainerData crossTrainerDataFrom(const TrainerState& state);
+StepClimberData stepClimberDataFrom(const TrainerState& state);
+StairClimberData stairClimberDataFrom(const TrainerState& state);
+RowerData rowerDataFrom(const TrainerState& state);
+
+// Data characteristic UUID used by a machine profile.
+std::uint16_t machineDataUuid(MachineProfile profile);
+// Data notification for the profile, built from the core state.
+Bytes encodeMachineData(MachineProfile profile, const TrainerState& state);
+
+// True when FTMS lets the profile accept the control (independent of the
+// source's capabilities, which the core still enforces).
+bool profileAcceptsControl(MachineProfile profile, Control control);
 Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile profile = MachineProfile::IndoorBike);
 Bytes encodeSupportedSpeedRange();
 Bytes encodeSupportedInclinationRange();
@@ -133,35 +300,27 @@ ResultCode resultCodeFor(ControlResult result);
 // Control Point commands sent to it.
 // ---------------------------------------------------------------------------
 
-constexpr std::uint16_t kTreadmillDataUuid = 0x2ACD;
-constexpr std::uint16_t kCrossTrainerDataUuid = 0x2ACE;
-constexpr std::uint16_t kRowerDataUuid = 0x2AD1;
-
-// Additional Fitness Machine Features / Target Setting Features bits.
-constexpr std::uint32_t kFeatureResistanceLevel = 1U << 7;
-constexpr std::uint32_t kFeaturePowerAndForce = 1U << 15;
-constexpr std::uint32_t kTargetSpeed = 1U << 0;
-
 using MachineType = MachineProfile;
 
-// Normalized sample decoded from one data notification. Only fields whose
-// flag was present are marked valid.
-struct MachineData {
-    MetricSample speed;       // km/h
-    MetricSample cadence;     // rpm (steps/min for cross trainers, strokes/min for rowers)
-    MetricSample power;       // W
-    MetricSample heartRate;   // bpm
-    MetricSample incline;     // %
-    MetricSample resistance;  // device resistance level (unitless, as sent)
-    MetricSample distance;    // m
-    MetricSample elapsed;     // seconds
-};
+// Input mapping: one data notification decoded into normalized core metrics.
+// Only fields present in the notification are marked valid.
+using MachineData = MetricSet;
 
-// Return false when the payload is truncated for the flags it announces.
+MachineData toMachineData(const IndoorBikeData& data);
+MachineData toMachineData(const TreadmillData& data);
+MachineData toMachineData(const CrossTrainerData& data);
+MachineData toMachineData(const StepClimberData& data);
+MachineData toMachineData(const StairClimberData& data);
+MachineData toMachineData(const RowerData& data);
+
+// Decode + map in one step. Return false when the payload is truncated.
 bool decodeIndoorBikeData(const std::uint8_t* data, std::size_t length, MachineData& out);
 bool decodeTreadmillData(const std::uint8_t* data, std::size_t length, MachineData& out);
 bool decodeCrossTrainerData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeStepClimberData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeStairClimberData(const std::uint8_t* data, std::size_t length, MachineData& out);
 bool decodeRowerData(const std::uint8_t* data, std::size_t length, MachineData& out);
+bool decodeMachineData(MachineProfile profile, const std::uint8_t* data, std::size_t length, MachineData& out);
 
 struct Features {
     std::uint32_t machine = 0;

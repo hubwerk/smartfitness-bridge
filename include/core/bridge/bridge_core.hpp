@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include "bridge_types.h"
+#include "bridge/metric.hpp"
 #include "bridge/machine_profile.hpp"
 
 class BtDeviceAdapter;
@@ -11,28 +12,12 @@ class FtmsOutput;
 
 namespace smartfitness {
 
-enum class Metric : std::uint8_t {
-    Speed,
-    Distance,
-    Cadence,
-    Power,
-    HeartRate,
-    Incline,
-    ElapsedTime,
-    Count
-};
-
 enum class Control : std::uint8_t {
     Speed,
     Incline,
     Resistance,
     Power,
     Count
-};
-
-struct MetricSample {
-    float value = 0.0F;
-    bool valid = false;
 };
 
 struct TrainerCapabilities {

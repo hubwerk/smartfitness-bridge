@@ -165,7 +165,7 @@ void testRuntimeRouting() {
     assert(bridge.scanAndConnect());
     bridge.loop();
     assert(!bridge.hasControlTarget() && !ant.hasControlTarget() && !ftms.hasControlTarget());
-    assert(ant.telemetry().power == 150 && ftms.telemetry().targetPower == 0);
+    assert(ant.telemetry().power == 150 && !ftms.telemetry().targetPower);
     assert(ftms.requestControl({Control::Power, 220}) == ControlResult::Applied);
     bridge.loop();
 
@@ -184,7 +184,7 @@ void testRuntimeRouting() {
     bridge.loop();
     assert(bridge.state() == RuntimeState::Disconnected);
     assert(!bridge.hasControlTarget() && !ant.hasControlTarget());
-    assert(!ftms.telemetry().connected && ftms.telemetry().power == 0);
+    assert(!ftms.telemetry().connected && !ftms.telemetry().power);
     assert(!bridge.trainerState().sample(Metric::Power).valid);
 }
 
@@ -371,13 +371,12 @@ void testOptionalTreadmillTotals() {
     bridge.setTrainerState(state);
     FitnessTelemetry telemetry;
     telemetry.connected = true;
-    telemetry.distance = 1234;
-    telemetry.elapsed = 321;
+    // Supported but not transmitted: never reported as 0.
     bridge.setTelemetry(telemetry);
     assert(!bridge.trainerState().sample(Metric::Distance).valid);
     assert(!bridge.trainerState().sample(Metric::ElapsedTime).valid);
-    telemetry.distanceValid = true;
-    telemetry.elapsedValid = true;
+    telemetry.distance = 1234;
+    telemetry.elapsed = 321;
     bridge.setTelemetry(telemetry);
     assert(bridge.trainerState().sample(Metric::Distance).value == 1234);
     assert(bridge.trainerState().sample(Metric::Distance).valid);

@@ -16,8 +16,6 @@ using ftms::ResultCode;
 
 namespace {
 
-MetricSample valid(float value) { return {value, true}; }
-
 ftms::ControlPointCommand decode(const Bytes& bytes) {
     ftms::ControlPointCommand command;
     assert(ftms::decodeControlPoint(bytes.data(), bytes.size(), command));
@@ -26,33 +24,36 @@ ftms::ControlPointCommand decode(const Bytes& bytes) {
 
 void testIndoorBikeDataEncoding() {
     ftms::IndoorBikeData data;
-    data.speed = valid(25.0F);
-    data.cadence = valid(80.0F);
-    data.power = valid(150.0F);
-    data.heartRate = valid(120.0F);
+    data.instantaneousSpeed = 2500;
+    data.instantaneousCadence = 160;
+    data.instantaneousPower = 150;
+    data.heartRate = 120;
     // Flags 0x0244: speed present (More Data clear), cadence, power, heart rate.
     assert(ftms::encodeIndoorBikeData(data) == (Bytes{0x44, 0x02, 0xC4, 0x09, 0xA0, 0x00, 0x96, 0x00, 0x78}));
 
     assert(ftms::encodeIndoorBikeData({}) == (Bytes{0x01, 0x00}));
 
     ftms::IndoorBikeData powerOnly;
-    powerOnly.power = valid(-5.0F);
-    powerOnly.speed = {25.0F, false};
-    powerOnly.heartRate = {NAN, true};
+    powerOnly.instantaneousPower = -5;
     assert(ftms::encodeIndoorBikeData(powerOnly) == (Bytes{0x41, 0x00, 0xFB, 0xFF}));
 
-    ftms::IndoorBikeData clamped;
-    clamped.speed = valid(1000.0F);
-    clamped.cadence = valid(90.5F);
-    clamped.heartRate = valid(300.0F);
-    assert(ftms::encodeIndoorBikeData(clamped) == (Bytes{0x04, 0x02, 0xFF, 0xFF, 0xB5, 0x00, 0xFF}));
+    // Mapping from core state: invalid / non-finite metrics stay absent and
+    // out-of-range values clamp to the field's native type.
+    TrainerState clamped;
+    clamped.connected = true;
+    clamped.setSample(Metric::Speed, 1000.0F);
+    clamped.setSample(Metric::Cadence, 90.5F);
+    clamped.setSample(Metric::HeartRate, 300.0F);
+    clamped.setSample(Metric::Power, NAN);
+    assert(ftms::encodeIndoorBikeData(ftms::indoorBikeDataFrom(clamped)) ==
+           (Bytes{0x04, 0x02, 0xFF, 0xFF, 0xB5, 0x00, 0xFF}));
 
     TrainerState state;
     state.setSample(Metric::Power, 200.0F);
-    assert(!ftms::indoorBikeDataFrom(state).power.valid);
+    assert(!ftms::indoorBikeDataFrom(state).instantaneousPower);
     state.connected = true;
-    assert(ftms::indoorBikeDataFrom(state).power.valid);
-    assert(!ftms::indoorBikeDataFrom(state).speed.valid);
+    assert(ftms::indoorBikeDataFrom(state).instantaneousPower == std::int16_t{200});
+    assert(!ftms::indoorBikeDataFrom(state).instantaneousSpeed);
 }
 
 void testStaticCharacteristics() {
@@ -320,25 +321,27 @@ void testFtmsClientAddress() {
 
 void testTreadmillCodec() {
     ftms::TreadmillData data;
-    data.speed = valid(8.5F);
-    data.incline = valid(-5);
-    data.distance = valid(1234);
-    data.heartRate = valid(120);
+    data.instantaneousSpeed = 850;
+    data.inclination = -50;
+    data.rampAngleSetting = -29;
+    data.totalDistance = 1234;
+    data.heartRate = 120;
     const Bytes payload{0x0C, 0x01, 0x52, 0x03, 0xD2, 0x04, 0x00, 0xCE, 0xFF, 0xE3, 0xFF, 0x78};
     assert(ftms::encodeTreadmillData(data) == payload);
     ftms::MachineData decoded;
     assert(ftms::decodeTreadmillData(payload.data(), payload.size(), decoded));
     assert(decoded.speed.value == 8.5F && decoded.incline.value == -5);
     assert(decoded.distance.value == 1234 && decoded.heartRate.value == 120);
+    assert(!decoded.power.valid && !decoded.elapsed.valid && !decoded.totalEnergy.valid);
     assert(ftms::encodeTreadmillData({}) == (Bytes{1, 0}));
-    data = {};
-    data.distance = valid(1.0e30F);
-    data.incline = valid(1.0e30F);
-    assert(ftms::encodeTreadmillData(data) ==
+    TrainerState huge;
+    huge.connected = true;
+    huge.setSample(Metric::Distance, 1.0e30F);
+    huge.setSample(Metric::Incline, 1.0e30F);
+    assert(ftms::encodeTreadmillData(ftms::treadmillDataFrom(huge)) ==
            (Bytes{0x0D, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0x84, 0x03}));
     data = {};
-    data.elapsed = valid(42);
-    data.speed = {NAN, true};
+    data.elapsedTime = 42;
     assert(ftms::encodeTreadmillData(data) == (Bytes{1, 4, 42, 0}));
     const auto timed = ftms::encodeTreadmillData(data);
     assert(ftms::decodeTreadmillData(timed.data(), timed.size(), decoded));
@@ -424,7 +427,7 @@ void testTreadmillOutput() {
     ftms::MachineData data;
     auto payload = output.lastTreadmillData();
     assert(ftms::decodeTreadmillData(payload.data(), payload.size(), data));
-    assert(data.speed.valid && data.speed.value == 0);
+    assert(!data.speed.valid);  // never transmitted, so never reported as 0
     assert(write(output, bridge, {2, 0x20, 3}) == (Bytes{0x80, 2, 5}));
     assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
     assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 4}));
@@ -487,10 +490,15 @@ void testTreadmillOutput() {
     bridge.disconnect();
     bridge.loop();
     assert(!output.controlGranted());
+    // Every FTMS profile is served natively (no indoor bike fallback).
     output.setProfileOverride(FtmsOutputProfile::Rower);
-    assert(output.profile() == MachineProfile::IndoorBike);
+    assert(output.profile() == MachineProfile::Rower);
     output.setProfileOverride(FtmsOutputProfile::CrossTrainer);
-    assert(output.profile() == MachineProfile::IndoorBike);
+    assert(output.profile() == MachineProfile::CrossTrainer);
+    output.setProfileOverride(FtmsOutputProfile::StepClimber);
+    assert(output.profile() == MachineProfile::StepClimber);
+    output.setProfileOverride(FtmsOutputProfile::StairClimber);
+    assert(output.profile() == MachineProfile::StairClimber);
     output.setProfileOverride(FtmsOutputProfile::Auto);
     bridge.scanAndConnect();
     bridge.loop();

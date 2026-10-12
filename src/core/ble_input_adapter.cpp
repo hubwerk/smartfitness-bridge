@@ -10,8 +10,6 @@ namespace {
 
 bool reached(std::uint32_t now, std::uint32_t deadline) { return static_cast<std::int32_t>(now - deadline) >= 0; }
 
-float valueOf(const MetricSample& sample) { return sample.valid ? sample.value : 0.0F; }
-
 }  // namespace
 
 BleInputAdapter::BleInputAdapter(ble::CentralTransport& transport, Clock clock)
@@ -145,6 +143,7 @@ bool BleInputAdapter::closeLink() {
     if (state_ == LinkState::Listening && !userScan_) accepted = transport_.stopScan() && accepted;
     if (protocol_) protocol_->reset();
     targetPower_ = 0.0F;
+    hasTargetPower_ = false;
     if (!accepted) lastError_ = "disconnect/stop request rejected";
     return accepted;
 }
@@ -413,18 +412,15 @@ FitnessTelemetry BleInputAdapter::telemetry() const {
     telemetry.deviceName = paired_.name.empty() ? paired_.address.toString() : paired_.name;
     telemetry.deviceType = protocolId();
     if (!telemetry.connected) return telemetry;
+    if (hasTargetPower_) telemetry.targetPower = targetPower_;
+    // Stale data invalidates every metric (capabilities() clears them too).
+    if (stale()) return telemetry;
     const auto& sample = protocol_->sample();
-    telemetry.speed = valueOf(sample.speed);
-    telemetry.cadence = valueOf(sample.cadence);
-    telemetry.power = valueOf(sample.power);
-    telemetry.heartRate = valueOf(sample.heartRate);
-    telemetry.incline = valueOf(sample.incline);
-    telemetry.resistance = valueOf(sample.resistance);
-    telemetry.targetPower = targetPower_;
-    telemetry.distance = valueOf(sample.distance);
-    telemetry.distanceValid = sample.distance.valid && !stale();
-    telemetry.elapsed = valueOf(sample.elapsed);
-    telemetry.elapsedValid = sample.elapsed.valid && !stale();
+    for (std::size_t index = 0; index < kMetricCount; ++index) {
+        const auto metric = static_cast<Metric>(index);
+        const auto& value = sample[metric];
+        if (value.valid) telemetry.metric(metric) = value.value;
+    }
     return telemetry;
 }
 
@@ -433,7 +429,10 @@ bool BleInputAdapter::apply(const ControlRequest& request) {
     if (profile() == MachineProfile::Treadmill && stale()) return false;
     if (!protocol_->control(request, clock_())) return false;
     if (!flushWrites()) return false;
-    if (request.control == Control::Power) targetPower_ = request.value;
+    if (request.control == Control::Power) {
+        targetPower_ = request.value;
+        hasTargetPower_ = true;
+    }
     maybeEmit(true);
     return true;
 }

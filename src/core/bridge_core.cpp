@@ -155,15 +155,13 @@ void BridgeCore::setTelemetry(const FitnessTelemetry& telemetry) {
         next.trainerDetected = telemetry.trainerDetected;
         setTrainerState(next);
     }
-    trainer_.setSample(Metric::Speed, telemetry_.speed, trainer_.connected && trainer_.capabilities.supports(Metric::Speed));
-    trainer_.setSample(Metric::Cadence, telemetry_.cadence, trainer_.connected && trainer_.capabilities.supports(Metric::Cadence));
-    trainer_.setSample(Metric::Power, telemetry_.power, trainer_.connected && trainer_.capabilities.supports(Metric::Power));
-    trainer_.setSample(Metric::HeartRate, telemetry_.heartRate, trainer_.connected && trainer_.capabilities.supports(Metric::HeartRate));
-    trainer_.setSample(Metric::Incline, telemetry_.incline, trainer_.connected && trainer_.capabilities.supports(Metric::Incline));
-    trainer_.setSample(Metric::Distance, telemetry_.distance,
-                      trainer_.connected && telemetry_.distanceValid && trainer_.capabilities.supports(Metric::Distance));
-    trainer_.setSample(Metric::ElapsedTime, telemetry_.elapsed,
-                      trainer_.connected && telemetry_.elapsedValid && trainer_.capabilities.supports(Metric::ElapsedTime));
+    // Only values the device actually sent become valid samples.
+    for (std::size_t index = 0; index < kMetricCount; ++index) {
+        const auto metric = static_cast<Metric>(index);
+        const auto& value = telemetry_.metric(metric);
+        trainer_.setSample(metric, value.value_or(0.0F),
+                           trainer_.connected && value.has_value() && trainer_.capabilities.supports(metric));
+    }
     dirty_ = true;
 }
 

@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <thread>
 
 #include "ant_output.h"
@@ -38,6 +39,10 @@ using testing::address;
 namespace {
 
 bool near(float actual, float expected, float tolerance = 0.01F) { return std::fabs(actual - expected) <= tolerance; }
+// Optional telemetry values only match when they were actually transmitted.
+bool near(const std::optional<float>& actual, float expected, float tolerance = 0.01F) {
+    return actual.has_value() && near(*actual, expected, tolerance);
+}
 
 void testBleTypes() {
     ble::Uuid uuid;
@@ -117,8 +122,8 @@ void testFtmsInputCodec() {
     assert(!data.speed.valid && near(data.power.value, 200.0F));
     // Round trip with the FTMS output encoder.
     ftms::IndoorBikeData out;
-    out.speed = {31.5F, true};
-    out.power = {-5.0F, true};
+    out.instantaneousSpeed = 3150;
+    out.instantaneousPower = -5;
     const Bytes encoded = ftms::encodeIndoorBikeData(out);
     assert(ftms::decodeIndoorBikeData(encoded.data(), encoded.size(), data));
     assert(near(data.speed.value, 31.5F) && near(data.power.value, -5.0F));
@@ -500,16 +505,22 @@ void testProtocolProfiles() {
 
 void testFtmsProfiles() {
     using Source = protocols::FtmsSource;
-    const std::array<MachineProfile, 4> profiles{{MachineProfile::IndoorBike, MachineProfile::Treadmill,
-                                                MachineProfile::CrossTrainer, MachineProfile::Rower}};
-    const std::array<Bytes, 4> frames{{{0, 0, 0xC4, 9}, {0, 0, 0xB0, 4},
-                                      {0, 0, 0, 0xE8, 3}, {0, 0, 0x30, 0x10, 0}}};
-    const std::array<std::uint8_t, 4> typeBits{{0x20, 1, 2, 0x10}};
+    const std::array<MachineProfile, 6> profiles{{MachineProfile::IndoorBike, MachineProfile::Treadmill,
+                                                MachineProfile::CrossTrainer, MachineProfile::Rower,
+                                                MachineProfile::StepClimber, MachineProfile::StairClimber}};
+    const std::array<std::size_t, 6> subscriptions{{Source::SubBike, Source::SubTreadmill, Source::SubCrossTrainer,
+                                                    Source::SubRower, Source::SubStepClimber,
+                                                    Source::SubStairClimber}};
+    const std::array<Bytes, 6> frames{{{0, 0, 0xC4, 9}, {0, 0, 0xB0, 4},
+                                      {0, 0, 0, 0xE8, 3}, {0, 0, 0x30, 0x10, 0},
+                                      {0, 0, 5, 0, 0x64, 0}, {0, 0, 3, 0}}};
+    const std::array<std::uint8_t, 6> typeBits{{0x20, 1, 2, 0x10, 4, 8}};
     for (std::size_t index = 0; index < profiles.size(); ++index) {
+        const std::size_t subscription = subscriptions[index];
         Source source;
-        assert(source.onConnected(1U << index, 100));
+        assert(source.onConnected(1U << subscription, 100));
         assert(source.profile() == profiles[index]);
-        source.onNotify(index, frames[index].data(), frames[index].size(), 200);
+        source.onNotify(subscription, frames[index].data(), frames[index].size(), 200);
         assert(source.profile() == profiles[index] && source.hasData());
         source.reset();
         assert(source.profile() == MachineProfile::IndoorBike && !source.sample().distance.valid);
@@ -517,17 +528,17 @@ void testFtmsProfiles() {
         advertisement.ftmsServiceData = {1, typeBits[index], 0};
         source.onAdvertisement(advertisement, 300);
         assert(source.profile() == profiles[index]);
-        assert(source.onConnected(0x1f, 300));  // Some machines expose every data characteristic.
+        assert(source.onConnected(0x7f, 300));  // Some machines expose every data characteristic.
         assert(source.profile() == profiles[index]);
         for (std::size_t other = 0; other < frames.size(); ++other) {
-            source.onNotify(other, frames[other].data(), frames[other].size(), 400);
+            source.onNotify(subscriptions[other], frames[other].data(), frames[other].size(), 400);
             assert(source.profile() == profiles[index]);
         }
     }
     Source source;
     ble::Advertisement advertisement;
     for (const Bytes& invalid : {Bytes{1, 1}, Bytes{0, 1, 0}, Bytes{1, 0, 0}, Bytes{1, 3, 0},
-                                 Bytes{1, 4, 0}}) {
+                                 Bytes{1, 0x40, 0}, Bytes{1, 0x0c, 0}}) {
         advertisement.ftmsServiceData = invalid;
         source.onAdvertisement(advertisement, 100);
         assert(source.profile() == MachineProfile::IndoorBike);
@@ -670,23 +681,23 @@ void testFtmsDistanceTelemetry() {
     assert(h.adapter.scanAndConnect());
     h.central.pushEvent(ble::CentralEventType::Connected, 1);
     h.adapter.loop();
-    assert(!h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.telemetry().distance.has_value());
     assert(!h.adapter.capabilities().supports(Metric::Distance));
     h.advance(300);
     h.central.pushEvent(ble::CentralEventType::Notification, 0, 0,
                         {0x10, 0, 0xC4, 9, 0x10, 0x27, 0});
     h.adapter.loop();
-    assert(h.adapter.telemetry().distanceValid && near(h.adapter.telemetry().distance, 10000));
+    assert(near(h.adapter.telemetry().distance, 10000));
     assert(h.adapter.capabilities().supports(Metric::Distance));
     h.advance(300);
     h.central.pushEvent(ble::CentralEventType::Notification, 0, 0, {1, 0});
     h.adapter.loop();
-    assert(h.adapter.telemetry().distanceValid && near(h.adapter.telemetry().distance, 10000));
+    assert(near(h.adapter.telemetry().distance, 10000));
     h.advance(5001);
-    assert(!h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.telemetry().distance.has_value());
     assert(!h.adapter.capabilities().supports(Metric::Distance));
     h.adapter.disconnect();
-    assert(!h.adapter.telemetry().distanceValid && h.adapter.telemetry().distance == 0);
+    assert(!h.adapter.telemetry().distance);
 }
 
 void testFtmsElapsedTelemetry() {
@@ -695,26 +706,26 @@ void testFtmsElapsedTelemetry() {
     assert(h.adapter.scanAndConnect());
     h.central.pushEvent(ble::CentralEventType::Connected, 1U << protocols::FtmsSource::SubTreadmill);
     h.adapter.loop();
-    assert(!h.adapter.telemetry().elapsedValid);
+    assert(!h.adapter.telemetry().elapsed.has_value());
     assert(!h.adapter.capabilities().supports(Metric::ElapsedTime));
     h.advance(300);
     h.central.pushEvent(ble::CentralEventType::Notification, 0, protocols::FtmsSource::SubTreadmill,
                         {0x04, 0x04, 0xB0, 4, 0x10, 0x27, 0, 0x2c, 1});
     h.adapter.loop();
     const auto telemetry = h.adapter.telemetry();
-    assert(telemetry.elapsedValid && near(telemetry.elapsed, 300));
-    assert(telemetry.distanceValid && near(telemetry.distance, 10000));
+    assert(near(telemetry.elapsed, 300));
+    assert(near(telemetry.distance, 10000));
     assert(h.adapter.capabilities().supports(Metric::ElapsedTime));
     assert(h.adapter.capabilities().supports(Metric::Distance));
     h.advance(300);
     h.central.pushEvent(ble::CentralEventType::Notification, 0, protocols::FtmsSource::SubTreadmill, {1, 0});
     h.adapter.loop();
-    assert(h.adapter.telemetry().elapsedValid && near(h.adapter.telemetry().elapsed, 300));
+    assert(near(h.adapter.telemetry().elapsed, 300));
     h.advance(5001);
-    assert(!h.adapter.telemetry().elapsedValid && !h.adapter.telemetry().distanceValid);
+    assert(!h.adapter.telemetry().elapsed && !h.adapter.telemetry().distance);
     assert(!h.adapter.capabilities().supports(Metric::ElapsedTime));
     h.adapter.disconnect();
-    assert(!h.adapter.telemetry().elapsedValid && h.adapter.telemetry().elapsed == 0);
+    assert(!h.adapter.telemetry().elapsed);
 }
 
 void testStaleFtmsTreadmillControlSafety() {
@@ -817,7 +828,8 @@ void testFtmsLifecycle() {
     assert(!h.adapter.scanning() && !h.central.scanning());  // scanning stops before connecting
     assert(h.central.connects.size() == 1 && h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     const auto& plan = h.central.connects[0].plan;
-    assert(plan.subscriptionCount == 5 && plan.subscriptions[4].indicate && plan.readCount == 4);
+    assert(plan.subscriptionCount == protocols::FtmsSource::SubCount && plan.readCount == 4);
+    assert(plan.subscriptions[protocols::FtmsSource::SubControlPoint].indicate);
     assert(!h.adapter.startScan());  // busy
 
     const Bytes feature{0x02, 0x44, 0x00, 0x00, 0x0E, 0x20, 0x00, 0x00};
@@ -1150,7 +1162,7 @@ void testTransportRejectionPropagation() {
     trainer.central.acceptWrite = false;
     assert(!trainer.adapter.apply({Control::Power, 200}));
     assert(trainer.adapter.lastError() == "write request rejected");
-    assert(trainer.adapter.telemetry().targetPower == 0);
+    assert(!trainer.adapter.telemetry().targetPower);
     assert(trainer.adapter.droppedCommands() == 1);
 }
 

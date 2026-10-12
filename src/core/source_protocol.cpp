@@ -51,16 +51,9 @@ bool SourceProtocol::queueWrite(const ble::Uuid& service, const ble::Uuid& chara
 void SourceProtocol::touch(std::uint32_t nowMs) {
     hasData_ = true;
     lastDataMs_ = nowMs;
-    const auto observe = [this](const MetricSample& sample, Metric metric) {
-        if (sample.valid) observedMetrics_ |= 1U << static_cast<unsigned int>(metric);
-    };
-    observe(sample_.speed, Metric::Speed);
-    observe(sample_.cadence, Metric::Cadence);
-    observe(sample_.power, Metric::Power);
-    observe(sample_.heartRate, Metric::HeartRate);
-    observe(sample_.incline, Metric::Incline);
-    observe(sample_.distance, Metric::Distance);
-    observe(sample_.elapsed, Metric::ElapsedTime);
+    for (std::size_t index = 0; index < kMetricCount; ++index) {
+        if (sample_[static_cast<Metric>(index)].valid) observedMetrics_ |= 1U << index;
+    }
 }
 
 int percentToLevel(float percent, int minimum, int maximum) {

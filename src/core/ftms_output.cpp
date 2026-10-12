@@ -42,8 +42,8 @@ struct FtmsOutput::Transport : public NimBLEServerCallbacks, public NimBLECharac
     FtmsOutput& owner;
     NimBLEServer* server = nullptr;
     NimBLECharacteristic* feature = nullptr;
-    NimBLECharacteristic* bikeData = nullptr;
-    NimBLECharacteristic* treadmillData = nullptr;
+    // Machine data characteristics, indexed by MachineProfile.
+    std::array<NimBLECharacteristic*, kMachineProfileCount> machineData{};
     NimBLECharacteristic* trainingStatus = nullptr;
     NimBLECharacteristic* controlPoint = nullptr;
     NimBLECharacteristic* machineStatus = nullptr;
@@ -124,8 +124,7 @@ void FtmsOutput::refreshProfile() {
     resetSession();
     response_.clear();
     status_.clear();
-    bikeData_.clear();
-    treadmillData_.clear();
+    for (auto& data : machineData_) data.clear();
     trainingStatus_ = ftms::TrainingStatus::Idle;
     profileDisconnectPending_ = connections_.load() > 0;
     transportDisconnectClients();
@@ -192,8 +191,12 @@ bool FtmsOutput::clientAddress(std::array<std::uint8_t, 6>& address, std::uint8_
 bool FtmsOutput::advertising() const { return advertising_; }
 bool FtmsOutput::clientConnected() const { return connected_; }
 bool FtmsOutput::controlGranted() const { return granted_; }
-const ftms::Bytes& FtmsOutput::lastIndoorBikeData() const { return bikeData_; }
-const ftms::Bytes& FtmsOutput::lastTreadmillData() const { return treadmillData_; }
+const ftms::Bytes& FtmsOutput::lastIndoorBikeData() const { return lastMachineData(MachineProfile::IndoorBike); }
+const ftms::Bytes& FtmsOutput::lastTreadmillData() const { return lastMachineData(MachineProfile::Treadmill); }
+const ftms::Bytes& FtmsOutput::lastMachineData(MachineProfile profile) const {
+    const auto index = static_cast<std::size_t>(profile);
+    return machineData_[index < machineData_.size() ? index : 0];
+}
 const ftms::Bytes& FtmsOutput::lastControlResponse() const { return response_; }
 const ftms::Bytes& FtmsOutput::lastMachineStatus() const { return status_; }
 const ftms::Bytes& FtmsOutput::feature() const { return feature_; }
@@ -217,7 +220,7 @@ void FtmsOutput::handleConnectionChanges() {
         granted_ = false;
         bikeDataSent_ = false;
         trainingStatusSent_ = false;
-        treadmillData_.clear();
+        clearSessionData();
         // The stack stops advertising once a central connects.
         if (connected_) advertising_ = false;
     }
@@ -277,10 +280,8 @@ void FtmsOutput::handleControlPoint(const PendingWrite& write) {
 
 void FtmsOutput::publishBikeData() {
     if (!connected_) return;
-    const bool treadmill = profile_ == MachineProfile::Treadmill;
-    auto payload = treadmill ? ftms::encodeTreadmillData(ftms::treadmillDataFrom(trainerState()))
-                             : ftms::encodeIndoorBikeData(ftms::indoorBikeDataFrom(trainerState()));
-    auto& data = treadmill ? treadmillData_ : bikeData_;
+    auto payload = ftms::encodeMachineData(profile_, trainerState());
+    auto& data = machineData_[static_cast<std::size_t>(profile_) % machineData_.size()];
     const std::uint32_t timestamp = now();
     const std::uint32_t elapsed = timestamp - lastBikeDataMs_;
     if (bikeDataSent_) {
@@ -290,8 +291,13 @@ void FtmsOutput::publishBikeData() {
     data = std::move(payload);
     lastBikeDataMs_ = timestamp;
     bikeDataSent_ = true;
-    if (treadmill) transportNotifyTreadmillData();
-    else transportNotifyBikeData();
+    transportNotifyMachineData();
+}
+
+// Session data of every non-bike profile restarts with each session.
+void FtmsOutput::clearSessionData() {
+    for (std::size_t index = 0; index < machineData_.size(); ++index)
+        if (index != static_cast<std::size_t>(MachineProfile::IndoorBike)) machineData_[index].clear();
 }
 
 void FtmsOutput::updateTrainingStatus() {
@@ -331,7 +337,7 @@ void FtmsOutput::resetSession() {
     granted_ = false;
     bikeDataSent_ = false;
     trainingStatusSent_ = false;
-    treadmillData_.clear();
+    clearSessionData();
     std::lock_guard<std::mutex> lock(mutex_);
     queueHead_ = 0;
     queueCount_ = 0;
@@ -353,8 +359,10 @@ bool FtmsOutput::transportBegin() {
 
     NimBLEService* service = transport->server->createService(NimBLEUUID(ftms::kServiceUuid));
     transport->feature = service->createCharacteristic(NimBLEUUID(ftms::kFeatureUuid), NIMBLE_PROPERTY::READ);
-    transport->bikeData = service->createCharacteristic(NimBLEUUID(ftms::kIndoorBikeDataUuid), NIMBLE_PROPERTY::NOTIFY);
-    transport->treadmillData = service->createCharacteristic(NimBLEUUID(ftms::kTreadmillDataUuid), NIMBLE_PROPERTY::NOTIFY);
+    for (std::size_t index = 0; index < transport->machineData.size(); ++index) {
+        const auto uuid = ftms::machineDataUuid(static_cast<MachineProfile>(index));
+        transport->machineData[index] = service->createCharacteristic(NimBLEUUID(uuid), NIMBLE_PROPERTY::NOTIFY);
+    }
     transport->trainingStatus = service->createCharacteristic(
         NimBLEUUID(ftms::kTrainingStatusUuid), NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
     NimBLECharacteristic* incline = service->createCharacteristic(
@@ -422,16 +430,11 @@ void FtmsOutput::transportApplyProfile() {
     transport_->trainingStatus->setValue(ftms::encodeTrainingStatus(trainingStatus_));
 }
 
-void FtmsOutput::transportNotifyTreadmillData() {
+void FtmsOutput::transportNotifyMachineData() {
     if (!transport_) return;
-    transport_->treadmillData->setValue(treadmillData_);
-    transport_->treadmillData->notify();
-}
-
-void FtmsOutput::transportNotifyBikeData() {
-    if (!transport_) return;
-    transport_->bikeData->setValue(bikeData_);
-    transport_->bikeData->notify();
+    const auto index = static_cast<std::size_t>(profile_) % machineData_.size();
+    transport_->machineData[index]->setValue(machineData_[index]);
+    transport_->machineData[index]->notify();
 }
 
 void FtmsOutput::transportNotifyTrainingStatus() {
@@ -463,8 +466,7 @@ void FtmsOutput::transportDisconnectClients() {
 void FtmsOutput::transportApplyName() {}
 void FtmsOutput::transportSetFeature() {}
 void FtmsOutput::transportApplyProfile() {}
-void FtmsOutput::transportNotifyBikeData() {}
-void FtmsOutput::transportNotifyTreadmillData() {}
+void FtmsOutput::transportNotifyMachineData() {}
 void FtmsOutput::transportNotifyTrainingStatus() {}
 void FtmsOutput::transportIndicateResponse() {}
 void FtmsOutput::transportNotifyStatus() {}

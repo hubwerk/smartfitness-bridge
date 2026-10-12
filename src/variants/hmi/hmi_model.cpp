@@ -19,6 +19,25 @@ constexpr MetricFormat kMetricFormats[] = {
     {Str::MetricHeartRate, "bpm", 0, 40.0F, 200.0F}, // HeartRate
     {Str::MetricIncline, "%", 1, -5.0F, 15.0F},      // Incline
     {Str::MetricElapsed, "s", 0, 0.0F, 3600.0F},     // ElapsedTime (not on the gauge)
+    {Str::MetricResistance, "", 0, 0.0F, 100.0F},             // Resistance (device level)
+    {Str::MetricAverageSpeed, "km/h", 1, 0.0F, 25.0F},        // AverageSpeed
+    {Str::MetricAverageCadence, "rpm", 0, 0.0F, 150.0F},      // AverageCadence
+    {Str::MetricAveragePower, "W", 0, 0.0F, 500.0F},          // AveragePower
+    {Str::MetricTotalEnergy, "kcal", 0, 0.0F, 1000.0F},       // TotalEnergy
+    {Str::MetricEnergyPerHour, "kcal/h", 0, 0.0F, 1500.0F},   // EnergyPerHour
+    {Str::MetricEnergyPerMinute, "kcal/min", 0, 0.0F, 25.0F}, // EnergyPerMinute
+    {Str::MetricMet, "MET", 1, 0.0F, 20.0F},                  // MetabolicEquivalent
+    {Str::MetricRemaining, "s", 0, 0.0F, 3600.0F},            // RemainingTime
+    {Str::MetricRampAngle, "deg", 1, -10.0F, 15.0F},          // RampAngle
+    {Str::MetricElevationGain, "m", 1, 0.0F, 1000.0F},        // PositiveElevationGain
+    {Str::MetricElevationLoss, "m", 1, 0.0F, 1000.0F},        // NegativeElevationGain
+    {Str::MetricPace, "s/500m", 0, 0.0F, 300.0F},             // Pace
+    {Str::MetricAveragePace, "s/500m", 0, 0.0F, 300.0F},      // AveragePace
+    {Str::MetricStrokes, "", 0, 0.0F, 5000.0F},               // StrokeCount
+    {Str::MetricSteps, "", 0, 0.0F, 20000.0F},                // StepCount
+    {Str::MetricStrides, "", 0, 0.0F, 20000.0F},              // StrideCount
+    {Str::MetricFloors, "", 0, 0.0F, 500.0F},                 // Floors
+    {Str::MetricBeltForce, "N", 0, -500.0F, 500.0F},          // ForceOnBelt
 };
 static_assert(sizeof(kMetricFormats) / sizeof(kMetricFormats[0]) == static_cast<std::size_t>(Metric::Count),
               "one format per metric");
@@ -53,8 +72,12 @@ std::vector<Metric> dashboardMetrics(MachineProfile profile) {
         case MachineProfile::Treadmill:
             return {Metric::Speed, Metric::Incline, Metric::HeartRate, Metric::Power, Metric::Cadence};
         case MachineProfile::Rower:
+            return {Metric::Power, Metric::Cadence, Metric::HeartRate, Metric::Pace, Metric::Speed};
         case MachineProfile::CrossTrainer:
             return {Metric::Power, Metric::Cadence, Metric::HeartRate, Metric::Speed, Metric::Incline};
+        case MachineProfile::StepClimber:
+        case MachineProfile::StairClimber:
+            return {Metric::Cadence, Metric::HeartRate, Metric::Floors, Metric::Power, Metric::TotalEnergy};
         case MachineProfile::IndoorBike:
         default:
             return {Metric::Power, Metric::Cadence, Metric::Speed, Metric::HeartRate, Metric::Incline};
@@ -156,6 +179,8 @@ const char* profileLabel(MachineProfile profile) {
         case MachineProfile::Treadmill: return "Treadmill";
         case MachineProfile::CrossTrainer: return "Cross trainer";
         case MachineProfile::Rower: return "Rower";
+        case MachineProfile::StepClimber: return "Step climber";
+        case MachineProfile::StairClimber: return "Stair climber";
         case MachineProfile::IndoorBike:
         default: return "Bike";
     }
@@ -167,6 +192,8 @@ const char* ftmsProfileLabel(FtmsOutputProfile profile) {
         case FtmsOutputProfile::Treadmill: return profileLabel(MachineProfile::Treadmill);
         case FtmsOutputProfile::CrossTrainer: return profileLabel(MachineProfile::CrossTrainer);
         case FtmsOutputProfile::Rower: return profileLabel(MachineProfile::Rower);
+        case FtmsOutputProfile::StepClimber: return profileLabel(MachineProfile::StepClimber);
+        case FtmsOutputProfile::StairClimber: return profileLabel(MachineProfile::StairClimber);
         case FtmsOutputProfile::Auto:
         default: return "Auto";
     }
@@ -250,8 +277,8 @@ bool deserialize(const std::vector<std::uint8_t>& data, HmiSettings& settings) {
 
 FtmsOutputProfile nextFtmsProfile(FtmsOutputProfile profile) {
     const auto next = static_cast<std::uint8_t>(profile) + 1;
-    return next > static_cast<std::uint8_t>(FtmsOutputProfile::Rower) ? FtmsOutputProfile::Auto
-                                                                       : static_cast<FtmsOutputProfile>(next);
+    return next > static_cast<std::uint8_t>(FtmsOutputProfile::StairClimber) ? FtmsOutputProfile::Auto
+                                                                              : static_cast<FtmsOutputProfile>(next);
 }
 
 const std::vector<std::string>& ftmsNamePresets() {
