@@ -23,6 +23,7 @@ constexpr std::uint32_t Lavender = 0xCC99CC;
 constexpr std::uint32_t Violet = 0x9999FF;
 constexpr std::uint32_t LightBlue = 0x99CCFF;
 constexpr std::uint32_t Blue = 0x5566FF;
+constexpr std::uint32_t Gray = 0x888888;
 constexpr std::uint32_t Alert = 0xCC4444;
 constexpr std::size_t GaugeSegments = 24;
 // Knob focus cursor drawn around the focused widget (outline width + gap).

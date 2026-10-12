@@ -141,6 +141,73 @@ void testScanAndPairViews() {
     assert(!rig.controller.statusView().input.paired.valid);
 }
 
+void testScanSortingAndRelevance() {
+    ControllerRig rig;
+    Command scan = make(CommandType::Scan);
+    scan.durationMs = 15000;
+    assert(rig.controller.execute(scan).ok);
+
+    // Dev 1: Detected adapter (echelon), RSSI -70
+    rig.central.advertise(address("aa:00:00:00:00:01"), "ECH-SPORT", {}, {}, -70);
+    // Dev 2: Detected adapter (ftms), RSSI -50
+    rig.central.advertise(address("aa:00:00:00:00:02"), "KICKR CORE", {0x1826}, {}, -50);
+    // Dev 3: Relevant by name (no adapter, no known service), RSSI -60
+    rig.central.advertise(address("aa:00:00:00:00:03"), "Headphones", {}, {}, -60);
+    // Dev 4: Relevant by known service (RSC 0x1814, no name, no adapter), RSSI -40
+    rig.central.advertise(address("aa:00:00:00:00:04"), "", {0x1814}, {}, -40);
+    // Dev 5: Non-relevant (no name, unknown service, Apple mfg data 0x004C), RSSI -30
+    rig.central.advertise(address("aa:00:00:00:00:05"), "", {0x1234}, {0x4C, 0x00}, -30);
+    // Dev 6: Non-relevant (no name, unknown mfg data 0xABCD), RSSI -20
+    rig.central.advertise(address("aa:00:00:00:00:06"), "", {}, {0xCD, 0xAB}, -20);
+    // Dev 7: Non-relevant (no name, no service, no mfg data), RSSI -10
+    rig.central.advertise(address("aa:00:00:00:00:07"), "", {}, {}, -10);
+
+    rig.core.loop();
+    ScanView view = rig.controller.scanView();
+    assert(view.devices.size() == 7);
+
+    // Check order:
+    // 1: Dev 2 (detected adapter ftms, -50)
+    // 2: Dev 1 (detected adapter echelon, -70)
+    // 3: Dev 4 (relevant RSC, -40)
+    // 4: Dev 3 (relevant Headphones, -60)
+    // 5: Dev 7 (non-relevant address only, -10)
+    // 6: Dev 6 (non-relevant manufacturer 0xABCD, -20)
+    // 7: Dev 5 (non-relevant Apple mfg, -30)
+
+    assert(view.devices[0].address == "aa:00:00:00:00:02");
+    assert(view.devices[0].adapter == "ftms");
+    assert(view.devices[0].label == "KICKR CORE");
+    assert(view.devices[0].relevant == true);
+
+    assert(view.devices[1].address == "aa:00:00:00:00:01");
+    assert(view.devices[1].adapter == "echelon");
+    assert(view.devices[1].label == "ECH-SPORT");
+    assert(view.devices[1].relevant == true);
+
+    assert(view.devices[2].address == "aa:00:00:00:00:04");
+    assert(view.devices[2].adapter.empty());
+    assert(view.devices[2].label == "Running Speed/Cadence");
+    assert(view.devices[2].relevant == true);
+
+    assert(view.devices[3].address == "aa:00:00:00:00:03");
+    assert(view.devices[3].adapter.empty());
+    assert(view.devices[3].label == "Headphones");
+    assert(view.devices[3].relevant == true);
+
+    assert(view.devices[4].address == "aa:00:00:00:00:07");
+    assert(view.devices[4].label == "aa:00:00:00:00:07");
+    assert(view.devices[4].relevant == false);
+
+    assert(view.devices[5].address == "aa:00:00:00:00:06");
+    assert(view.devices[5].label == "Hersteller 0xABCD");
+    assert(view.devices[5].relevant == false);
+
+    assert(view.devices[6].address == "aa:00:00:00:00:05");
+    assert(view.devices[6].label == "Apple");
+    assert(view.devices[6].relevant == false);
+}
+
 void testConfigViewTracksCommands() {
     ControllerRig rig;
     Command name = make(CommandType::FtmsName);
@@ -213,6 +280,7 @@ void runControllerTests() {
     testDefaultViews();
     testSimulationTelemetryAndTargets();
     testScanAndPairViews();
+    testScanSortingAndRelevance();
     testConfigViewTracksCommands();
     testAdapterViews();
     testWithoutBleInput();

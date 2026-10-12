@@ -93,6 +93,8 @@ struct ScanDeviceView {
     bool connectable = true;
     std::string adapter;  // detected adapter id; empty when unknown
     std::vector<std::string> services;
+    std::string label;
+    bool relevant = false;
 };
 
 struct AdapterView {

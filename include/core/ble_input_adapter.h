@@ -29,6 +29,7 @@ struct ScanResult {
     bool connectable = true;
     std::vector<smartfitness::ble::Uuid> services;
     smartfitness::ble::Bytes ftmsServiceData;
+    smartfitness::ble::Bytes manufacturerData;
     std::string detectedAdapter;  // empty when no adapter matches
     std::uint32_t lastSeenMs = 0;
 };
@@ -50,7 +51,7 @@ public:
     enum class LinkState : std::uint8_t { Idle, Connecting, Ready, Backoff, Listening };
 
     static constexpr std::size_t kMaxScanResults = 24;
-    static constexpr std::uint32_t kDefaultScanMs = 10000;
+    static constexpr std::uint32_t kDefaultScanMs = 15000;
 
     BleInputAdapter(smartfitness::ble::CentralTransport& transport, Clock clock);
     BleInputAdapter(smartfitness::ble::CentralTransport& transport, Clock clock, const Timing& timing);

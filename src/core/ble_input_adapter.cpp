@@ -280,7 +280,7 @@ bool BleInputAdapter::startScan(std::uint32_t durationMs) {
     scanUntilMs_ = clock_() + durationMs;
     // While listening to a broadcast device the continuous scan is reused.
     if (state_ == LinkState::Listening) return true;
-    if (!transport_.startScan(durationMs, false)) {
+    if (!transport_.startScan(durationMs, true, true)) {
         userScan_ = false;
         lastError_ = "scan could not be started";
         return false;
@@ -338,13 +338,16 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
         results_.emplace_back();
         entry = &results_.back();
         entry->address = report.address;
+        entry->connectable = report.connectable;
+    } else {
+        entry->connectable = entry->connectable || report.connectable;
     }
     entry->address.type = report.address.type;
     entry->rssi = report.rssi;
-    entry->connectable = report.connectable;
     entry->lastSeenMs = now;
     if (!advertisement.name.empty()) entry->name = advertisement.name;
     if (!advertisement.ftmsServiceData.empty()) entry->ftmsServiceData = advertisement.ftmsServiceData;
+    if (!advertisement.manufacturerData.empty()) entry->manufacturerData = advertisement.manufacturerData;
     for (const auto& service : advertisement.services) {
         bool known = false;
         for (const auto& existing : entry->services) known = known || existing == service;
@@ -354,6 +357,8 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     // packets); keep an earlier detection when this packet carries less.
     advertisement.name = entry->name;
     advertisement.services = entry->services;
+    advertisement.ftmsServiceData = entry->ftmsServiceData;
+    advertisement.manufacturerData = entry->manufacturerData;
     if (const auto* info = protocols::detectProtocol(advertisement)) entry->detectedAdapter = info->id;
 }
 

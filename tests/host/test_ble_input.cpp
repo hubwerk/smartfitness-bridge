@@ -30,6 +30,7 @@
 #include "protocols/sensor_sources.hpp"
 #include "protocols/treadmills.hpp"
 #include "protocols/yesoul_keiser.hpp"
+#include "scan_label.h"
 
 using namespace smartfitness;
 using ble::Bytes;
@@ -767,7 +768,7 @@ void testScanDedupAndExclusion() {
     h.central.own = address("00:00:00:00:00:01");
     h.adapter.setExcludedPeer(address("00:00:00:00:00:02"), true);
     assert(h.adapter.startScan(10000) && h.adapter.scanning());
-    assert(h.central.scanStarts == 1 && h.central.lastScanDuration == 10000 && !h.central.lastScanDuplicates);
+    assert(h.central.scanStarts == 1 && h.central.lastScanDuration == 10000 && h.central.lastScanDuplicates && h.central.lastScanHighDuty);
     h.central.advertise(address("aa:00:00:00:00:01"), "ECH-SPORT", {}, {}, -70);
     h.central.advertise(address("aa:00:00:00:00:01"), "", {0x1826}, {}, -50);  // scan response
     h.central.advertise(address("aa:00:00:00:00:02"), "HRM", {0x180D});
@@ -1332,6 +1333,147 @@ void testDiscoveredVendorEndpoint() {
     assert(!h.adapter.trainerDetected());
 }
 
+void testScanMergingAndConsolidation() {
+    Harness h;
+    assert(h.adapter.startScan() && h.adapter.scanning());
+    assert(h.central.scanStarts == 1 && h.central.lastScanDuration == BleInputAdapter::kDefaultScanMs);
+    assert(h.central.lastScanDuplicates && h.central.lastScanHighDuty);
+
+    const auto addr = address("aa:11:22:33:44:55");
+
+    // Report 1: Advertisement without name, with Apple manufacturer data (0x004C)
+    const Bytes appleMfg{0x4C, 0x00, 0x02, 0x15};
+    h.central.advertise(addr, "", {}, appleMfg, -75);
+    h.advance(10);
+
+    const auto* dev = h.adapter.findResult(addr);
+    assert(dev != nullptr);
+    assert(dev->name.empty());
+    assert(dev->manufacturerData == appleMfg);
+    assert(dev->services.empty());
+    assert(dev->connectable);
+    assert(dev->rssi == -75);
+    assert(h.adapter.scanResults().size() == 1);
+
+    // Report 2: Scan response with name, no manufacturer data, non-connectable
+    ble::ScanReport report2;
+    report2.address = addr;
+    report2.setName("Smart Trainer");
+    report2.connectable = false;
+    report2.rssi = -60;
+    h.central.reports.push_back(report2);
+    h.advance(10);
+
+    dev = h.adapter.findResult(addr);
+    assert(dev != nullptr);
+    assert(h.adapter.scanResults().size() == 1);  // exactly one consolidated entry
+    assert(dev->name == "Smart Trainer");
+    assert(dev->manufacturerData == appleMfg);  // manufacturer data retained
+    assert(dev->connectable);                   // connectable status retained
+    assert(dev->rssi == -60);
+
+    // Report 3: Packet with FTMS service (0x1826), empty name and empty manufacturer
+    h.central.advertise(addr, "", {0x1826}, {}, -50);
+    h.advance(10);
+
+    dev = h.adapter.findResult(addr);
+    assert(dev != nullptr);
+    assert(h.adapter.scanResults().size() == 1);
+    assert(dev->name == "Smart Trainer");       // name retained
+    assert(dev->manufacturerData == appleMfg);  // manufacturer retained
+    assert(dev->services.size() == 1 && dev->services[0] == ble::Uuid::from16(0x1826));
+    assert(dev->detectedAdapter == "ftms");
+    assert(dev->rssi == -50);
+
+    // Report 4: Duplicate report with no new data must not duplicate or clear
+    h.central.advertise(addr, "", {}, {}, -48);
+    h.advance(10);
+
+    dev = h.adapter.findResult(addr);
+    assert(dev != nullptr);
+    assert(h.adapter.scanResults().size() == 1);
+    assert(dev->name == "Smart Trainer");
+    assert(dev->manufacturerData == appleMfg);
+    assert(dev->services.size() == 1);
+    assert(dev->detectedAdapter == "ftms");
+    assert(dev->rssi == -48);
+
+    // Filling queue does not drop existing entry
+    for (int i = 0; i < 25; ++i) {
+        ble::BleAddress other;
+        other.bytes[5] = static_cast<std::uint8_t>(0x60 + i);
+        h.central.advertise(other, "Other");
+    }
+    h.advance(10);
+    assert(h.adapter.scanResults().size() == BleInputAdapter::kMaxScanResults);
+    assert(h.adapter.droppedScanResults() == (1 + 25) - BleInputAdapter::kMaxScanResults);
+    // Duplicate for existing device updates even when queue is full
+    h.central.advertise(addr, "Smart Trainer Updated", {}, {}, -40);
+    h.advance(10);
+    dev = h.adapter.findResult(addr);
+    assert(dev != nullptr);
+    assert(dev->name == "Smart Trainer Updated");
+    assert(dev->rssi == -40);
+}
+
+void testScanLabelHelpers() {
+    // lookupCompany
+    assert(lookupCompany(0x004C) == "Apple");
+    assert(lookupCompany(0x0006) == "Microsoft");
+    assert(lookupCompany(0x0075) == "Samsung");
+    assert(lookupCompany(0x00E0) == "Google");
+    assert(lookupCompany(0x0087) == "Garmin");
+    assert(lookupCompany(0x0157) == "Huami/Xiaomi");
+    assert(lookupCompany(0x0059) == "Nordic");
+    assert(lookupCompany(0x02E5) == "Espressif");
+    assert(lookupCompany(0x0499) == "Ruuvi");
+    assert(lookupCompany(0x01C7) == "Wahoo");
+    assert(lookupCompany(0x0089) == "Tacx");
+    assert(lookupCompany(0x02CD) == "Elite");
+    assert(lookupCompany(0xFFFF) == "");
+
+    // manufacturerLabel
+    assert(manufacturerLabel({}) == "");
+    assert(manufacturerLabel({0x4C}) == "");
+    assert(manufacturerLabel({0x4C, 0x00}) == "Apple");
+    assert(manufacturerLabel({0x4C, 0x00, 0x01, 0x02}) == "Apple");
+    assert(manufacturerLabel({0xCD, 0xAB}) == "Hersteller 0xABCD");
+
+    // serviceLabel
+    assert(serviceLabel(ble::Uuid::from16(0x1826)) == "FTMS");
+    assert(serviceLabel(ble::Uuid::from16(0x180D)) == "Heart Rate");
+    assert(serviceLabel(ble::Uuid::from16(0x1818)) == "Cycling Power");
+    assert(serviceLabel(ble::Uuid::from16(0x1816)) == "CSC");
+    assert(serviceLabel(ble::Uuid::from16(0x1234)) == "");
+
+    // isKnownService
+    assert(isKnownService(ble::Uuid::from16(0x1826)));
+    assert(isKnownService(ble::Uuid::from16(0x180D)));
+    assert(!isKnownService(ble::Uuid::from16(0x1234)));
+
+    // bestServiceLabel
+    assert(bestServiceLabel({}) == "");
+    assert(bestServiceLabel({ble::Uuid::from16(0x1826)}) == "FTMS");
+    assert(bestServiceLabel({ble::Uuid::from16(0x1234), ble::Uuid::from16(0x1826)}) == "FTMS");
+    assert(bestServiceLabel({ble::Uuid::from16(0x1234)}) == "0x1234");
+
+    // isRelevantDevice
+    assert(isRelevantDevice("My Device", "", {}));
+    assert(isRelevantDevice("", "ftms", {}));
+    assert(isRelevantDevice("", "", {ble::Uuid::from16(0x1826)}));
+    assert(!isRelevantDevice("", "", {}));
+    assert(!isRelevantDevice("", "", {ble::Uuid::from16(0x1234)}));
+
+    // scanDeviceLabel priority: Name -> Manufacturer -> Service -> Address
+    const auto testAddr = address("aa:bb:cc:dd:ee:ff");
+    assert(scanDeviceLabel("Name", {0x4C, 0x00}, {ble::Uuid::from16(0x1826)}, testAddr) == "Name");
+    assert(scanDeviceLabel("", {0x4C, 0x00}, {ble::Uuid::from16(0x1826)}, testAddr) == "Apple");
+    assert(scanDeviceLabel("", {0xCD, 0xAB}, {ble::Uuid::from16(0x1826)}, testAddr) == "Hersteller 0xABCD");
+    assert(scanDeviceLabel("", {}, {ble::Uuid::from16(0x1826)}, testAddr) == "FTMS");
+    assert(scanDeviceLabel("", {}, {ble::Uuid::from16(0x1234)}, testAddr) == "0x1234");
+    assert(scanDeviceLabel("", {}, {}, testAddr) == "aa:bb:cc:dd:ee:ff");
+}
+
 }  // namespace
 
 void runBleInputTests() {
@@ -1351,6 +1493,8 @@ void runBleInputTests() {
     testFtmsElapsedTelemetry();
     testStaleFtmsTreadmillControlSafety();
     testScanDedupAndExclusion();
+    testScanMergingAndConsolidation();
+    testScanLabelHelpers();
     testFtmsLifecycle();
     testProtocolFailureAndControlDenied();
     testSessionReplacementAndCancellation();

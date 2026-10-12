@@ -499,6 +499,8 @@ void testJsonViews() {
     assert(document["scanning"] == true && document["devices"].size() == 1);
     assert(document["devices"][0]["address"] == "aa:00:00:00:00:41");
     assert(document["devices"][0]["adapter"] == "echelon");
+    assert(document["devices"][0]["label"] == "ECH-SPORT-1");
+    assert(document["devices"][0]["relevant"] == true);
     assert(document["adapters"].size() > 5);
 
     rig.ui.handleCommand("sim");
