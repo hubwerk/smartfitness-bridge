@@ -74,9 +74,14 @@ void checkLcars() {
            lv_color_to_u32(lv_color_hex(lcars::Lavender)));
     assert(lv_obj_get_style_shadow_width(button, LV_PART_MAIN) == 0);
     lv_obj_add_state(button, LV_STATE_FOCUSED);
-    // Disable transitions so this assertion checks the settled focus style.
-    lv_obj_set_style_transition(button, nullptr, LV_STATE_FOCUSED);
+    // Focus colors switch immediately: no fading highlight on the old item.
     assert(lv_obj_get_style_border_width(button, LV_PART_MAIN) == 2);
+    assert(lv_color_to_u32(lv_obj_get_style_bg_color(button, LV_PART_MAIN)) ==
+           lv_color_to_u32(lv_color_hex(lcars::Peach)));
+    lv_obj_remove_state(button, LV_STATE_FOCUSED);
+    assert(lv_color_to_u32(lv_obj_get_style_bg_color(button, LV_PART_MAIN)) ==
+           lv_color_to_u32(lv_color_hex(lcars::Lavender)));
+    lv_obj_add_state(button, LV_STATE_FOCUSED);
     for (const auto state : {LV_STATE_FOCUS_KEY, LV_STATE_EDITED}) {
         lv_style_value_t width{}, pad{};
         assert(lv_obj_get_local_style_prop(button, LV_STYLE_OUTLINE_WIDTH, &width, LV_PART_MAIN | state) == LV_STYLE_RES_FOUND);

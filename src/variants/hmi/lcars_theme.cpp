@@ -3,6 +3,8 @@
 #include <algorithm>
 
 #include "scroll_arc.h"
+#include "src/core/lv_obj_private.h"
+#include "src/core/lv_obj_style_private.h"
 #include "src/themes/lv_theme_private.h"
 
 namespace hmi::lcars {
@@ -144,6 +146,18 @@ void pill(lv_obj_t* object, std::uint32_t color) {
     lv_obj_set_style_bg_color(object, lv_color_hex(Peach), LV_STATE_FOCUSED);
     lv_obj_set_style_bg_color(object, lv_color_hex(Golden), LV_STATE_PRESSED);
     lv_obj_set_style_opa(object, LV_OPA_50, LV_STATE_DISABLED);
+    // The default theme fades bg colors with a delay, so the previously
+    // focused pill stayed highlighted next to the new one while scrolling.
+    for (std::uint32_t i = 0; i < object->style_cnt;) {
+        const lv_obj_style_t& entry = object->styles[i];
+        lv_style_value_t value{};
+        if (!entry.is_local && !entry.is_trans &&
+            lv_style_get_prop(entry.style, LV_STYLE_TRANSITION, &value) == LV_STYLE_RES_FOUND) {
+            lv_obj_remove_style(object, entry.style, entry.selector);
+        } else {
+            ++i;
+        }
+    }
 }
 
 lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert) {
