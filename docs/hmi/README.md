@@ -5,10 +5,12 @@ One original, LCARS-inspired design system serves the **CrowPanel 1.28" round
 (`esp32s3dev`). The visual reference is the warm, flat, condensed design language
 of TNG-era interfaces; these are not reproductions of screen assets.
 
-**Not hardware-verified.** These are actual LVGL and Chromium renders with fixed
-sample data, not photographs. Colours, small text, touch accuracy, IPS contrast,
-frame rate, heap/PSRAM headroom and readability require checks on the real panel.
-Commands, safety confirmations, API contracts, BLE and FTMS behavior are unchanged.
+The HMI display, rotary encoder (turning/direction), and knob press have been tested
+and work on the real CrowPanel. Gallery images are simulator renders with fixed
+sample data, not photographs; the web UI remains unverified on hardware. Touch
+accuracy, colours, small text, IPS contrast, frame rate, heap/PSRAM headroom and
+readability still require checks on the real panel. Commands, safety confirmations,
+API contracts, BLE and FTMS behavior are unchanged.
 
 ## Shared design system
 
@@ -184,8 +186,10 @@ Mobile (390×844; full-page screenshots include scrollable content):
 ## Before / after
 
 Header-only HMI revision (same fixtures; historical elbow images are not
-regenerated). The web UI and its screenshots are unchanged. Nothing is
-hardware-verified; firmware flash/static RAM delta is unavailable locally
+regenerated). The web UI and its screenshots are unchanged. The CrowPanel display,
+rotary encoder and knob have been tested on hardware; the gallery images remain
+simulator renders, and the web UI is unverified on hardware. Firmware flash/static
+RAM delta is unavailable locally
 because PlatformIO's `espressif32` download fails before compilation.
 The scrollbar adds one LVGL arc per list/roller, with no timer or heap-allocated
 callback context; runtime RAM must still be measured on hardware.
