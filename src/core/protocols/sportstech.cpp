@@ -1,4 +1,4 @@
-// Sportstech F15 / F31 treadmill BLE protocol.
+// Sportstech / FitHome treadmill BLE protocol (F15, F31, WP100, WP200).
 //
 // Ported from syssi/esphome-treadmill-f15
 // (https://github.com/syssi/esphome-treadmill-f15), Copyright syssi and
@@ -6,11 +6,14 @@
 // Pinned revision 61172d6448e00d0a4eb5d70c3c39a3427c292041:
 // components/treadmill_f15/treadmill_f15.{cpp,h}, components/treadmill_f15/
 // button/__init__.py, components/treadmill_f15/number/ and docs/protocol.md.
+// Also cross-checked against deniskie/ha-sportstech-walkingpad-integration,
+// MIT-licensed, revision f2f102710f3a7ca8c0671ea32316cb18b35274fd.
 // This port is part of smartfitness-bridge and distributed under
 // GPL-3.0-or-later.
 
 #include "protocols/sportstech.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace smartfitness {
@@ -37,6 +40,8 @@ Bytes frame(std::uint8_t reg, const Bytes& payload) {
 
 Bytes pollFrame() { return {0x02, 0x51, 0x51, 0x03}; }
 
+Bytes limitsFrame(std::uint8_t subcommand) { return frame(0x50, {subcommand}); }
+
 Bytes stopFrame() { return frame(0x53, {0x03}); }
 
 Bytes speedInclineFrame(std::uint8_t speedTenths, std::uint8_t inclinePercent) {
@@ -45,9 +50,8 @@ Bytes speedInclineFrame(std::uint8_t speedTenths, std::uint8_t inclinePercent) {
 
 bool decodeStatus(const std::uint8_t* data, std::size_t length, Status& out) {
     if (!data || length < 5 || length > kMaxFrameLength || data[0] != 0x02 || data[length - 1] != 0x03) return false;
-    if (checksum(data + 1, length - 3) != data[length - 2]) return false;
+    if (data[1] != 0x51 || checksum(data + 1, length - 3) != data[length - 2]) return false;
     const std::uint8_t type = data[2];
-    if (type != 0x00 && type != 0x02 && type != 0x03 && type != 0x04) return false;
     out = Status{};
     out.mode = static_cast<Mode>(type);
     if (length < 17) return true;  // stopped: 02 51 00 51 03
@@ -56,11 +60,12 @@ bool decodeStatus(const std::uint8_t* data, std::size_t length, Status& out) {
     };
     out.full = true;
     out.speed = static_cast<float>(data[3]) * 0.1F;
-    out.incline = static_cast<float>(data[4]) * 0.1F;
+    out.incline = static_cast<float>(data[4]);
     out.elapsed = le16(5);
     out.distance = le16(7);
     out.calories = static_cast<float>(le16(9)) * 0.1F;
-    out.heartRate = le16(13);
+    out.steps = le16(11);
+    out.heartRate = data[13];
     return true;
 }
 
@@ -80,6 +85,13 @@ void SportstechF15Source::reset() {
     mode_ = Mode::Stopped;
     pollMs_ = 0;
     speedTarget_ = inclineTarget_ = -1;
+    minSpeed_ = sportstech::kMinSpeed;
+    maxSpeed_ = sportstech::kMaxSpeed;
+    minIncline_ = 0.0F;
+    maxIncline_ = sportstech::kMaxIncline;
+    elapsedOffset_ = 0;
+    lastElapsed_ = 0;
+    haveElapsed_ = false;
 }
 
 bool SportstechF15Source::onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) {
@@ -89,7 +101,9 @@ bool SportstechF15Source::onConnected(std::uint32_t subscribedMask, std::uint32_
     }
     connected_ = true;
     pollMs_ = nowMs;
-    return queueWrite(sportstech::kService, sportstech::kWrite, sportstech::pollFrame(), false);
+    return queueWrite(sportstech::kService, sportstech::kWrite, sportstech::limitsFrame(0x02), false) &&
+           queueWrite(sportstech::kService, sportstech::kWrite, sportstech::limitsFrame(0x03), false) &&
+           queueWrite(sportstech::kService, sportstech::kWrite, sportstech::pollFrame(), false);
 }
 
 void SportstechF15Source::tick(std::uint32_t nowMs) {
@@ -99,23 +113,68 @@ void SportstechF15Source::tick(std::uint32_t nowMs) {
 }
 
 void SportstechF15Source::onNotify(std::size_t, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) {
+    if (data && length >= 7 && length <= sportstech::kMaxFrameLength && data[0] == 0x02 &&
+        data[1] == 0x50 && data[length - 1] == 0x03 && sportstech::checksum(data + 1, length - 3) == data[length - 2]) {
+        const float minSpeed = std::max(sportstech::kMinSpeed, std::min(sportstech::kMaxSpeed, data[4] * 0.1F));
+        const float maxSpeed = std::max(sportstech::kMinSpeed, std::min(sportstech::kMaxSpeed, data[3] * 0.1F));
+        const float minIncline = std::max(0.0F, std::min(sportstech::kMaxIncline, static_cast<float>(data[4])));
+        const float maxIncline = std::max(0.0F, std::min(sportstech::kMaxIncline, static_cast<float>(data[3])));
+        if (data[2] == 0x02 && minSpeed <= maxSpeed) {
+            minSpeed_ = minSpeed;
+            maxSpeed_ = maxSpeed;
+        } else if (data[2] == 0x03 && minIncline <= maxIncline) {
+            minIncline_ = minIncline;
+            maxIncline_ = maxIncline;
+        }
+        return;
+    }
+
     sportstech::Status status;
     if (!sportstech::decodeStatus(data, length, status)) return;
     mode_ = status.mode;
-    if (mode_ != Mode::Running && mode_ != Mode::Starting) speedTarget_ = inclineTarget_ = -1;
+    if (mode_ != Mode::Running) speedTarget_ = inclineTarget_ = -1;
+
+    const bool knownMode = mode_ == Mode::Stopped || mode_ == Mode::Finish || mode_ == Mode::Starting ||
+                           mode_ == Mode::Running || mode_ == Mode::Stopping || mode_ == Mode::Error ||
+                           mode_ == Mode::Safety || mode_ == Mode::Sleep || mode_ == Mode::Paused;
+    if (!knownMode) {
+        touch(nowMs);
+        return;
+    }
+
+    if (mode_ == Mode::Stopped || mode_ == Mode::Finish || mode_ == Mode::Starting) {
+        elapsedOffset_ = 0;
+        lastElapsed_ = 0;
+        haveElapsed_ = false;
+        if (sample_.elapsed.valid) sample_.elapsed.value = 0.0F;
+        if (sample_.distance.valid) sample_.distance.value = 0.0F;
+        if (sample_.totalEnergy.valid) sample_.totalEnergy.value = 0.0F;
+        if (sample_.stepCount.valid) sample_.stepCount.value = 0.0F;
+    }
+
     if (!status.full) {
-        // Upstream publishes speed 0 and clears the pulse for short frames;
-        // totals keep their last reported values.
         sample_.speed = {0.0F, true};
         sample_.heartRate = {};
         touch(nowMs);
         return;
     }
+
+    if (mode_ != Mode::Running && mode_ != Mode::Paused && mode_ != Mode::Stopping) {
+        touch(nowMs);
+        return;
+    }
+
     sample_.speed = {status.speed, true};
     sample_.incline = {status.incline, true};
-    sample_.elapsed = {static_cast<float>(status.elapsed), true};
+    if (mode_ == Mode::Running) {
+        if (haveElapsed_ && status.elapsed < lastElapsed_) elapsedOffset_ += lastElapsed_;
+        lastElapsed_ = status.elapsed;
+        haveElapsed_ = true;
+    }
+    sample_.elapsed = {static_cast<float>(elapsedOffset_ + status.elapsed), true};
     sample_.distance = {static_cast<float>(status.distance), true};
     sample_.totalEnergy = {status.calories, true};
+    sample_.stepCount = {static_cast<float>(status.steps), true};
     if (status.heartRate > 0)
         sample_.heartRate = {static_cast<float>(status.heartRate), true};
     else
@@ -135,7 +194,7 @@ bool SportstechF15Source::fresh(std::uint32_t nowMs) const {
 bool SportstechF15Source::control(const ControlRequest& request, std::uint32_t nowMs) {
     if (!capabilities().supports(request.control) || !std::isfinite(request.value) || !fresh(nowMs)) return false;
     if (request.control == Control::Speed && request.value == 0.0F) {
-        if (mode_ != Mode::Running && mode_ != Mode::Starting) return false;
+        if (mode_ != Mode::Running && mode_ != Mode::Starting && mode_ != Mode::Paused) return false;
         speedTarget_ = inclineTarget_ = -1;
         return queueWrite(sportstech::kService, sportstech::kWrite, sportstech::stopFrame(), false);
     }
@@ -145,14 +204,14 @@ bool SportstechF15Source::control(const ControlRequest& request, std::uint32_t n
     long speed = speedTarget_ >= 0 ? speedTarget_ : std::lround(sample_.speed.value * 10);
     long incline = inclineTarget_ >= 0 ? inclineTarget_ : (sample_.incline.valid ? std::lround(sample_.incline.value) : 0);
     if (request.control == Control::Speed) {
-        if (request.value < sportstech::kMinSpeed || request.value > sportstech::kMaxSpeed) return false;
+        if (request.value < minSpeed_ || request.value > maxSpeed_) return false;
         speed = std::lround(request.value * 10);
     } else {
-        if (request.value < 0.0F || request.value > sportstech::kMaxIncline) return false;
+        if (request.value < minIncline_ || request.value > maxIncline_) return false;
         incline = std::lround(request.value);
     }
-    if (speed < std::lround(sportstech::kMinSpeed * 10) || speed > std::lround(sportstech::kMaxSpeed * 10) ||
-        incline < 0 || incline > static_cast<long>(sportstech::kMaxIncline))
+    if (speed < std::lround(minSpeed_ * 10) || speed > std::lround(maxSpeed_ * 10) || incline < std::lround(minIncline_) ||
+        incline > std::lround(maxIncline_))
         return false;
     if (!queueWrite(sportstech::kService, sportstech::kWrite,
                     sportstech::speedInclineFrame(static_cast<std::uint8_t>(speed), static_cast<std::uint8_t>(incline)),

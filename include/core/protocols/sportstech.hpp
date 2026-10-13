@@ -1,6 +1,6 @@
 #pragma once
 
-// Sportstech F15 / F31 treadmill BLE protocol.
+// Sportstech / FitHome treadmill BLE protocol (F15, F31, WP100, WP200).
 //
 // Ported from syssi/esphome-treadmill-f15
 // (https://github.com/syssi/esphome-treadmill-f15), Copyright syssi and
@@ -11,6 +11,9 @@
 // __init__.py (stop command), components/treadmill_f15/number/ (speed/incline
 // limits) and docs/protocol.md (captured frames). This port is part of
 // smartfitness-bridge and distributed under GPL-3.0-or-later.
+// Also cross-checked against deniskie/ha-sportstech-walkingpad-integration,
+// MIT-licensed, revision f2f102710f3a7ca8c0671ea32316cb18b35274fd
+// (FitHome/F37 status states, metrics, and limit queries).
 
 #include <cstddef>
 #include <cstdint>
@@ -34,7 +37,17 @@ constexpr float kMaxIncline = 15.0F;
 constexpr std::uint32_t kPollIntervalMs = 1000;
 constexpr std::size_t kMaxFrameLength = 108;
 
-enum class Mode : std::uint8_t { Stopped = 0, StartAck = 1, Starting = 2, Running = 3, Stopping = 4 };
+enum class Mode : std::uint8_t {
+    Stopped = 0,
+    Finish = 1,
+    Starting = 2,
+    Running = 3,
+    Stopping = 4,
+    Error = 5,
+    Safety = 6,
+    Sleep = 7,
+    Paused = 10
+};
 
 // XOR over every byte between the 0x02 start and the checksum.
 std::uint8_t checksum(const std::uint8_t* data, std::size_t length);
@@ -42,6 +55,8 @@ std::uint8_t checksum(const std::uint8_t* data, std::size_t length);
 Bytes frame(std::uint8_t reg, const Bytes& payload);
 // Status poll 02 51 51 03 (upstream sends it without a checksum).
 Bytes pollFrame();
+// Request the device speed/incline limits (02 50 02/03 <xor> 03).
+Bytes limitsFrame(std::uint8_t subcommand);
 // 02 53 03 <xor> 03
 Bytes stopFrame();
 // 02 53 02 <speed 0.1 km/h> <incline %> 00*7 <xor> 03
@@ -55,10 +70,10 @@ struct Status {
     std::uint16_t elapsed = 0;   // s
     std::uint16_t distance = 0;  // m
     float calories = 0.0F;       // kcal
+    std::uint16_t steps = 0;
     std::uint16_t heartRate = 0; // bpm, 0 = no reading
 };
-// False for malformed frames, checksum errors and non-status frames (e.g. the
-// start acknowledgement).
+// False for malformed frames, checksum errors and non-status frames.
 bool decodeStatus(const std::uint8_t* data, std::size_t length, Status& out);
 
 }  // namespace sportstech
@@ -90,6 +105,13 @@ private:
     // 0.1 km/h, incline in integer percent as sent on the wire.
     int speedTarget_ = -1;
     int inclineTarget_ = -1;
+    float minSpeed_ = sportstech::kMinSpeed;
+    float maxSpeed_ = sportstech::kMaxSpeed;
+    float minIncline_ = 0.0F;
+    float maxIncline_ = sportstech::kMaxIncline;
+    std::uint32_t elapsedOffset_ = 0;
+    std::uint16_t lastElapsed_ = 0;
+    bool haveElapsed_ = false;
 };
 
 }  // namespace protocols

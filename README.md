@@ -11,10 +11,12 @@ on the ELECROW CrowPanel 1.28" round rotary display.
 > **License:** GPL-3.0-or-later (see [`LICENSE`](LICENSE)). The vendor protocols in
 > `src/core/protocols/` and `include/core/protocols/` are ported from
 > [`cagnulein/qdomyos-zwift`](https://github.com/cagnulein/qdomyos-zwift) (GPL-3.0),
-> which makes the firmware a derivative work. The Sportstech F15/F31 treadmill
-> protocol is ported from
+> which makes the firmware a derivative work. The Sportstech/FitHome treadmill
+> protocol is derived from
 > [`syssi/esphome-treadmill-f15`](https://github.com/syssi/esphome-treadmill-f15)
-> (Apache-2.0).
+> (Apache-2.0) and cross-checked against
+> [`deniskie/ha-sportstech-walkingpad-integration`](https://github.com/deniskie/ha-sportstech-walkingpad-integration)
+> (MIT).
 
 ## Overview and project status
 
@@ -338,7 +340,7 @@ the saved BLE source again. `save` persists that input toggle.
 
 See [supported devices](docs/supported-devices.md) for the complete adapter table,
 match rules, metrics, controls, attribution, and test status. Only the listed
-qdomyos-zwift (and Sportstech F15/F31) ports exist; this is not support for its entire device catalogue.
+qdomyos-zwift (and Sportstech/FitHome) ports exist; this is not support for its entire device catalogue.
 
 To add a protocol:
 1. Implement pure C++ `SourceProtocol` in `include/core/protocols/` and `src/core/protocols/`:
@@ -870,10 +872,15 @@ text. Vendor protocol code is derived from
 Viola and contributors (GPL-3.0). Port headers retain upstream paths (no upstream
 commit revision is recorded); see the
 [supported-device attribution table](docs/supported-devices.md).
-The Sportstech F15/F31 treadmill protocol (`sportstech.hpp/.cpp`) is derived from
+The Sportstech/FitHome treadmill protocol (`sportstech.hpp/.cpp`) is derived from
 [`syssi/esphome-treadmill-f15`](https://github.com/syssi/esphome-treadmill-f15)
 (Apache-2.0, revision `61172d6448e00d0a4eb5d70c3c39a3427c292041`); Apache-2.0
 code may be incorporated into GPL-3.0 works.
+The implementation is also cross-checked against
+[`deniskie/ha-sportstech-walkingpad-integration`](https://github.com/deniskie/ha-sportstech-walkingpad-integration)
+(MIT, revision `f2f102710f3a7ca8c0671ea32316cb18b35274fd`), whose manifest matches
+service `0xFFF0`. That discovery signal is generic, so this adapter remains
+manual-only and priority 0.
 Redistribution must comply with the GPL, including corresponding source obligations.
 [HD-005](docs/hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports)
 records this decision. Dependency licenses remain their own; the vendored
