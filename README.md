@@ -20,9 +20,10 @@ qdomyos-zwift vendor ports, reconnect/backoff, stale-data handling, FTMS output,
 Wi-Fi setup and web UI, a shared console/API command layer, and NVS configuration.
 ANT output remains a stub; CPS/HRS output services and OTA are not implemented.
 
-**Not verified on hardware.** Host tests and firmware compilation do not establish
-real-device compatibility, radio coexistence, app interoperability, or safe physical
-trainer operation. All supported-device entries are unverified on equipment.
+The CrowPanel HMI has been verified on real hardware: the display, rotary encoder
+(turning/direction), and knob button work. BLE equipment compatibility, app
+interoperability, radio coexistence, the web variant, safe physical trainer operation,
+and all supported-device entries remain unverified on equipment.
 The post-PR-#10 [main CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38030185653)
 passed both host tests and firmware build; the badge above tracks CI.
 
@@ -48,8 +49,10 @@ Wi-Fi fields) is identical; the HMI variant simply never starts Wi-Fi.
 
 Both variants share an **LCARS-inspired** palette, Antonio typography, swept
 frames, pill controls and telemetry gauges. Existing commands and safety
-confirmations are unchanged. These simulator/browser renders are **not
-hardware-verified**; colours and readability need checking on the real IPS panel.
+confirmations are unchanged. The HMI UI has been tested on the real CrowPanel;
+the screenshots are simulator/browser renders, not photographs. The web UI remains
+unverified on hardware, and colours and readability still need checking on the real
+IPS panel.
 
 ![Round HMI dashboard](docs/hmi/hmi/01-dashboard-bike.png)
 ![Round HMI speed confirmation](docs/hmi/hmi/10-confirm-speed.png)
@@ -123,9 +126,9 @@ notes for the exact version), then run `pio run -t clean` and rebuild with
 
 ## HMI variant (CrowPanel 1.28")
 
-> **Not tested on hardware.** The HMI firmware compiles; layout and knob-only
-> navigation are checked in the host simulator only. Display orientation, touch
-> coordinates, encoder direction and LED ring order still need a real board.
+> Tested on real CrowPanel hardware and functional for display output, rotary
+> encoder turning/direction, and knob press. Touch operation and the `TODO(verify)`
+> items (GPIO 2 5 V enable, LED count/order) remain unconfirmed.
 
 ### Board pins
 
@@ -193,7 +196,9 @@ data and runs a knob-only walkthrough. CI uploads the PNGs as the
 
 - No Wi-Fi, web UI or REST/WebSocket API in this variant (Serial console stays).
 - Only the built-in Montserrat fonts (ASCII); German umlauts need a custom font.
-- Nothing is hardware-verified; see the pin TODOs above.
+- The display, rotary encoder (turning/direction), and knob press are verified on
+  hardware. Touch operation and the pin TODOs (GPIO 2 5 V enable, LED count/order)
+  remain unconfirmed.
 
 ## Architecture
 
@@ -845,7 +850,8 @@ green CI as hardware validation.
 
 ## Roadmap
 
-- Hardware validation: first setup, every source protocol, real trainer controls,
+- Hardware validation: CrowPanel HMI display, rotary encoder and knob verified;
+  remaining work includes first setup, every source protocol, real trainer controls,
   reconnect/persistence, nRF Connect, Zwift/MyWhoosh and BLE/Wi-Fi load tests.
 - API authentication and access protection.
 - CPS/HRS outputs and multi-client support for Garmin recording.

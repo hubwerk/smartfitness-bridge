@@ -168,7 +168,7 @@ output, configuration, commands) must not be duplicated.
 
 ## HD-007: CrowPanel 1.28" HMI hardware, drivers and LVGL version
 
-**Status:** Accepted (not hardware-verified)
+**Status:** Accepted; display, rotary encoder and knob tested on hardware
 
 ### Context
 The CrowPanel 1.28" ESP32-S3 Rotary Display (ESP32-S3R8, 8 MB octal PSRAM, 16 MB
@@ -198,8 +198,8 @@ WS2812 LEDs. The firmware must stay on Arduino core 2.0.x because NimBLE-Arduino
   and a runtime setting) for connection/control status.
 
 ### Consequences
-- Display orientation, touch mapping, encoder direction, LED count/order and
-  GPIO 2 (external 5 V enable) must be checked on a real board.
+- Touch mapping, LED count/order and GPIO 2 (external 5 V enable) remain
+  unverified on a real board.
 - HD-008 supplies a Latin-1 font with umlauts; the German string table is still
   untranslated and falls back to English.
 - Upgrading to LVGL 9.3+ or Arduino core 3.x requires re-checking LovyanGFX and
@@ -207,7 +207,8 @@ WS2812 LEDs. The firmware must stay on Arduino core 2.0.x because NimBLE-Arduino
 
 ## HD-008: Shared LCARS-inspired interface design
 
-**Status:** Accepted; simulator/browser verified, not hardware-verified
+**Status:** Accepted; simulator/browser verified. CrowPanel display, encoder and
+knob tested on hardware; visual appearance and the web variant remain unverified.
 
 ### Context
 The web and round-display variants expose the same bridge commands and safety
