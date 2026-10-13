@@ -17,10 +17,23 @@ void notify(SourceProtocol& source, const Bytes& frame, std::uint32_t now) {
     source.onNotify(0, frame.data(), frame.size(), now);
 }
 
-// Synthetic running frame in the captured 17-byte layout.
+// Synthetic running frame in the upstream 17-byte layout.
 Bytes running(std::uint8_t speedTenths, std::uint8_t incline = 0, std::uint8_t heartRate = 0,
-              std::uint8_t mode = 0x03) {
-    Bytes payload{mode, speedTenths, incline, 0x10, 0x00, 0x25, 0x00, 0x0e, 0x00, 0x00, 0x00, heartRate, 0x00};
+              std::uint8_t mode = 0x03, std::uint16_t elapsed = 16, std::uint16_t steps = 0,
+              std::uint8_t heartRateHigh = 0) {
+    Bytes payload{mode,
+                  speedTenths,
+                  incline,
+                  static_cast<std::uint8_t>(elapsed),
+                  static_cast<std::uint8_t>(elapsed >> 8),
+                  0x25,
+                  0x00,
+                  0x0e,
+                  0x00,
+                  static_cast<std::uint8_t>(steps),
+                  static_cast<std::uint8_t>(steps >> 8),
+                  heartRate,
+                  heartRateHigh};
     Bytes out = sportstech::frame(0x51, payload);
     assert(out.size() == 17);
     return out;
@@ -28,6 +41,8 @@ Bytes running(std::uint8_t speedTenths, std::uint8_t incline = 0, std::uint8_t h
 
 void codecTests() {
     assert(sportstech::pollFrame() == Bytes({0x02, 0x51, 0x51, 0x03}));
+    assert(sportstech::limitsFrame(0x02) == Bytes({0x02, 0x50, 0x02, 0x52, 0x03}));
+    assert(sportstech::limitsFrame(0x03) == Bytes({0x02, 0x50, 0x03, 0x53, 0x03}));
     // Upstream button/__init__.py stop command and captured app commands.
     assert(sportstech::stopFrame() == Bytes({0x02, 0x53, 0x03, 0x50, 0x03}));
     assert(sportstech::frame(0x53, {0x01, 0, 0, 0, 0, 0, 0, 0, 0}) ==
@@ -44,6 +59,10 @@ void codecTests() {
     assert(status.full && status.mode == Mode::Running);
     assert(near(status.speed, 6.0F) && near(status.incline, 0));
     assert(status.elapsed == 28 && status.distance == 42 && near(status.calories, 1.6F) && status.heartRate == 0);
+
+    const Bytes synthetic = running(80, 5, 120, 0x03, 44, 0x1234, 0x99);
+    assert(sportstech::decodeStatus(synthetic.data(), synthetic.size(), status));
+    assert(near(status.incline, 5) && status.heartRate == 120 && status.steps == 0x1234 && status.elapsed == 44);
 
     const Bytes stopping{0x02, 0x51, 0x04, 0x03, 0x00, 0x16, 0x01, 0x48, 0x00, 0x1c,
                          0x00, 0x00, 0x00, 0x00, 0x00, 0x15, 0x03};
@@ -64,10 +83,14 @@ void codecTests() {
     assert(!sportstech::decodeStatus(bad.data(), bad.size(), status));
     assert(!sportstech::decodeStatus(capture.data(), 4, status));
     assert(!sportstech::decodeStatus(nullptr, 17, status));
-    const Bytes startAck = sportstech::frame(0x51, {0x01});
-    assert(!sportstech::decodeStatus(startAck.data(), startAck.size(), status));
-    const Bytes unknown = sportstech::frame(0x51, {0x07});
-    assert(!sportstech::decodeStatus(unknown.data(), unknown.size(), status));
+    // Raw state 1 is finish/idle, including the short response previously
+    // treated as a start acknowledgement; no start command is ever emitted.
+    const Bytes finish = sportstech::frame(0x51, {0x01});
+    assert(sportstech::decodeStatus(finish.data(), finish.size(), status));
+    assert(!status.full && status.mode == Mode::Finish);
+    const Bytes unknown = sportstech::frame(0x51, {0x09});
+    assert(sportstech::decodeStatus(unknown.data(), unknown.size(), status));
+    assert(static_cast<std::uint8_t>(status.mode) == 0x09);
 }
 
 void sourceTests() {
@@ -90,6 +113,8 @@ void sourceTests() {
     std::uint32_t now = 100;
     assert(source.onConnected(1, now));
     ble::GattWrite write;
+    assert(source.takeWrite(write) && write.payload() == sportstech::limitsFrame(0x02));
+    assert(source.takeWrite(write) && write.payload() == sportstech::limitsFrame(0x03));
     assert(source.takeWrite(write) && write.payload() == sportstech::pollFrame() && !write.withResponse &&
            write.characteristic == sportstech::kWrite);
     assert(!source.isTrainer());
@@ -111,18 +136,18 @@ void sourceTests() {
     assert(!source.takeWrite(write));
 
     // Running: every decoded value is forwarded.
-    notify(source, running(50, 20, 120), ++now);
+    notify(source, running(50, 2, 120, 3, 16, 456, 0x90), ++now);
     const auto& sample = source.sample();
     assert(source.mode() == Mode::Running);
     assert(near(sample.speed.value, 5.0F) && near(sample.incline.value, 2.0F) && near(sample.elapsed.value, 16) &&
            near(sample.distance.value, 37) && near(sample.totalEnergy.value, 1.4F) &&
-           near(sample.heartRate.value, 120));
+           near(sample.heartRate.value, 120) && near(sample.stepCount.value, 456));
     const auto capabilities = source.capabilities();
     for (Metric metric : {Metric::Speed, Metric::Incline, Metric::ElapsedTime, Metric::Distance,
-                          Metric::TotalEnergy, Metric::HeartRate})
+                          Metric::TotalEnergy, Metric::HeartRate, Metric::StepCount})
         assert(capabilities.supports(metric));
     assert(capabilities.supports(Control::Speed) && capabilities.supports(Control::Incline));
-    notify(source, running(50, 20, 0), ++now);
+    notify(source, running(50, 2, 0), ++now);
     assert(!source.sample().heartRate.valid);
 
     // Bounds follow the upstream number entities.
@@ -133,6 +158,16 @@ void sourceTests() {
     assert(!source.control({Control::Speed, std::numeric_limits<float>::quiet_NaN()}, now));
     assert(!source.takeWrite(write));
 
+    // Synthetic parameter replies replace the fallback bounds, clamped to
+    // this adapter's supported speed/incline ranges.
+    notify(source, sportstech::frame(0x50, {0x02, 100, 10, 0, 0}), ++now);
+    notify(source, sportstech::frame(0x50, {0x03, 12, 2, 0, 0}), ++now);
+    assert(!source.control({Control::Speed, 0.9F}, now));
+    assert(!source.control({Control::Speed, 10.1F}, now));
+    assert(!source.control({Control::Incline, 1}, now));
+    assert(!source.control({Control::Incline, 13}, now));
+    assert(!source.takeWrite(write));
+
     // Speed and incline share one frame; the partner keeps the pending target.
     assert(source.control({Control::Speed, 8}, now));
     assert(source.takeWrite(write) && write.payload() == sportstech::speedInclineFrame(80, 2));
@@ -141,8 +176,8 @@ void sourceTests() {
     notify(source, running(65, 0), ++now);  // still ramping
     assert(source.control({Control::Incline, 5}, now));
     assert(source.takeWrite(write) && write.payload() == sportstech::speedInclineFrame(80, 5));
-    notify(source, running(80, 50), ++now);  // targets reached
-    notify(source, running(90, 50), ++now);  // console speed change is followed
+    notify(source, running(80, 5), ++now);  // targets reached
+    notify(source, running(90, 5), ++now);  // console speed change is followed
     assert(source.control({Control::Incline, 6}, now));
     assert(source.takeWrite(write) && write.payload() == sportstech::speedInclineFrame(90, 6));
 
@@ -152,6 +187,46 @@ void sourceTests() {
     // Speed 0 stops the belt.
     assert(source.control({Control::Speed, 0}, now));
     assert(source.takeWrite(write) && write.payload() == sportstech::stopFrame());
+
+    // Paused/stopping full frames carry live metrics, while all non-running
+    // modes reject speed/incline changes. Pause still permits a stop command.
+    notify(source, running(65, 3, 88, static_cast<std::uint8_t>(Mode::Paused)), ++now);
+    assert(source.mode() == Mode::Paused && near(source.sample().speed.value, 6.5F) &&
+           near(source.sample().incline.value, 3) && near(source.sample().heartRate.value, 88));
+    assert(!source.control({Control::Speed, 5}, now));
+    assert(!source.control({Control::Incline, 4}, now));
+    assert(source.control({Control::Speed, 0}, now));
+    assert(source.takeWrite(write) && write.payload() == sportstech::stopFrame());
+    notify(source, running(20, 1, 0, static_cast<std::uint8_t>(Mode::Stopping)), ++now);
+    assert(source.mode() == Mode::Stopping && near(source.sample().speed.value, 2.0F));
+
+    // State notifications from idle, starting, finish, error, safety-key,
+    // sleep, pause, and unknown states keep telemetry fresh and gate controls.
+    for (std::uint8_t state : {0, 1, 2, 5, 6, 7, 10, 9}) {
+        const Bytes status = sportstech::frame(0x51, {state});
+        notify(source, status, ++now);
+        assert(source.lastDataMs() == now);
+        assert(!source.control({Control::Speed, 5}, now));
+        assert(!source.control({Control::Incline, 2}, now));
+        if (state == 6) assert(source.mode() == Mode::Safety);
+        if (state == 2 || state == 10) {
+            assert(source.control({Control::Speed, 0}, now));
+            assert(source.takeWrite(write) && write.payload() == sportstech::stopFrame());
+        }
+    }
+    assert(!source.takeWrite(write));
+
+    // The device timer wraps at 6039 seconds. Cumulative elapsed stays
+    // monotonic while running and resets for an idle/new session.
+    notify(source, running(80, 2, 0, 3, 6039), ++now);
+    assert(near(source.sample().elapsed.value, 6039));
+    notify(source, running(80, 2, 0, 3, 0), ++now);
+    assert(near(source.sample().elapsed.value, 6039));
+    notify(source, running(80, 2, 0, 3, 1), ++now);
+    assert(near(source.sample().elapsed.value, 6040));
+    notify(source, Bytes({0x02, 0x51, 0x00, 0x51, 0x03}), ++now);
+    notify(source, running(80, 2, 0, 3, 1), ++now);
+    assert(near(source.sample().elapsed.value, 1));
 
     source.reset();
     assert(!source.hasData() && !source.isTrainer() && source.mode() == Mode::Stopped);

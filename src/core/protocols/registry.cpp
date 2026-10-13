@@ -99,7 +99,7 @@ const ProtocolInfo kProtocols[] = {
     {"elite-misuro", "Elite Misuro B+ (read-only)", 70, matchesEliteMisuro, makeEliteMisuro, false, false, MachineProfile::IndoorBike},
     {"wahoo-legacy", "Wahoo KICKR legacy", 80, matchesWahooKickr, makeWahooKickr, true, false, MachineProfile::IndoorBike},
     {"concept2-pm5", "Concept2 PM5 rower", 80, matchesConcept2Pm5, makeConcept2Pm5, false, false, MachineProfile::Rower},
-    {"sportstech-f15", "Sportstech F15 / F31 treadmill", 0, manualOnly, make<SportstechF15Source>, true, false, MachineProfile::Treadmill},
+    {"sportstech-f15", "Sportstech / FitHome (F15, F31, WP100, WP200)", 0, manualOnly, make<SportstechF15Source>, true, false, MachineProfile::Treadmill},
     {"ftms", "FTMS fitness machine", 50, matchesFtms, make<FtmsSource>, true, false, MachineProfile::IndoorBike},
     {"cps", "Cycling Power sensor", 40, matchesCps, make<CyclingPowerSource>, false, false, MachineProfile::IndoorBike},
     {"csc", "Speed/Cadence sensor", 30, matchesCsc, make<CscSource>, false, false, MachineProfile::IndoorBike},
