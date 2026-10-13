@@ -131,6 +131,8 @@ notes for the exact version), then run `pio run -t clean` and rebuild with
 
 ## HMI variant (CrowPanel 1.28")
 
+<img width="2866" height="2152" alt="PXL_20261013_195008383 MACRO_FOCUS" src="https://github.com/user-attachments/assets/6ee3d298-121d-4532-b26b-ac3e838d9c6a" />
+
 
 ### Board pins
 
