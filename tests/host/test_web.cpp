@@ -433,7 +433,7 @@ void testSportstechViews() {
     rig.now += 300;
     rig.central.pushEvent(ble::CentralEventType::Notification, 0, 0, {2, 0x51, 0, 0x51, 3});
     rig.core.loop();
-    rig.now += 25;  // Allow short-frame reassembly to complete.
+    rig.now += 1000;  // Allow short-frame reassembly to complete.
     rig.core.loop();
     control({0x07});
     assert(rig.central.writes.back().payload() == ble::Bytes({2, 0x53, 1, 0, 0, 0, 0, 0, 0x52, 3}));

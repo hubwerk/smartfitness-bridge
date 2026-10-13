@@ -497,14 +497,16 @@ void f15TelemetryTests() {
         notify(source, f15Status(mode), 3);
         assert(source.treadmillOperation() == static_cast<TreadmillOperation>(mode));
     }
+    std::uint32_t shortMs = 100;
     for (std::uint8_t mode : {0,2,3,4}) {
-        notify(source, mode == 2 ? f15Frame({2,0x51,2,3}) : f15Frame({2,0x51,mode}), 4);
-        source.tick(24);
+        notify(source, mode == 2 ? f15Frame({2,0x51,2,3}) : f15Frame({2,0x51,mode}), shortMs);
+        source.tick(shortMs + 1000);
         assert(source.treadmillOperation() == static_cast<TreadmillOperation>(mode));
         assert(source.sample().speed.value == 0 && source.sample().heartRate.value == 0);
         assert(source.sample().incline.value == 0.5F && source.sample().elapsed.value == 597);
         assert(source.sample().distance.value == 388);
         assert(std::abs(source.sample().totalEnergy.value - 56.4F) < 0.001F);
+        shortMs += 2000;
     }
     // A valid short-looking prefix inside a fragmented full frame is not EOF.
     full = f15Status();
@@ -512,21 +514,22 @@ void f15TelemetryTests() {
     full[4] = 3;
     full.resize(15);
     full = f15Frame(full);
-    source.onNotify(0, full.data(), 5, 30);
-    assert(source.lastDataMs() == 24);
-    source.onNotify(0, full.data() + 5, full.size() - 5, 31);
-    assert(source.lastDataMs() == 31 && source.sample().speed.value == 8.2F);
+    source.onNotify(0, full.data(), 5, 8000);
+    source.tick(8100);
+    assert(source.lastDataMs() == 7100);
+    source.onNotify(0, full.data() + 5, full.size() - 5, 8200);
+    assert(source.lastDataMs() == 8200 && source.sample().speed.value == 8.2F);
     auto joined = f15Status(0);
     const auto second = f15Status(3);
     joined.insert(joined.end(), second.begin(), second.end());
-    notify(source, joined, 40);
-    assert(source.treadmillOperation() == TreadmillOperation::Running && source.lastDataMs() == 40);
+    notify(source, joined, 8300);
+    assert(source.treadmillOperation() == TreadmillOperation::Running && source.lastDataMs() == 8300);
     source.reset();
     f15Connect(source);
     for (Bytes bad : {Bytes{}, Bytes{2}, Bytes{2,0x51,3}, Bytes{2,0x51,3,0},
                       f15Frame({2,0x52,3}), f15Frame({2,0x51,5}), Bytes(109,0x03)}) {
         notify(source, bad, 50);
-        source.tick(71);
+        source.tick(1050);
         assert(!source.hasData());
         source.reset();
         f15Connect(source);
@@ -558,16 +561,16 @@ void f15TelemetryTests() {
     for (std::size_t i = 0; i < oversized.size(); i += 7) {
         source.onNotify(0, oversized.data() + i, std::min<std::size_t>(7, oversized.size() - i), 2);
     }
-    source.tick(22);
+    source.tick(1002);
     assert(!source.hasData());
-    notify(source, f15Status(), 23);
-    assert(source.hasData() && source.lastDataMs() == 23);
+    notify(source, f15Status(), 1003);
+    assert(source.hasData() && source.lastDataMs() == 1003);
     source.reset();
     f15Connect(source);
     const auto shortStarting = f15Frame({2,0x51,2,6});
     for (auto byte : shortStarting) source.onNotify(0, &byte, 1, 24);
     assert(!source.hasData());
-    source.tick(44);
+    source.tick(1024);
     assert(source.hasData() && source.treadmillOperation() == TreadmillOperation::Starting);
     assert(source.sample().speed.value == 0 && source.sample().heartRate.value == 0);
     assert(!source.sample().incline.valid && !source.sample().elapsed.valid);
@@ -623,10 +626,33 @@ void f15ControlsAndLifecycleTests() {
         notify(source, f15Status(0), 1);
         assert(source.control({Control::RunState,1}, 2));
         assert(source.takeWrite(write));
+        notify(source, f15Status(2), 1000);
         notify(source, f15Status(hardwareStop), 5999);
         source.tick(6002);
         while (source.takeWrite(write)) assert(write.payload() == Bytes({2,0x51,0x51,3}));
     }
+    for (std::uint8_t confirmedMode : {2,3}) {
+        source.reset();
+        f15Connect(source);
+        notify(source, f15Status(0), 1);
+        source.tick(1000); // Poll queued before the explicit start.
+        assert(source.control({Control::RunState,1}, 1001));
+        assert(source.takeWrite(write) && write.payload() == Bytes({2,0x51,0x51,3}));
+        assert(source.takeWrite(write) && write.payload() == Bytes({2,0x53,1,0,0,0,0,0,0x52,3}));
+        notify(source, f15Status(0), 1002); // Old poll response does not cancel an unobserved start.
+        notify(source, f15Status(confirmedMode), 6000);
+        source.tick(7001);
+        assert(source.takeWrite(write) && write.payload() == f15Target(8,0));
+        while (source.takeWrite(write)) assert(write.payload() == Bytes({2,0x51,0x51,3}));
+    }
+    source.reset();
+    f15Connect(source);
+    notify(source, f15Status(0), 1);
+    assert(source.control({Control::RunState,1}, 2));
+    assert(source.takeWrite(write));
+    notify(source, f15Status(0), 5999); // No confirmed successful start.
+    source.tick(6002);
+    while (source.takeWrite(write)) assert(write.payload() == Bytes({2,0x51,0x51,3}));
     for (const ControlRequest stopping : {ControlRequest{Control::RunState,0},
                                          {Control::RunState,2}, {Control::Speed,0}}) {
         source.reset();

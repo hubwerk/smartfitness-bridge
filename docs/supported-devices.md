@@ -81,6 +81,7 @@ energy 0.1 kcal, pulse bpm. Short status responses provide mode and zero
 speed/pulse, retaining previous distance/time/energy/incline as upstream does.
 `01` is a start acknowledgement, not a telemetry sample. Bytes 11–12 are
 undecoded upstream: **no step count or error code is fabricated**.
+Short responses wait up to one second for fragmented full status data.
 
 All six measurements use FTMS Treadmill Data `2ACD`; the existing codec derives
 ramp angle from incline and leaves unavailable energy-rate fields unavailable.
@@ -100,7 +101,8 @@ the reference; this port preserves it pending real-device verification.
 Changing one target preserves the other requested target, not a differently
 scaled measurement. Speed limits are 0.8–12 km/h, incline 0–15%;
 speed zero uses stop. Explicit start applies targets after the upstream six-second
-countdown; stop/pause cancels that delayed write. Pairing/reconnecting never starts
+countdown only with fresh starting/running confirmation; stop/pause cancels that
+delayed write. Pairing/reconnecting never starts
 the belt. Controls require fresh status.
 
 FTMS `02` Set Target Speed, `03` Set Target Inclination, `07` Start/Resume and

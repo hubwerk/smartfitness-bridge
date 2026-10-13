@@ -36,6 +36,7 @@ private:
     std::uint32_t receiveMs_ = 0, pollMs_ = 0, startMs_ = 0;
     float speedTarget_ = 0.8F, inclineTarget_ = 0;
     bool writeFound_ = false, connected_ = false, usable_ = false, delayedStart_ = false;
+    bool startupObserved_ = false;
 };
 
 }  // namespace protocols

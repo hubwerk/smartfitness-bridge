@@ -125,7 +125,10 @@ void SportstechF15Treadmill::parse(std::uint32_t nowMs, bool flushShort) {
 void SportstechF15Treadmill::accept(const Bytes& frame, std::uint32_t nowMs) {
     if (frame[2] == 1) return;  // Start ACK is not telemetry.
     operation_ = static_cast<TreadmillOperation>(frame[2]);
-    if (operation_ == TreadmillOperation::Stopped || operation_ == TreadmillOperation::Stopping)
+    if (delayedStart_ && (operation_ == TreadmillOperation::Starting || operation_ == TreadmillOperation::Running))
+        startupObserved_ = true;
+    if (operation_ == TreadmillOperation::Stopping ||
+        (operation_ == TreadmillOperation::Stopped && startupObserved_))
         delayedStart_ = false;
     if (frame.size() == 17) {
         sample_.speed = {frame[3] * 0.1F, true};
@@ -144,14 +147,16 @@ void SportstechF15Treadmill::accept(const Bytes& frame, std::uint32_t nowMs) {
 }
 void SportstechF15Treadmill::tick(std::uint32_t nowMs) {
     if (!connected_ || failed()) return;
-    if (!receive_.empty() && static_cast<std::uint32_t>(nowMs - receiveMs_) >= 20) parse(nowMs, true);
+    if (!receive_.empty() && static_cast<std::uint32_t>(nowMs - receiveMs_) >= 1000) parse(nowMs, true);
     if (hasData() && static_cast<std::uint32_t>(nowMs - lastDataMs()) > kFreshStatusMs) {
         usable_ = false;
         delayedStart_ = false;
     }
     if (delayedStart_ && static_cast<std::uint32_t>(nowMs - startMs_) >= 6000) {
         delayedStart_ = false;
-        if (fresh(nowMs)) sendTarget(speedTarget_, inclineTarget_);
+        if (fresh(nowMs) && startupObserved_ &&
+            (operation_ == TreadmillOperation::Starting || operation_ == TreadmillOperation::Running))
+            sendTarget(speedTarget_, inclineTarget_);
     }
     if (static_cast<std::uint32_t>(nowMs - pollMs_) >= 1000) {
         pollMs_ = nowMs;
@@ -177,6 +182,7 @@ bool SportstechF15Treadmill::control(const ControlRequest& request, std::uint32_
         (request.control == Control::RunState && (request.value == 0 || request.value == 2))) {
         // F15 has no native pause: pause explicitly uses the hardware stop.
         delayedStart_ = false;
+        startupObserved_ = false;
         discardWrites();
         return send(stop);
     }
@@ -185,6 +191,7 @@ bool SportstechF15Treadmill::control(const ControlRequest& request, std::uint32_
             operation_ == TreadmillOperation::Running || operation_ == TreadmillOperation::Stopping) return false;
         if (!send(start)) return false;
         delayedStart_ = true;
+        startupObserved_ = false;
         startMs_ = nowMs;
         return true;
     }
@@ -205,6 +212,7 @@ bool SportstechF15Treadmill::control(const ControlRequest& request, std::uint32_
 }
 void SportstechF15Treadmill::onWriteFailed(std::uint32_t) {
     delayedStart_ = false;
+    startupObserved_ = false;
     usable_ = false;
     discardWrites();
     fail("F15 write failed");
@@ -217,6 +225,7 @@ void SportstechF15Treadmill::reset() {
     speedTarget_ = 0.8F;
     inclineTarget_ = 0;
     writeFound_ = connected_ = usable_ = delayedStart_ = false;
+    startupObserved_ = false;
 }
 
 }  // namespace protocols

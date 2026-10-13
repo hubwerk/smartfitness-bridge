@@ -5,6 +5,8 @@
 #include "ftms_output.h"
 #include "config_store.h"
 #include "bridge_controller.h"
+#include "ble_input_adapter.h"
+#include "fake_central.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -603,6 +605,82 @@ void testNativeTreadmillRunState() {
     assert(!output.controlGranted() && !output.telemetry().treadmillOperation);
 }
 
+void testF15BridgeToFtms() {
+    testing::FakeCentral central;
+    std::uint32_t clock = 100;
+    BleInputAdapter adapter(central, [&] { return clock; });
+    PairedDevice paired;
+    paired.address = testing::address("aa:00:00:00:00:15");
+    paired.adapterId = "sportstech-f15";
+    paired.name = "FS-001";
+    paired.valid = true;
+    adapter.setPairedDevice(paired);
+    AntOutput ant;
+    FtmsOutput output;
+    output.setClock([&] { return clock; });
+    BridgeCore bridge;
+    bridge.attach(adapter, ant, output);
+    bridge.begin();
+    assert(bridge.scanAndConnect() == false); // asynchronous connection
+    const auto service = ble::Uuid::from16(0xfff0);
+    const auto characteristic = ble::Uuid::from16(0xfff2);
+    Bytes endpoint(service.bytes.begin(), service.bytes.end());
+    endpoint.insert(endpoint.end(), characteristic.bytes.begin(), characteristic.bytes.end());
+    central.pushEvent(ble::CentralEventType::WriteEndpoint, 0, 0, endpoint);
+    central.pushEvent(ble::CentralEventType::Connected, 1);
+    bridge.loop();
+    output.notifyClientConnected();
+    const auto confirm = [&](TreadmillOperation operation) {
+        Bytes frame{2, 0x51, static_cast<std::uint8_t>(operation),
+                    85, 35, 0x55, 2, 0x84, 1, 0x34, 2, 0, 0, 132, 0};
+        std::uint8_t checksum = 0;
+        for (std::size_t index = 1; index < frame.size(); ++index) checksum ^= frame[index];
+        frame.push_back(checksum);
+        frame.push_back(3);
+        clock += 300;
+        central.pushEvent(ble::CentralEventType::Notification, 0, 0, frame);
+        bridge.loop();
+        assert(output.telemetry().treadmillOperation == operation);
+    };
+    confirm(TreadmillOperation::Stopped);
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 1}));
+    assert(central.writes.back().payload() == (Bytes{2, 0x53, 1, 0, 0, 0, 0, 0, 0x52, 3}));
+    assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 4})); // duplicate start
+    confirm(TreadmillOperation::Starting);
+    assert(output.lastMachineStatus() == (Bytes{4}));
+    assert(write(output, bridge, {8, 2}) == (Bytes{0x80, 8, 1}));
+    assert(central.writes.back().payload() == (Bytes{2, 0x53, 3, 0x50, 3}));
+    assert(output.lastMachineStatus() == (Bytes{4}));
+    confirm(TreadmillOperation::Stopping);
+    assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    confirm(TreadmillOperation::Running);
+    ftms::MachineData decoded;
+    const auto& payload = output.lastTreadmillData();
+    assert(ftms::decodeTreadmillData(payload.data(), payload.size(), decoded));
+    assert(decoded.speed.valid && decoded.speed.value == 8.5F);
+    assert(decoded.incline.valid && decoded.incline.value == 3.5F);
+    assert(decoded.elapsed.valid && decoded.elapsed.value == 597);
+    assert(decoded.distance.valid && decoded.distance.value == 388);
+    assert(decoded.totalEnergy.valid && decoded.totalEnergy.value == 56);
+    assert(decoded.heartRate.valid && decoded.heartRate.value == 132);
+    assert(!decoded.averageSpeed.valid && !decoded.power.valid && !decoded.remainingTime.valid);
+    assert(write(output, bridge, {2, 0x20, 3}) == (Bytes{0x80, 2, 1}));
+    assert(central.writes.back().payload()[2] == 2 && central.writes.back().payload()[3] == 80);
+    assert(write(output, bridge, {3, 50, 0}) == (Bytes{0x80, 3, 1}));
+    assert(central.writes.back().payload()[4] == 5);
+    assert(write(output, bridge, {8, 1}) == (Bytes{0x80, 8, 1}));
+    assert(central.writes.back().payload() == (Bytes{2, 0x53, 3, 0x50, 3}));
+    clock += 5001;
+    bridge.loop();
+    assert(!output.telemetry().treadmillOperation && !bridge.canControl());
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 5}));
+    bridge.disconnect();
+    bridge.loop();
+    assert(!output.telemetry().connected && !output.telemetry().treadmillOperation);
+}
+
 bool near(const MetricSample& sample, float expected) {
     return sample.valid && std::fabs(sample.value - expected) < 0.01F;
 }
@@ -956,6 +1034,7 @@ void runFtmsTests() {
     testTreadmillCodec();
     testTreadmillOutput();
     testNativeTreadmillRunState();
+    testF15BridgeToFtms();
     testFtmsClientAddress();
     testIndoorBikeDataEncoding();
     testStaticCharacteristics();
