@@ -34,6 +34,9 @@ extern const ble::Uuid kWrite;    // 0xFFF2 (write without response)
 constexpr float kMinSpeed = 0.8F;
 constexpr float kMaxSpeed = 12.0F;
 constexpr float kMaxIncline = 15.0F;
+constexpr float kHardMinSpeed = 0.1F;
+constexpr float kHardMaxSpeed = 25.5F;
+constexpr float kHardMaxIncline = 25.0F;
 constexpr std::uint32_t kPollIntervalMs = 1000;
 constexpr std::size_t kMaxFrameLength = 108;
 

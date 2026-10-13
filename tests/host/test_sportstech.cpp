@@ -158,8 +158,7 @@ void sourceTests() {
     assert(!source.control({Control::Speed, std::numeric_limits<float>::quiet_NaN()}, now));
     assert(!source.takeWrite(write));
 
-    // Synthetic parameter replies replace the fallback bounds, clamped to
-    // this adapter's supported speed/incline ranges.
+    // Synthetic parameter replies replace the fallback bounds.
     notify(source, sportstech::frame(0x50, {0x02, 100, 10, 0, 0}), ++now);
     notify(source, sportstech::frame(0x50, {0x03, 12, 2, 0, 0}), ++now);
     assert(!source.control({Control::Speed, 0.9F}, now));
@@ -167,6 +166,23 @@ void sourceTests() {
     assert(!source.control({Control::Incline, 1}, now));
     assert(!source.control({Control::Incline, 13}, now));
     assert(!source.takeWrite(write));
+
+    // Device-reported bounds may extend beyond the fallbacks.
+    notify(source, sportstech::frame(0x50, {0x02, 160, 5, 0, 0}), ++now);
+    notify(source, sportstech::frame(0x50, {0x03, 20, 0, 0, 0}), ++now);
+    assert(source.control({Control::Speed, 15}, now));
+    assert(source.takeWrite(write) && write.payload() == sportstech::speedInclineFrame(150, 2));
+    assert(source.control({Control::Incline, 18}, now));
+    assert(source.takeWrite(write) && write.payload() == sportstech::speedInclineFrame(150, 18));
+
+    // Speed replies are capped at the one-byte wire maximum (25.5 km/h).
+    notify(source, sportstech::frame(0x50, {0x02, 255, 5, 0, 0}), ++now);
+    assert(source.control({Control::Speed, 25.5F}, now));
+    assert(source.takeWrite(write) && write.payload() == sportstech::speedInclineFrame(255, 18));
+    assert(!source.control({Control::Speed, 26}, now));
+    assert(!source.takeWrite(write));
+    notify(source, running(255, 18), ++now);
+    notify(source, running(50, 2), ++now);
 
     // Speed and incline share one frame; the partner keeps the pending target.
     assert(source.control({Control::Speed, 8}, now));
@@ -215,6 +231,19 @@ void sourceTests() {
         }
     }
     assert(!source.takeWrite(write));
+
+    // Full inactive/error/safety/sleep/unknown frames cannot leave stale
+    // running speed or heart rate in the sample.
+    for (std::uint8_t state : {0, 1, 5, 6, 7, 9}) {
+        notify(source, running(60, 2, 120), ++now);
+        const std::uint32_t stateTime = ++now;
+        notify(source, running(60, 2, 120, state), stateTime);
+        assert(source.sample().speed.valid && near(source.sample().speed.value, 0));
+        assert(!source.sample().heartRate.valid);
+        assert(source.lastDataMs() == stateTime);
+        assert(!source.control({Control::Speed, 5}, stateTime));
+        assert(!source.control({Control::Incline, 2}, stateTime));
+    }
 
     // The device timer wraps at 6039 seconds. Cumulative elapsed stays
     // monotonic while running and resets for an idle/new session.
