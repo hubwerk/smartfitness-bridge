@@ -115,10 +115,10 @@ void SportstechF15Source::tick(std::uint32_t nowMs) {
 void SportstechF15Source::onNotify(std::size_t, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) {
     if (data && length >= 7 && length <= sportstech::kMaxFrameLength && data[0] == 0x02 &&
         data[1] == 0x50 && data[length - 1] == 0x03 && sportstech::checksum(data + 1, length - 3) == data[length - 2]) {
-        const float minSpeed = std::max(sportstech::kMinSpeed, std::min(sportstech::kMaxSpeed, data[4] * 0.1F));
-        const float maxSpeed = std::max(sportstech::kMinSpeed, std::min(sportstech::kMaxSpeed, data[3] * 0.1F));
-        const float minIncline = std::max(0.0F, std::min(sportstech::kMaxIncline, static_cast<float>(data[4])));
-        const float maxIncline = std::max(0.0F, std::min(sportstech::kMaxIncline, static_cast<float>(data[3])));
+        const float minSpeed = std::max(sportstech::kHardMinSpeed, std::min(sportstech::kHardMaxSpeed, data[4] * 0.1F));
+        const float maxSpeed = std::max(sportstech::kHardMinSpeed, std::min(sportstech::kHardMaxSpeed, data[3] * 0.1F));
+        const float minIncline = std::max(0.0F, std::min(sportstech::kHardMaxIncline, static_cast<float>(data[4])));
+        const float maxIncline = std::max(0.0F, std::min(sportstech::kHardMaxIncline, static_cast<float>(data[3])));
         if (data[2] == 0x02 && minSpeed <= maxSpeed) {
             minSpeed_ = minSpeed;
             maxSpeed_ = maxSpeed;
@@ -138,6 +138,8 @@ void SportstechF15Source::onNotify(std::size_t, const std::uint8_t* data, std::s
                            mode_ == Mode::Running || mode_ == Mode::Stopping || mode_ == Mode::Error ||
                            mode_ == Mode::Safety || mode_ == Mode::Sleep || mode_ == Mode::Paused;
     if (!knownMode) {
+        sample_.speed = {0.0F, true};
+        sample_.heartRate = {};
         touch(nowMs);
         return;
     }
@@ -160,6 +162,8 @@ void SportstechF15Source::onNotify(std::size_t, const std::uint8_t* data, std::s
     }
 
     if (mode_ != Mode::Running && mode_ != Mode::Paused && mode_ != Mode::Stopping) {
+        sample_.speed = {mode_ == Mode::Starting ? status.speed : 0.0F, true};
+        sample_.heartRate = {};
         touch(nowMs);
         return;
     }
