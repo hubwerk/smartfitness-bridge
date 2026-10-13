@@ -114,6 +114,7 @@ pio device monitor -b 115200
 - The DevKitC-1 has two USB ports; Serial output uses the native USB port labelled **USB** (`ARDUINO_USB_CDC_ON_BOOT=1`).
 - If upload does not start, hold **BOOT**, press **RST**, release BOOT, and retry.
 - Select ports with `--upload-port` / `--port`, e.g. `COM5` or `/dev/ttyACM0`.
+- `crowpanel128` uploads at 115200 baud because esptool's switch to 921600 on the native USB port can fail with `A fatal error occurred: No serial data received.` Upload speed stays the same because the native USB port ignores the baud rate. If `esp32s3dev` shows the same error on its native **USB** port, add `-O "upload_speed=115200"` to `pio run` or use the **UART** port.
 
 Serial is **115200 baud** (USB CDC enabled); it prints boot/configuration and Wi-Fi
 information.
