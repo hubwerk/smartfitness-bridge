@@ -6,7 +6,8 @@ CXXFLAGS = -std=c++17 -Wall -Wextra -Werror -pthread
 CORE_SOURCES = $(sort $(wildcard src/core/*.cpp src/core/protocols/*.cpp))
 CORE_TESTS = tests/host/test_main.cpp tests/host/test_bridge_core.cpp tests/host/test_controller.cpp \
 	tests/host/test_ftms.cpp tests/host/test_config_store.cpp tests/host/test_ble_input.cpp \
-	tests/host/test_ifit_bowflex.cpp tests/host/test_trainers_rower.cpp tests/host/test_treadmills.cpp
+	tests/host/test_ifit_bowflex.cpp tests/host/test_trainers_rower.cpp tests/host/test_treadmills.cpp \
+	tests/host/test_sportstech.cpp
 
 # Web variant (pure C++ parts): API exchange, JSON renderer, Wi-Fi policy.
 WEB_SOURCES = src/variants/web/web_api.cpp src/variants/web/web_json.cpp src/variants/web/wifi_policy.cpp

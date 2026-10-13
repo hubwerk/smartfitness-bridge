@@ -12,6 +12,7 @@ void runBleInputTests();
 void runIfitBowflexTests();
 void runTrainersRowerTests();
 void runTreadmillTests();
+void runSportstechTests();
 #ifdef SF_TEST_WEB
 void runWebTests();
 #endif
@@ -28,6 +29,7 @@ int main() {
     runIfitBowflexTests();
     runTrainersRowerTests();
     runTreadmillTests();
+    runSportstechTests();
 #ifdef SF_TEST_WEB
     runWebTests();
 #endif
