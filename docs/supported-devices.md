@@ -42,6 +42,7 @@ An override never adds missing source control capabilities.
 | `sole-treadmill`, `sole-f63`, `sole-f65`, `sole-tt8` (80) | Sole F80/F85/F89/S77/ST90/TRX7.5 / F63 / F65 / TT8 | Case-insensitive corresponding upstream model prefixes; no FTMS | Speed (mph converted to km/h), incline, HR | Status-driven speed/incline buttons; no unsolicited belt start | `src/devices/solef80treadmill/solef80treadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `walkingpad-r1`, `walkingpad-flat`, `walkingpad-re` (80) | Kingsmith / WalkingPad R1 Pro, A1/C2, RE | Case-insensitive upstream R1/KS prefixes; `RE` exact; excludes R2 names and FTMS-only variants | Speed | Speed only; flat walking variants capped at 6 km/h, R1 at 10 km/h; no incline | `src/devices/kingsmithr1protreadmill/kingsmithr1protreadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `walkingpad-r2`, `walkingpad-g1`, `walkingpad-g1b`, `wp2-c*-s*` (90) | Kingsmith R2 / X21 / K12 / G1 / MXG | Case-insensitive upstream `KS-ST-K12PRO`, `KS-R1AC`, `KS-HC-R1AA/AC`, X21, MXG, G1 prefixes; advertised custom services select UUID variant; nondefault cipher overrides are manual; no FTMS | Speed, step rate if reported | Speed only; G1 capped at 6 km/h; no incline | `src/devices/kingsmithr2treadmill/kingsmithr2treadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
+| `sportstech-f15` (0, manual) | Sportstech F15 / F31 treadmill | Manual pairing override only; upstream documents no advertisement name and the custom service `0xFFF0` (notify `0xFFF1`, write-without-response `0xFFF2`) is too generic to match | Every value of the 17-byte status frame: speed (0.1 km/h), incline (byte × 0.1 %, as decoded upstream), elapsed time (s), distance (m), calories (0.1 kcal → `totalEnergy`), nonzero heart rate; stopped frames report speed 0. The operation mode (stopped/starting/running/stopping) gates controls but is not a bridge metric. Status is polled every second (`02 51 51 03`) | Combined speed/incline frame `02 53 02 <speed×10> <incline %>`: speed 0.8–12 km/h, integer incline 0–15 % (upstream number defaults), only while the belt is running; a pending target is kept until reported so the other value does not cancel a ramp. Speed 0 sends stop `02 53 03`; the bridge never sends the start command | [`syssi/esphome-treadmill-f15`](https://github.com/syssi/esphome-treadmill-f15) (Apache-2.0) `components/treadmill_f15/`, `docs/protocol.md` at `61172d6448e00d0a4eb5d70c3c39a3427c292041`; `sportstech.hpp/.cpp` | Host tests with upstream captured frames plus synthetic vectors; hardware unverified | `treadmill` |
 | `ftms` (50) | FTMS bike, treadmill, cross trainer, step climber, stair climber, rower | Advertised Fitness Machine Service `0x1826` | Indoor Bike `0x2AD2`, Treadmill `0x2ACD`, Cross Trainer `0x2ACE`, Step Climber `0x2ACF`, Stair Climber `0x2AD0`, Rower `0x2AD1`: every FTMS data field of the profile, only when the machine sends it (see field table below) | Feature-gated power, resistance, incline, speed; Request Control handshake; power/resistance/incline honor supplied ranges; grade via bike simulation if needed. Speed is available via console/API and treadmill FTMS output | Local Bluetooth FTMS codec and `ftms_source.hpp` / `src/core/ftms_source.cpp` | Host byte-layout, feature/range/control tests; hardware unverified | Derived from input data characteristic/service data: `bike`, `treadmill`, `cross-trainer`, `step-climber`, `stair-climber` or `rower` |
 | `cps` (40) | Cycling Power sensor | Service `0x1818` | Power, cadence derived from crank revolution/event deltas | None | Local Bluetooth CPS codec; `sensor_sources.hpp`, `src/core/sensor_sources.cpp`, `src/core/sensor_codec.cpp` | Host power/crank/wraparound tests; hardware unverified | `bike` |
 | `csc` (30) | Cycling Speed and Cadence sensor | Service `0x1816` | Speed (fixed **2.105 m** wheel circumference), cadence from wheel/crank deltas | None | Local Bluetooth CSC codec; sensor sources/codec | Host wheel/crank/wraparound tests; hardware unverified | `bike` |
@@ -52,7 +53,12 @@ Vendor ports are GPL-derived from
 Copyright Roberto Viola and contributors (GPL-3.0). Attribution is retained in
 `include/core/protocols/` and `src/core/protocols/`. The original ports do not record a
 revision; new batch-1 ports use the pinned revision below.
-Discovery rules follow upstream `src/devices/bluetooth.cpp`. See [license and
+Discovery rules follow upstream `src/devices/bluetooth.cpp`.
+The Sportstech F15/F31 port (`sportstech-f15`) is derived instead from
+[`syssi/esphome-treadmill-f15`](https://github.com/syssi/esphome-treadmill-f15)
+(Apache-2.0, compatible with GPL-3.0) at revision
+`61172d6448e00d0a4eb5d70c3c39a3427c292041`; its attribution is kept in
+`sportstech.hpp/.cpp`. See [license and
 attribution](../README.md#license-and-attribution) and [HD-005](hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports).
 
 ## Batch 1: BLE-only vendor protocols
@@ -249,7 +255,7 @@ first field group (e.g. instantaneous speed / stroke rate) closes the record.
 | Rower | `0x2AD1` | 4 | `rower` |
 
 Protocol → profile: vendor bikes, trainers and CPS/CSC/HRS sensors → `bike`;
-treadmill protocols (iFit/Bowflex/Horizon/Spirit/Sole/WalkingPad) → `treadmill`;
+treadmill protocols (iFit/Bowflex/Horizon/Spirit/Sole/WalkingPad/Sportstech) → `treadmill`;
 iFit FreeStride / ellipticals (`ifit-freestride`, `ifit-elliptical`,
 `ifit-el-trainer`, manual models 84–90) → `cross-trainer`; Concept2 PM5 →
 `rower`; generic `ftms` → the data characteristic/service data the machine
