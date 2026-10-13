@@ -43,6 +43,7 @@ An override never adds missing source control capabilities.
 | `walkingpad-r1`, `walkingpad-flat`, `walkingpad-re` (80) | Kingsmith / WalkingPad R1 Pro, A1/C2, RE | Case-insensitive upstream R1/KS prefixes; `RE` exact; excludes R2 names and FTMS-only variants | Speed | Speed only; flat walking variants capped at 6 km/h, R1 at 10 km/h; no incline | `src/devices/kingsmithr1protreadmill/kingsmithr1protreadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `walkingpad-r2`, `walkingpad-g1`, `walkingpad-g1b`, `wp2-c*-s*` (90) | Kingsmith R2 / X21 / K12 / G1 / MXG | Case-insensitive upstream `KS-ST-K12PRO`, `KS-R1AC`, `KS-HC-R1AA/AC`, X21, MXG, G1 prefixes; advertised custom services select UUID variant; nondefault cipher overrides are manual; no FTMS | Speed, step rate if reported | Speed only; G1 capped at 6 km/h; no incline | `src/devices/kingsmithr2treadmill/kingsmithr2treadmill.cpp`; `treadmills.hpp/.cpp`, pinned revision below | host-tested, not hardware-verified | `treadmill` |
 | `ftms` (50) | FTMS bike, treadmill, cross trainer, step climber, stair climber, rower | Advertised Fitness Machine Service `0x1826` | Indoor Bike `0x2AD2`, Treadmill `0x2ACD`, Cross Trainer `0x2ACE`, Step Climber `0x2ACF`, Stair Climber `0x2AD0`, Rower `0x2AD1`: every FTMS data field of the profile, only when the machine sends it (see field table below) | Feature-gated power, resistance, incline, speed; Request Control handshake; power/resistance/incline honor supplied ranges; grade via bike simulation if needed. Speed is available via console/API and treadmill FTMS output | Local Bluetooth FTMS codec and `ftms_source.hpp` / `src/core/ftms_source.cpp` | Host byte-layout, feature/range/control tests; hardware unverified | Derived from input data characteristic/service data: `bike`, `treadmill`, `cross-trainer`, `step-climber`, `stair-climber` or `rower` |
+| `sportstech-f15` (80) | **Sportstech F15 treadmill** | Case-insensitive `FS-` advertising prefix; F15-compatible names/service `0xFFF0`; excludes FTMS | Speed, incline, distance, elapsed time, calories, pulse; operation mode and its four state flags | Speed 0.8–12 km/h (0 stops), incline 0–15%; explicit start, stop-backed pause | syssi `esphome-treadmill-f15`, pinned revision below; `sportstech_f15.hpp/.cpp` | Upstream captured status and host control/UI tests; hardware unverified | `treadmill` |
 | `cps` (40) | Cycling Power sensor | Service `0x1818` | Power, cadence derived from crank revolution/event deltas | None | Local Bluetooth CPS codec; `sensor_sources.hpp`, `src/core/sensor_sources.cpp`, `src/core/sensor_codec.cpp` | Host power/crank/wraparound tests; hardware unverified | `bike` |
 | `csc` (30) | Cycling Speed and Cadence sensor | Service `0x1816` | Speed (fixed **2.105 m** wheel circumference), cadence from wheel/crank deltas | None | Local Bluetooth CSC codec; sensor sources/codec | Host wheel/crank/wraparound tests; hardware unverified | `bike` |
 | `hrs` (20) | Heart Rate monitor | Service `0x180D` | Heart rate, 8- or 16-bit measurement | None | Local Bluetooth HRS codec; sensor sources/codec | Host 8/16-bit parser tests; hardware unverified | `bike` |
@@ -54,6 +55,60 @@ Copyright Roberto Viola and contributors (GPL-3.0). Attribution is retained in
 revision; new batch-1 ports use the pinned revision below.
 Discovery rules follow upstream `src/devices/bluetooth.cpp`. See [license and
 attribution](../README.md#license-and-attribution) and [HD-005](hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports).
+
+## Sportstech F15
+
+Native GPL-3.0 port of [syssi's ESPHome component](https://github.com/syssi/esphome-treadmill-f15/tree/61172d6448e00d0a4eb5d70c3c39a3427c292041/components/treadmill_f15),
+without ESPHome dependencies. Select **Sportstech F15 treadmill** in either UI;
+the captured advertising name is `FS-46CEE4`. Generic `FFF0` alone is not
+unique to F15 and must not select this control protocol for unrelated equipment.
+
+BLE UUIDs (Bluetooth base `0000xxxx-0000-1000-8000-00805f9b34fb`):
+service `FFF0`, notify `FFF1`, write-without-response `FFF2`. Subscribe first,
+then send `02 51 51 03` immediately and every second for status/keep-alive.
+Frames are `02 REGISTER PAYLOAD... XOR 03`; XOR covers register and payload.
+
+The 17-byte status layout is:
+
+```text
+02 51 MODE SPEED INCLINE TIMElo TIMEhi DISTlo DISThi
+CALlo CALhi UNKNOWN UNKNOWN HRlo HRhi XOR 03
+```
+
+`MODE`: 0 stopped, 2 starting, 3 running, 4 stopping. Speed is 0.1 km/h;
+received incline is 0.1%; little-endian time is seconds, distance metres,
+energy 0.1 kcal, pulse bpm. Short status responses provide mode and zero
+speed/pulse, retaining previous distance/time/energy/incline as upstream does.
+`01` is a start acknowledgement, not a telemetry sample. Bytes 11–12 are
+undecoded upstream: **no step count or error code is fabricated**.
+
+All six measurements use FTMS Treadmill Data `2ACD`; the existing codec derives
+ramp angle from incline and leaves unavailable energy-rate fields unavailable.
+Confirmed operation mode drives Training Status and
+Fitness Machine Status and is also exposed in web `treadmillStatus` (mode ID,
+text, and stopped/starting/running/stopping flags) and the HMI state badge.
+Elapsed seconds carry the complete time value; the upstream formatted-time
+sensor is just a derived display, not another measurement. Distance, time and
+energy are selectable on the HMI dashboard.
+
+Controls: start `02 53 01 00 00 00 00 00 52 03`, stop
+`02 53 03 50 03`, combined targets
+`02 53 02 SS II 00 00 00 00 00 00 00 XOR 03`.
+`SS` is speed ×10; `II` is integer percent, truncating fractional incline as
+upstream does. **Receive incline scaling differs from transmit scaling** in
+the reference; this port preserves it pending real-device verification.
+Changing one target preserves the other requested target, not a differently
+scaled measurement. Speed limits are 0.8–12 km/h, incline 0–15%;
+speed zero uses stop. Explicit start applies targets after the upstream six-second
+countdown; stop/pause cancels that delayed write. Pairing/reconnecting never starts
+the belt. Controls require fresh status.
+
+FTMS `02` Set Target Speed, `03` Set Target Inclination, `07` Start/Resume and
+`08` Stop/Pause pass through the core safety gate. The reference has no distinct
+pause command: **Pause stops the F15 and Resume uses start**, not a guaranteed
+preserved-workout hardware pause. Console/API `run-state` values are
+0 stop, 1 start/resume, 2 pause. Keep the physical safety key/stop available;
+hardware and Zwift interoperability remain unverified.
 
 ## Batch 1: BLE-only vendor protocols
 

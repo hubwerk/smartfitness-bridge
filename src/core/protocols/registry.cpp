@@ -8,6 +8,7 @@
 #include "protocols/ftms_source.hpp"
 #include "protocols/ifit_bowflex.hpp"
 #include "protocols/sensor_sources.hpp"
+#include "protocols/sportstech_f15.hpp"
 #include "protocols/trainers_rower.hpp"
 #include "protocols/treadmills.hpp"
 #include "protocols/yesoul_keiser.hpp"
@@ -83,6 +84,7 @@ std::unique_ptr<SourceProtocol> makeSchwinn() {
 }
 
 const ProtocolInfo kProtocols[] = {
+    {"sportstech-f15", "Sportstech F15 treadmill", 80, matchesSportstechF15, make<SportstechF15Treadmill>, true, false, MachineProfile::Treadmill},
     {"keiser-m3i", "Keiser M3i (broadcast)", 90, matchesKeiser, make<KeiserM3iSource>, false, true, MachineProfile::IndoorBike},
     {"echelon", "Echelon Connect Sport", 80, matchesEchelon, make<EchelonSource>, true, false, MachineProfile::IndoorBike},
     {"domyos", "Domyos / Decathlon bike", 80, matchesDomyos, make<DomyosSource>, true, false, MachineProfile::IndoorBike},

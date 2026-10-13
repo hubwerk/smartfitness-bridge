@@ -315,6 +315,17 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
     std::uint32_t mask = 0;
     const std::uint32_t session = cmd.session;
     ble::ConnectPlan plan = cmd.plan;
+    for (const auto& write : plan.writeEndpoints) {
+        if (write.service.isZero() || write.characteristic.isZero()) continue;
+        if (cancelled(session)) { doDisconnect(); return; }
+        NimBLERemoteCharacteristic* characteristic =
+            findCharacteristic(client, write.service, write.characteristic);
+        if (!characteristic ||
+            !(write.withResponse ? characteristic->canWrite() : characteristic->canWriteNoResponse())) continue;
+        ble::Bytes endpoint(write.service.bytes.begin(), write.service.bytes.end());
+        endpoint.insert(endpoint.end(), write.characteristic.bytes.begin(), write.characteristic.bytes.end());
+        pushEvent(ble::CentralEventType::WriteEndpoint, session, 0, 0, endpoint.data(), endpoint.size());
+    }
     if (plan.discoverNotifications) {
         plan.subscriptionCount = 0;
         bool writeFound = false;

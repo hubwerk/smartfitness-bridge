@@ -89,6 +89,7 @@ private:
 // ---- Status texts -------------------------------------------------------------
 
 Str stateLabel(smartfitness::RuntimeState state);
+Str treadmillStateLabel(smartfitness::TreadmillOperation state);
 const char* profileLabel(smartfitness::MachineProfile profile);
 const char* ftmsProfileLabel(smartfitness::FtmsOutputProfile profile);
 // "KICKR (ftms) ready" / "Simulation" / "No device".

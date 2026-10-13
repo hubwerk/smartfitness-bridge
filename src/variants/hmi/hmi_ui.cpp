@@ -467,7 +467,9 @@ void HmiUi::updateDashboard() {
         ratio = (sample.value - format.gaugeMin) / (format.gaugeMax - format.gaugeMin);
     lcars::setGauge(dash_.segments, ratio);
 
-    lv_label_set_text(dash_.state, lcars::uppercase(tr(stateLabel(status_.state))).c_str());
+    const char* state = tr(status_.treadmillOperation ? treadmillStateLabel(*status_.treadmillOperation) :
+                           stateLabel(status_.state));
+    lv_label_set_text(dash_.state, lcars::uppercase(state).c_str());
     lv_obj_set_style_bg_color(dash_.state, lv_color_hex(lcars::LightBlue), 0);
     lv_obj_set_style_text_color(dash_.state, lv_color_black(), 0);
     lv_label_set_text(dash_.target, lcars::uppercase(targetLabel(status_)).c_str());
@@ -652,7 +654,7 @@ void HmiUi::buildControl() {
         // Stopping never needs a confirmation.
         lcars::pill(addButton(list, tr(Str::StopBelt), [this] {
             Command stop = makeCommand(CommandType::Control);
-            stop.control = Control::Speed;
+            stop.control = status_.supports(Control::RunState) ? Control::RunState : Control::Speed;
             stop.value = 0.0F;
             submit(stop);
         }), lcars::Alert);

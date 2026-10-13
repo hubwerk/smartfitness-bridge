@@ -388,21 +388,25 @@ public:
         if (writable) {
             result.setControl(Control::Speed, true);
             result.setControl(Control::Incline, true);
+            result.setControl(Control::RunState, nativeRunState);
         }
         return result;
     }
     bool apply(const ControlRequest& request) override {
         if (!writable || reject) return false;
         ++writes;
+        lastRequest = request;
         if (request.control == Control::Speed) value.speed = request.value;
         else if (request.control == Control::Incline) value.incline = request.value;
-        else return false;
+        else if (request.control != Control::RunState || !nativeRunState) return false;
         if (afterApply) afterApply();
         return true;
     }
     FitnessTelemetry value;
     bool writable = true;
     bool reject = false;
+    bool nativeRunState = false;
+    ControlRequest lastRequest{};
     unsigned writes = 0;
     std::function<void()> afterApply;
 };
@@ -457,6 +461,8 @@ void testTreadmillOutput() {
     clock += 300;
     bridge.loop();
     assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    assert(write(output, bridge, {8, 2}) == (Bytes{0x80, 8, 1}));
+    assert(adapter.lastRequest.control == Control::Speed && adapter.lastRequest.value == 0);
     const Bytes stale{2, 0xB0, 4};
     assert(output.enqueueControlPoint(stale.data(), stale.size()));
     const auto writes = adapter.writes;
@@ -531,6 +537,70 @@ void testTreadmillOutput() {
     adapter.afterApply = {};
     bridge.loop();
     assert(!output.clientConnected() && !output.controlGranted());
+}
+
+void testNativeTreadmillRunState() {
+    FakeTreadmill adapter;
+    adapter.nativeRunState = true;
+    adapter.value.speed = 8;
+    adapter.value.treadmillOperation = TreadmillOperation::Stopped;
+    AntOutput ant;
+    FtmsOutput output;
+    BridgeCore bridge;
+    bridge.attach(adapter, ant, output);
+    bridge.begin();
+    assert(bridge.scanAndConnect());
+    output.notifyClientConnected();
+    bridge.loop();
+    // Confirmed stopped overrides a nonzero speed.
+    assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 5}));
+    assert(adapter.writes == 0);
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 1}));
+    assert(adapter.lastRequest.control == Control::RunState && adapter.lastRequest.value == 1);
+    assert(adapter.value.speed == 8 && output.lastMachineStatus() == (Bytes{2, 1}));
+    adapter.value.speed = 0;
+    adapter.value.treadmillOperation = TreadmillOperation::Starting;
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{4}));
+    adapter.value.treadmillOperation = TreadmillOperation::Running;
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{4})); // running can report zero speed
+    assert(write(output, bridge, {8, 2}) == (Bytes{0x80, 8, 1}));
+    assert(adapter.lastRequest.control == Control::RunState && adapter.lastRequest.value == 2);
+    assert(output.lastMachineStatus() == (Bytes{4})); // queued pause is not confirmed
+    adapter.value.speed = 8;
+    adapter.value.treadmillOperation = TreadmillOperation::Stopping;
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    assert(write(output, bridge, {8, 1}) == (Bytes{0x80, 8, 1}));
+    assert(adapter.lastRequest.control == Control::RunState && adapter.lastRequest.value == 0);
+    assert(adapter.value.speed == 8);
+    adapter.value.treadmillOperation = TreadmillOperation::Stopped;
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{2, 1}));
+    const auto writes = adapter.writes;
+    assert(write(output, bridge, {8, 3}) == (Bytes{0x80, 8, 3}));
+    assert(adapter.writes == writes);
+    adapter.reject = true;
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 4}));
+    assert(write(output, bridge, {8, 1}) == (Bytes{0x80, 8, 4}));
+    assert(adapter.writes == writes);
+    adapter.reject = false;
+    adapter.value.treadmillOperation.reset();
+    bridge.loop();
+    assert(output.lastMachineStatus() == (Bytes{4})); // legacy speed fallback
+    adapter.writable = false;
+    bridge.loop();
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 5}));
+    assert(write(output, bridge, {0}) == (Bytes{0x80, 0, 1}));
+    assert(write(output, bridge, {7}) == (Bytes{0x80, 7, 4}));
+    assert(write(output, bridge, {8, 2}) == (Bytes{0x80, 8, 4}));
+    assert(adapter.writes == writes);
+    bridge.disconnect();
+    bridge.loop();
+    assert(!output.controlGranted() && !output.telemetry().treadmillOperation);
 }
 
 bool near(const MetricSample& sample, float expected) {
@@ -885,6 +955,7 @@ void runFtmsTests() {
     testProfileControlsAndFeatures();
     testTreadmillCodec();
     testTreadmillOutput();
+    testNativeTreadmillRunState();
     testFtmsClientAddress();
     testIndoorBikeDataEncoding();
     testStaticCharacteristics();

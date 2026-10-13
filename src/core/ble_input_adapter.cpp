@@ -434,6 +434,7 @@ FitnessTelemetry BleInputAdapter::telemetry() const {
     if (hasTargetPower_) telemetry.targetPower = targetPower_;
     // Stale data invalidates every metric (capabilities() clears them too).
     if (stale()) return telemetry;
+    telemetry.treadmillOperation = protocol_->treadmillOperation();
     const auto& sample = protocol_->sample();
     for (std::size_t index = 0; index < kMetricCount; ++index) {
         const auto metric = static_cast<Metric>(index);

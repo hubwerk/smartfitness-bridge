@@ -42,6 +42,18 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
         if (status.metric(metric).valid) addMetric(telemetry, metricKey(metric), status, metric);
     }
     document["deviceName"] = status.deviceName;
+    if (status.treadmillOperation) {
+        const auto mode = *status.treadmillOperation;
+        JsonObject treadmill = document["treadmillStatus"].to<JsonObject>();
+        treadmill["operationModeId"] = static_cast<std::uint8_t>(mode);
+        treadmill["operationMode"] = mode == TreadmillOperation::Stopped ? "Stopped" :
+            mode == TreadmillOperation::Starting ? "Starting" :
+            mode == TreadmillOperation::Running ? "Running" : "Stopping";
+        treadmill["stopped"] = mode == TreadmillOperation::Stopped;
+        treadmill["starting"] = mode == TreadmillOperation::Starting;
+        treadmill["running"] = mode == TreadmillOperation::Running;
+        treadmill["stopping"] = mode == TreadmillOperation::Stopping;
+    }
     document["trainer"] = status.trainer;
     document["canControl"] = status.canControl;
     JsonArray controls = document["controls"].to<JsonArray>();

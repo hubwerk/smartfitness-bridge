@@ -1,5 +1,8 @@
 #include "protocols/treadmills.hpp"
+#include "protocols/sportstech_f15.hpp"
 #include "ble/central_transport.hpp"
+#include "ble_input_adapter.h"
+#include "fake_central.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -407,10 +410,325 @@ void targetTests() {
 }
 }  // namespace
 
+namespace {
+Bytes f15Frame(Bytes bytes) {
+    std::uint8_t crc = 0;
+    for (std::size_t i = 1; i < bytes.size(); ++i) crc ^= bytes[i];
+    bytes.push_back(crc);
+    bytes.push_back(3);
+    return bytes;
+}
+Bytes f15Status(std::uint8_t mode = 3) {
+    // Captured status layout, with nonzero high bytes exercising every LE16.
+    return f15Frame({2,0x51,mode,0x08,0x05,0x55,0x02,0x84,0x01,0x34,0x02,0,0,0x80,0x01});
+}
+Bytes f15Target(unsigned speed, unsigned incline) {
+    return f15Frame({2,0x53,2,static_cast<std::uint8_t>(speed),static_cast<std::uint8_t>(incline),
+                     0,0,0,0,0,0,0});
+}
+void f15Connect(SportstechF15Treadmill& source, std::uint32_t now = 0) {
+    source.onWriteEndpoint(ble::Uuid::from16(0xfff0), ble::Uuid::from16(0xfff2));
+    assert(source.onConnected(1, now));
+    ble::GattWrite write;
+    assert(source.takeWrite(write) && write.payload() == Bytes({2,0x51,0x51,3}));
+    assert(write.service == ble::Uuid::from16(0xfff0));
+    assert(write.characteristic == ble::Uuid::from16(0xfff2));
+    assert(!write.withResponse);
+    assert(!source.takeWrite(write));
+}
+void f15MatchAndPlanTests() {
+    const auto* info = findProtocol("sportstech-f15");
+    assert(info && std::string(info->label) == "Sportstech F15 treadmill");
+    assert(info->priority == 80 && info->profile == MachineProfile::Treadmill);
+    auto source = createProtocol(info->id);
+    assert(source && std::string(source->id()) == info->id);
+    assert(std::string(info->id).size() <= 16 && source->profile() == MachineProfile::Treadmill);
+    for (const char* name : {"FS-123", "fs-001", "Sportstech F15", "SPORTSTECH F15-001"}) {
+        assert(detectProtocol(advertisement(name)) == info);
+        assert(!info->matches(advertisement(name, true)));
+        assert(std::string(detectProtocol(advertisement(name, true))->id) == "ftms");
+    }
+    for (const char* name : {"", "Other treadmill", "Sportstech F150", "Sportstech F17", "Smart bike"}) {
+        auto adv = advertisement(name);
+        adv.services.push_back(ble::Uuid::from16(0xfff0));
+        assert(!info->matches(adv));
+    }
+    auto compatible = advertisement("F15-123");
+    assert(!info->matches(compatible));
+    compatible.services.push_back(ble::Uuid::from16(0xfff0));
+    assert(info->matches(compatible));
+    const auto plan = source->plan();
+    assert(!plan.discoverNotifications && plan.subscriptionCount == 1 && plan.readCount == 0);
+    assert(plan.subscriptions[0].service == ble::Uuid::from16(0xfff0));
+    assert(plan.subscriptions[0].characteristic == ble::Uuid::from16(0xfff1));
+    assert(!plan.subscriptions[0].indicate);
+    assert(plan.writeEndpoints[0].service == ble::Uuid::from16(0xfff0));
+    assert(plan.writeEndpoints[0].characteristic == ble::Uuid::from16(0xfff2));
+    assert(!plan.writeEndpoints[0].withResponse);
+    assert(!source->onConnected(1, 0));
+    source->onWriteEndpoint(ble::Uuid::from16(0xfff0), ble::Uuid::from16(0xfff3));
+    assert(!source->onConnected(1, 0));
+    source->onWriteEndpoint(ble::Uuid::from16(0xffe0), ble::Uuid::from16(0xfff2));
+    assert(!source->onConnected(1, 0));
+    source->onWriteEndpoint(ble::Uuid::from16(0xfff0), ble::Uuid::from16(0xfff2));
+    assert(!source->onConnected(0, 0));
+    assert(!source->capabilities().controls && source->pendingWrites() == 0);
+}
+void f15TelemetryTests() {
+    SportstechF15Treadmill source;
+    f15Connect(source);
+    assert(!source.control({Control::Speed, 5}, 1) && !source.capabilities().controls);
+    notify(source, f15Frame({2,0x51,1,1}), 1);
+    assert(!source.hasData() && !source.treadmillOperation());
+    auto full = f15Status();
+    for (std::size_t i = 0; i < full.size(); ++i) source.onNotify(0, &full[i], 1, 2);
+    assert(source.hasData() && source.lastDataMs() == 2);
+    assert(source.treadmillOperation() == TreadmillOperation::Running);
+    assert(std::abs(source.sample().speed.value - 0.8F) < 0.001F);
+    assert(source.sample().incline.value == 0.5F);
+    assert(source.sample().elapsed.value == 597);
+    assert(source.sample().distance.value == 388);
+    assert(std::abs(source.sample().totalEnergy.value - 56.4F) < 0.001F);
+    assert(source.sample().heartRate.value == 384);
+    assert(!source.sample().stepCount.valid && !source.sample().cadence.valid);
+    assert(source.capabilities().supports(Control::RunState));
+    assert(source.capabilities().supports(Metric::TotalEnergy));
+    for (std::uint8_t mode : {0,2,3,4}) {
+        notify(source, f15Status(mode), 3);
+        assert(source.treadmillOperation() == static_cast<TreadmillOperation>(mode));
+    }
+    for (std::uint8_t mode : {0,2,3,4}) {
+        notify(source, mode == 2 ? f15Frame({2,0x51,2,3}) : f15Frame({2,0x51,mode}), 4);
+        source.tick(24);
+        assert(source.treadmillOperation() == static_cast<TreadmillOperation>(mode));
+        assert(source.sample().speed.value == 0 && source.sample().heartRate.value == 0);
+        assert(source.sample().incline.value == 0.5F && source.sample().elapsed.value == 597);
+        assert(source.sample().distance.value == 388);
+        assert(std::abs(source.sample().totalEnergy.value - 56.4F) < 0.001F);
+    }
+    // A valid short-looking prefix inside a fragmented full frame is not EOF.
+    full = f15Status();
+    full[3] = 0x52;
+    full[4] = 3;
+    full.resize(15);
+    full = f15Frame(full);
+    source.onNotify(0, full.data(), 5, 30);
+    assert(source.lastDataMs() == 24);
+    source.onNotify(0, full.data() + 5, full.size() - 5, 31);
+    assert(source.lastDataMs() == 31 && source.sample().speed.value == 8.2F);
+    auto joined = f15Status(0);
+    const auto second = f15Status(3);
+    joined.insert(joined.end(), second.begin(), second.end());
+    notify(source, joined, 40);
+    assert(source.treadmillOperation() == TreadmillOperation::Running && source.lastDataMs() == 40);
+    source.reset();
+    f15Connect(source);
+    for (Bytes bad : {Bytes{}, Bytes{2}, Bytes{2,0x51,3}, Bytes{2,0x51,3,0},
+                      f15Frame({2,0x52,3}), f15Frame({2,0x51,5}), Bytes(109,0x03)}) {
+        notify(source, bad, 50);
+        source.tick(71);
+        assert(!source.hasData());
+        source.reset();
+        f15Connect(source);
+    }
+    full = f15Status();
+    full[15] ^= 1;
+    notify(source, full, 80);
+    assert(!source.hasData());
+    notify(source, f15Status(), 81);
+    assert(source.hasData() && source.lastDataMs() == 81);
+    source.reset();
+    f15Connect(source);
+    full = f15Status();
+    source.onNotify(0, full.data(), 10, 90);
+    source.tick(120);
+    assert(!source.hasData());
+    source.onNotify(0, full.data() + 10, 7, 121);
+    assert(source.hasData());
+    source.reset();
+    f15Connect(source);
+    source.onNotify(1, full.data(), full.size(), 1);
+    source.onNotify(0, nullptr, 17, 1);
+    assert(!source.hasData());
+    auto oversized = Bytes(109,0);
+    oversized[0] = 2;
+    oversized[1] = 0x51;
+    oversized[2] = 3;
+    oversized[108] = 3;
+    for (std::size_t i = 0; i < oversized.size(); i += 7) {
+        source.onNotify(0, oversized.data() + i, std::min<std::size_t>(7, oversized.size() - i), 2);
+    }
+    source.tick(22);
+    assert(!source.hasData());
+    notify(source, f15Status(), 23);
+    assert(source.hasData() && source.lastDataMs() == 23);
+    source.reset();
+    f15Connect(source);
+    const auto shortStarting = f15Frame({2,0x51,2,6});
+    for (auto byte : shortStarting) source.onNotify(0, &byte, 1, 24);
+    assert(!source.hasData());
+    source.tick(44);
+    assert(source.hasData() && source.treadmillOperation() == TreadmillOperation::Starting);
+    assert(source.sample().speed.value == 0 && source.sample().heartRate.value == 0);
+    assert(!source.sample().incline.valid && !source.sample().elapsed.valid);
+}
+void f15ControlsAndLifecycleTests() {
+    SportstechF15Treadmill source;
+    f15Connect(source, 100);
+    ble::GattWrite write;
+    source.tick(1099);
+    assert(!source.takeWrite(write));
+    source.tick(1100);
+    assert(source.takeWrite(write) && write.payload() == Bytes({2,0x51,0x51,3}));
+    assert(!source.takeWrite(write));
+    notify(source, f15Status(0), 1101);
+    for (const ControlRequest request : {
+        ControlRequest{Control::Speed,-1}, {Control::Speed,0.7F}, {Control::Speed,12.1F},
+        {Control::Incline,-0.1F}, {Control::Incline,15.1F}, {Control::RunState,-1},
+        {Control::RunState,0.5F}, {Control::RunState,3}, {Control::Resistance,1},
+        {Control::Speed,std::numeric_limits<float>::quiet_NaN()},
+        {Control::Incline,std::numeric_limits<float>::infinity()}}) {
+        assert(!source.control(request, 1102));
+        assert(!source.takeWrite(write));
+    }
+    assert(source.control({Control::Incline,15}, 1102));
+    assert(source.takeWrite(write) && write.payload() == f15Target(8,15) && !write.withResponse);
+    assert(source.control({Control::Speed,12}, 1103));
+    assert(source.takeWrite(write) && write.payload() == f15Target(120,15));
+    notify(source, f15Status(), 1104); // Measured incline must not replace desired target.
+    assert(source.control({Control::Speed,5.14F}, 1105));
+    assert(source.takeWrite(write) && write.payload() == f15Target(51,15));
+    assert(source.control({Control::Incline,4.9F}, 1106));
+    assert(source.takeWrite(write) && write.payload() == f15Target(51,4));
+    assert(source.control({Control::Incline,0}, 1107));
+    assert(source.takeWrite(write) && write.payload() == f15Target(51,0));
+    assert(source.control({Control::Speed,0.8F}, 1108));
+    assert(source.takeWrite(write) && write.payload() == f15Target(8,0));
+    assert(!source.control({Control::RunState,1}, 1109)); // Already running.
+    notify(source, f15Status(0), 1110);
+    assert(source.control({Control::RunState,1}, 1111));
+    assert(source.takeWrite(write) && write.payload() == Bytes({2,0x53,1,0,0,0,0,0,0x52,3}));
+    assert(!source.control({Control::RunState,1}, 1112));
+    assert(!source.control({Control::Speed,6}, 1112));
+    notify(source, f15Status(2), 6000);
+    source.tick(7110);
+    while (source.takeWrite(write)) assert(write.payload() == Bytes({2,0x51,0x51,3}));
+    source.tick(7111);
+    assert(source.takeWrite(write) && write.payload() == f15Target(8,0));
+    source.tick(7112);
+    assert(!source.takeWrite(write));
+    for (std::uint8_t hardwareStop : {0,4}) {
+        source.reset();
+        f15Connect(source);
+        notify(source, f15Status(0), 1);
+        assert(source.control({Control::RunState,1}, 2));
+        assert(source.takeWrite(write));
+        notify(source, f15Status(hardwareStop), 5999);
+        source.tick(6002);
+        while (source.takeWrite(write)) assert(write.payload() == Bytes({2,0x51,0x51,3}));
+    }
+    for (const ControlRequest stopping : {ControlRequest{Control::RunState,0},
+                                         {Control::RunState,2}, {Control::Speed,0}}) {
+        source.reset();
+        f15Connect(source);
+        notify(source, f15Status(0), 1);
+        assert(source.control({Control::RunState,1}, 2));
+        assert(source.control(stopping, 3));
+        assert(source.takeWrite(write) && write.payload() == Bytes({2,0x53,3,0x50,3}));
+        assert(!source.takeWrite(write)); // Pending start was discarded.
+        notify(source, f15Status(0), 5999);
+        source.tick(6002);
+        while (source.takeWrite(write)) assert(write.payload() == Bytes({2,0x51,0x51,3}));
+    }
+    source.reset();
+    assert(!source.hasData() && !source.treadmillOperation() && !source.capabilities().controls);
+    assert(!source.onConnected(1, 1)); // Endpoint discovery is per connection.
+    f15Connect(source);
+    notify(source, f15Status(0), 1);
+    assert(source.control({Control::RunState,1}, 2));
+    source.onWriteFailed(3);
+    assert(source.failed() && !source.capabilities().controls && !source.pendingWrites());
+    notify(source, f15Status(), 6001);
+    source.tick(6002);
+    assert(!source.takeWrite(write) && !source.control({Control::RunState,1}, 6003));
+    source.reset();
+    f15Connect(source);
+    notify(source, f15Status(0), 1);
+    assert(source.control({Control::RunState,1}, 2));
+    source.reset();
+    f15Connect(source);
+    notify(source, f15Status(0), 6001);
+    source.tick(6002);
+    while (source.takeWrite(write)) assert(write.payload() == Bytes({2,0x51,0x51,3}));
+    assert(source.control({Control::Incline,2}, 6003));
+    assert(source.takeWrite(write) && write.payload() == f15Target(8,2)); // Targets reset.
+    assert(!source.control({Control::Speed,5}, 11002));
+    source.tick(11002);
+    assert(!source.capabilities().controls);
+    notify(source, f15Status(0), 11003);
+    assert(source.capabilities().supports(Control::Speed));
+    // Full queue rejects requests, never claims an unqueued target was applied.
+    for (unsigned i = 0; i < 16; ++i) source.tick(11003 + i * 1000);
+    notify(source, f15Status(0), 27003);
+    assert(!source.control({Control::Speed,7}, 27003));
+    assert(source.control({Control::RunState,0}, 27003));
+    assert(source.takeWrite(write) && write.payload() == Bytes({2,0x53,3,0x50,3}));
+    assert(!source.takeWrite(write));
+}
+void f15AdapterStatusTests() {
+    std::uint32_t now = 1000;
+    testing::FakeCentral central;
+    BleInputAdapter adapter(central, [&now] { return now; });
+    PairedDevice paired;
+    paired.address = testing::address("aa:00:00:00:00:15");
+    paired.adapterId = "sportstech-f15";
+    paired.name = "FS-001";
+    paired.valid = true;
+    adapter.setPairedDevice(paired);
+    adapter.begin();
+    assert(adapter.scanAndConnect());
+    assert(!adapter.telemetry().treadmillOperation);
+    const auto service = ble::Uuid::from16(0xfff0);
+    const auto characteristic = ble::Uuid::from16(0xfff2);
+    Bytes endpoint(service.bytes.begin(), service.bytes.end());
+    endpoint.insert(endpoint.end(), characteristic.bytes.begin(), characteristic.bytes.end());
+    central.pushEvent(ble::CentralEventType::WriteEndpoint, 0, 0, endpoint);
+    central.pushEvent(ble::CentralEventType::Connected, 1);
+    adapter.loop();
+    assert(adapter.isConnected() && !adapter.telemetry().treadmillOperation);
+    central.pushEvent(ble::CentralEventType::Notification, 0, 0, f15Frame({2,0x51,1,1}));
+    adapter.loop();
+    assert(!adapter.telemetry().treadmillOperation); // ACK cannot invent a mode.
+    for (TreadmillOperation mode : {TreadmillOperation::Stopped, TreadmillOperation::Starting,
+                                    TreadmillOperation::Running, TreadmillOperation::Stopping}) {
+        ++now;
+        central.pushEvent(ble::CentralEventType::Notification, 0, 0,
+                          f15Status(static_cast<std::uint8_t>(mode)));
+        adapter.loop();
+        assert(adapter.telemetry().connected);
+        assert(adapter.telemetry().treadmillOperation == mode);
+    }
+    now += 5001;
+    adapter.loop();
+    assert(adapter.isConnected() && adapter.stale());
+    assert(!adapter.telemetry().treadmillOperation);
+    central.pushEvent(ble::CentralEventType::Notification, 0, 0, f15Status(3));
+    adapter.loop();
+    assert(!adapter.stale() && adapter.telemetry().treadmillOperation == TreadmillOperation::Running);
+    central.pushEvent(ble::CentralEventType::Disconnected);
+    adapter.loop();
+    assert(!adapter.isConnected() && !adapter.telemetry().treadmillOperation);
+}
+}  // namespace
+
 void runTreadmillTests() {
     matchTests();
     codecTests();
     lifecycleTests();
     telemetryTests();
     targetTests();
+    f15MatchAndPlanTests();
+    f15TelemetryTests();
+    f15ControlsAndLifecycleTests();
+    f15AdapterStatusTests();
 }

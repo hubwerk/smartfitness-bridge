@@ -35,6 +35,7 @@ bool parseControlName(const std::string& name, Control& control) {
     else if (name == "speed") control = Control::Speed;
     else if (name == "incline") control = Control::Incline;
     else if (name == "resistance") control = Control::Resistance;
+    else if (name == "run-state") control = Control::RunState;
     else return false;
     return true;
 }
@@ -45,6 +46,7 @@ const char* controlName(Control control) {
         case Control::Speed: return "speed";
         case Control::Incline: return "incline";
         case Control::Resistance: return "resistance";
+        case Control::RunState: return "run-state";
         case Control::Count: break;
     }
     return "unknown";

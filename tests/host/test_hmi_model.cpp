@@ -58,12 +58,17 @@ void testStrings() {
 void testMetrics() {
     assert(dashboardMetrics(MachineProfile::IndoorBike).front() == Metric::Power);
     assert(dashboardMetrics(MachineProfile::Treadmill).front() == Metric::Speed);
+    const auto treadmillMetrics = dashboardMetrics(MachineProfile::Treadmill);
+    assert(treadmillMetrics[treadmillMetrics.size() - 3] == Metric::Distance);
+    assert(treadmillMetrics[treadmillMetrics.size() - 2] == Metric::ElapsedTime);
+    assert(treadmillMetrics.back() == Metric::TotalEnergy);
     assert(formatValue(8.0F, 1) == "8.0" && formatValue(180.4F, 0) == "180" && formatValue(-0.01F, 1) == "0.0");
     assert(formatValue(NAN, 1) == "--");
     MetricView sample;
     assert(formatMetric(sample, Metric::Power) == "--");
     sample = {true, 181.6F};
     assert(formatMetric(sample, Metric::Power) == "182");
+    assert(formatMetric({true, 1234.0F}, Metric::Distance) == "1.23");
     assert(std::string(metricFormat(Metric::Speed).unit) == "km/h");
 
     MetricCycler cycler;
@@ -121,7 +126,8 @@ void testTargetEditor() {
     }
     assert(controlOrder(MachineProfile::Treadmill).front() == Control::Speed);
     assert(controlOrder(MachineProfile::IndoorBike).front() == Control::Power);
-    assert(controlOrder(MachineProfile::Rower).size() == static_cast<std::size_t>(Control::Count));
+    // RunState is a session action, not a numeric target editor.
+    assert(controlOrder(MachineProfile::Rower).size() == static_cast<std::size_t>(Control::Count) - 1);
 }
 
 void testStatusTexts() {
@@ -134,6 +140,10 @@ void testStatusTexts() {
     status.input.link = "ready";
     assert(inputLabel(status) == "KICKR (ftms) ready");
     assert(std::string(tr(stateLabel(RuntimeState::ControlReady))) == "Control ready");
+    assert(std::string(tr(treadmillStateLabel(TreadmillOperation::Stopped))) == "Stopped");
+    assert(std::string(tr(treadmillStateLabel(TreadmillOperation::Starting))) == "Starting");
+    assert(std::string(tr(treadmillStateLabel(TreadmillOperation::Running))) == "Running");
+    assert(std::string(tr(treadmillStateLabel(TreadmillOperation::Stopping))) == "Stopping");
     assert(std::string(profileLabel(MachineProfile::Treadmill)) == "Treadmill");
     assert(std::string(ftmsProfileLabel(FtmsOutputProfile::Auto)) == "Auto");
     assert(std::string(ftmsProfileLabel(FtmsOutputProfile::Rower)) == "Rower");
@@ -151,6 +161,12 @@ void testStatusTexts() {
     status.hasTarget = true;
     status.target = {Control::Speed, 8.0F};
     assert(targetLabel(status) == "Speed 8.0 km/h");
+    status.target = {Control::RunState, 1.0F};
+    assert(targetLabel(status) == "Start belt");
+    status.target.value = 2.0F;
+    assert(targetLabel(status) == "Pause belt");
+    status.target.value = 0.0F;
+    assert(targetLabel(status) == "Stop belt");
 
     ScanDeviceView device;
     device.address = "aa:00:00:00:00:22";

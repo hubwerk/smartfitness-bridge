@@ -71,6 +71,7 @@ struct StatusView {
     RuntimeState state = RuntimeState::Disconnected;
     std::array<MetricView, static_cast<std::size_t>(Metric::Count)> telemetry{};
     std::string deviceName;
+    std::optional<TreadmillOperation> treadmillOperation;
     bool trainer = false;
     bool canControl = false;
     std::array<bool, static_cast<std::size_t>(Control::Count)> controls{};  // supported controls

@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <string>
 #include <thread>
@@ -317,6 +318,8 @@ void testApiParsing() {
     assert(commands[0].type == CommandType::Control && commands[0].value == 250.0F);
     assert(parseApiRequest("control", R"({"control":"incline","value":-2.5})", commands, error));
     assert(commands[0].control == Control::Incline && commands[0].value == -2.5F);
+    assert(parseApiRequest("control", R"({"control":"run-state","value":2})", commands, error));
+    assert(commands[0].control == Control::RunState && commands[0].value == 2.0F);
     assert(!parseApiRequest("control", R"({"control":"power","value":"250"})", commands, error));
     assert(!parseApiRequest("control", R"({"control":"turbo","value":1})", commands, error));
     assert(!parseApiRequest("control", R"({"control":"power"})", commands, error));
@@ -360,6 +363,87 @@ void testApiParsing() {
     assert(!parseApiRequest("control", "{bad json", commands, error) && contains(error, "invalid JSON"));
     assert(!parseApiRequest("config", R"({"ftmsName":{"a":{"b":1}}})", commands, error));
     assert(!parseApiRequest("nope", "{}", commands, error) && error == "unknown endpoint");
+}
+
+void testSportstechViews() {
+    Rig rig;
+    rig.ui.handleCommand("scan 5");
+    rig.central.advertise(address("aa:00:00:00:00:15"), "FS-46CEE4", {0xfff0});
+    rig.core.loop();
+    auto scan = parse(rig.scanResultsJson());
+    assert(scan["devices"][0]["adapter"] == "sportstech-f15");
+    bool listed = false;
+    for (JsonObject adapter : scan["adapters"].as<JsonArray>()) {
+        if (adapter["id"] == "sportstech-f15") {
+            listed = true;
+            assert(adapter["label"] == "Sportstech F15 treadmill");
+        }
+    }
+    assert(listed);
+    assert(contains(rig.ui.handleCommand("pair aa:00:00:00:00:15"), "paired"));
+    const auto service = ble::Uuid::from16(0xfff0);
+    const auto characteristic = ble::Uuid::from16(0xfff2);
+    ble::Bytes endpoint(service.bytes.begin(), service.bytes.end());
+    endpoint.insert(endpoint.end(), characteristic.bytes.begin(), characteristic.bytes.end());
+    rig.central.pushEvent(ble::CentralEventType::WriteEndpoint, 0, 0, endpoint);
+    rig.central.pushEvent(ble::CentralEventType::Connected, 1);
+    rig.core.loop();
+    rig.now += 300;
+    rig.central.pushEvent(ble::CentralEventType::Notification, 0, 0,
+        {0x02, 0x51, 0x03, 0x0d, 0x00, 0x20, 0x00, 0x09, 0x00,
+         0x03, 0x00, 0x00, 0x00, 0x53, 0x00, 0x26, 0x03});
+    rig.core.loop();
+    auto status = parse(rig.statusJson());
+    assert(status["input"]["profile"] == "treadmill");
+    assert(status["ftmsOutput"]["profile"] == "treadmill");
+    assert(std::fabs(status["telemetry"]["speed"].as<float>() - 1.3F) < 0.001F);
+    assert(status["telemetry"]["distance"] == 9);
+    assert(status["telemetry"]["elapsed"] == 32);
+    assert(std::fabs(status["telemetry"]["totalEnergy"].as<float>() - 0.3F) < 0.001F);
+    assert(status["telemetry"]["heartRate"] == 83);
+    assert(status["treadmillStatus"]["operationModeId"] == 3);
+    assert(status["treadmillStatus"]["operationMode"] == "Running");
+    assert(status["treadmillStatus"]["running"] == true);
+    assert(status["treadmillStatus"]["starting"] == false);
+    assert(status["treadmillStatus"]["stopping"] == false);
+    assert(status["treadmillStatus"]["stopped"] == false);
+    rig.ftms.setClock([&rig] { return rig.now; });
+    rig.ftms.notifyClientConnected();
+    rig.core.loop();
+    ftms::TreadmillData treadmill;
+    const auto& data = rig.ftms.lastTreadmillData();
+    assert(ftms::decodeTreadmillData(data.data(), data.size(), treadmill));
+    assert(treadmill.instantaneousSpeed == 130 && treadmill.inclination == 0);
+    assert(treadmill.totalDistance == 9 && treadmill.elapsedTime == 32);
+    assert(treadmill.totalEnergy == 0 && treadmill.heartRate == 83);
+    const auto control = [&rig](const ble::Bytes& bytes) {
+        assert(rig.ftms.enqueueControlPoint(bytes.data(), bytes.size()));
+        rig.core.loop();
+        assert(rig.ftms.lastControlResponse() == ble::Bytes({0x80, bytes[0], 0x01}));
+    };
+    control({0x00});
+    control({0x02, 0x58, 0x02});  // 6 km/h
+    assert(rig.central.writes.back().payload() ==
+           ble::Bytes({2, 0x53, 2, 60, 0, 0, 0, 0, 0, 0, 0, 0, 0x6d, 3}));
+    control({0x03, 0x23, 0});    // 3.5%, truncated to integer as upstream.
+    assert(rig.central.writes.back().payload() ==
+           ble::Bytes({2, 0x53, 2, 60, 3, 0, 0, 0, 0, 0, 0, 0, 0x6e, 3}));
+    control({0x08, 0x02});
+    assert(rig.central.writes.back().payload() == ble::Bytes({2, 0x53, 3, 0x50, 3}));
+    rig.now += 300;
+    rig.central.pushEvent(ble::CentralEventType::Notification, 0, 0, {2, 0x51, 0, 0x51, 3});
+    rig.core.loop();
+    rig.now += 25;  // Allow short-frame reassembly to complete.
+    rig.core.loop();
+    control({0x07});
+    assert(rig.central.writes.back().payload() == ble::Bytes({2, 0x53, 1, 0, 0, 0, 0, 0, 0x52, 3}));
+    control({0x08, 0x01});
+    assert(rig.central.writes.back().payload() == ble::Bytes({2, 0x53, 3, 0x50, 3}));
+    rig.now += 6000;
+    rig.core.loop();
+    status = parse(rig.statusJson());
+    assert(status["telemetry"]["speed"].isNull());
+    assert(status["treadmillStatus"].isNull());
 }
 
 void testApiExchange() {
@@ -606,6 +690,7 @@ void runWebTests() {
     testWifiCommands();
     testOutputProfiles();
     testApiParsing();
+    testSportstechViews();
     testApiExchange();
     testApiExchangeThreads();
     testApiBleQueueRejections();

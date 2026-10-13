@@ -125,6 +125,13 @@ enum class Str : std::uint16_t {
     ConfirmResetText2,
     ConfirmRestartTitle,
     ConfirmRestartText,
+    BeltStopped,
+    BeltStarting,
+    BeltRunning,
+    BeltStopping,
+    BeltStart,
+    BeltPause,
+    OperationMode,
     Count
 };
 

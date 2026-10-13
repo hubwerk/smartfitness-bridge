@@ -132,6 +132,7 @@ function renderStatus(s){
  const i=s.input||{},items=[pill("source: "+i.source),pill("profile: "+(i.profile||"bike"))];
  if(i.link)items.push(pill("link: "+i.link,i.link==="ready"||i.link==="listening"?"ok":i.link==="backoff"?"warn":""));
  if(i.protocol)items.push(pill("adapter: "+i.protocol));if(i.stale)items.push(pill("stale data","warn"));if(i.scanning)items.push(pill("scanning"));
+ if(s.treadmillStatus)items.push(pill("belt: "+s.treadmillStatus.operationMode+" ("+s.treadmillStatus.operationModeId+")"));
  if(i.error)items.push(pill(i.error,"bad"));if(i.link==="backoff")items.push(pill("retry in "+Math.ceil(i.nextAttemptMs/1000)+" s"));
  fill($("s-input"),items);
  const f=s.ftmsOutput||{};fill($("s-ftms"),[pill(f.enabled?"enabled":"disabled",f.enabled?"ok":""),pill(f.name||""),pill("profile: "+(f.profile||"bike")),pill("override: "+(f.override||"auto")),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);

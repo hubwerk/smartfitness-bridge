@@ -186,6 +186,8 @@ bool BridgeCore::isValidValue(const ControlRequest& request) {
         case Control::Incline: return within(kInclineBounds);
         case Control::Resistance: return within(kResistanceBounds);
         case Control::Power: return within(kPowerBounds);
+        case Control::RunState:
+            return request.value >= 0.0F && request.value <= 2.0F && std::floor(request.value) == request.value;
         default: return false;
     }
 }

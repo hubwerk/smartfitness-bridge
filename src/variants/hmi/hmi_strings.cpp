@@ -119,6 +119,13 @@ constexpr Entry kTable[] = {
     {Str::ConfirmResetText2, {"Really erase\neverything?", nullptr}},
     {Str::ConfirmRestartTitle, {"Restart?", nullptr}},
     {Str::ConfirmRestartText, {"Unsaved changes are lost.", nullptr}},
+    {Str::BeltStopped, {"Stopped", nullptr}},
+    {Str::BeltStarting, {"Starting", nullptr}},
+    {Str::BeltRunning, {"Running", nullptr}},
+    {Str::BeltStopping, {"Stopping", nullptr}},
+    {Str::BeltStart, {"Start belt", nullptr}},
+    {Str::BeltPause, {"Pause belt", nullptr}},
+    {Str::OperationMode, {"Operation mode", nullptr}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Str::Count),

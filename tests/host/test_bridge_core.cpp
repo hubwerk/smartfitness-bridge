@@ -137,6 +137,40 @@ void testDisconnectedAndMissingAdapter() {
     assert(bridge.routeControl({Control::Speed, 2.0F}) == ControlResult::NoAdapter);
 }
 
+void testRunStateControlGating() {
+    FakeAdapter adapter;
+    BridgeCore bridge(&adapter);
+    TrainerState state;
+    state.connected = true;
+    state.trainerDetected = true;
+    state.profile = MachineProfile::Treadmill;
+    state.capabilities.setControl(Control::Speed, true);
+    bridge.setTrainerState(state);
+    assert(bridge.routeControl({Control::RunState, 1}) == ControlResult::Unsupported);
+    assert(adapter.calls == 0);
+    state.capabilities.setControl(Control::RunState, true);
+    bridge.setTrainerState(state);
+    for (float value : {0.0F, 1.0F, 2.0F}) {
+        assert(bridge.routeControl({Control::RunState, value}) == ControlResult::Applied);
+        assert(adapter.lastRequest.control == Control::RunState && adapter.lastRequest.value == value);
+    }
+    for (float value : {-1.0F, 3.0F, 0.5F, 1.5F, NAN, INFINITY}) {
+        assert(bridge.routeControl({Control::RunState, value}) == ControlResult::InvalidValue);
+    }
+    assert(adapter.calls == 3 && bridge.controlTarget().value == 2);
+    adapter.accept = false;
+    assert(bridge.routeControl({Control::RunState, 0}) == ControlResult::AdapterRejected);
+    bridge.setAdapter(nullptr);
+    assert(bridge.routeControl({Control::RunState, 0}) == ControlResult::NoAdapter);
+    state.trainerDetected = false;
+    bridge.setTrainerState(state);
+    assert(bridge.routeControl({Control::RunState, 1}) == ControlResult::NotTrainer);
+    state.connected = false;
+    bridge.setTrainerState(state);
+    assert(bridge.routeControl({Control::RunState, 0}) == ControlResult::Disconnected);
+    assert(adapter.calls == 4);
+}
+
 void testRuntimeRouting() {
     SimulatedDeviceAdapter adapter;
     AntOutput ant;
@@ -371,8 +405,10 @@ void testOptionalTreadmillTotals() {
     bridge.setTrainerState(state);
     FitnessTelemetry telemetry;
     telemetry.connected = true;
+    telemetry.treadmillOperation = TreadmillOperation::Stopped;
     // Supported but not transmitted: never reported as 0.
     bridge.setTelemetry(telemetry);
+    assert(bridge.telemetry().treadmillOperation == TreadmillOperation::Stopped);
     assert(!bridge.trainerState().sample(Metric::Distance).valid);
     assert(!bridge.trainerState().sample(Metric::ElapsedTime).valid);
     telemetry.distance = 1234;
@@ -386,6 +422,7 @@ void testOptionalTreadmillTotals() {
     bridge.setTelemetry(telemetry);
     assert(!bridge.trainerState().sample(Metric::Distance).valid);
     assert(!bridge.trainerState().sample(Metric::ElapsedTime).valid);
+    assert(!bridge.telemetry().treadmillOperation);
 }
 
 }  // namespace
@@ -395,6 +432,7 @@ void runBridgeCoreTests() {
     testFtmsRolesAreIndependent();
     testControlGating();
     testDisconnectedAndMissingAdapter();
+    testRunStateControlGating();
     testRuntimeRouting();
     testStatesAndBoundaries();
     testConsoleAndConfig();

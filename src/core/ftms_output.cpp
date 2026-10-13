@@ -256,12 +256,16 @@ void FtmsOutput::handleControlPoint(const PendingWrite& write) {
             result = ftms::ResultCode::ControlNotPermitted;
         } else if (profile_ == MachineProfile::Treadmill &&
                    command.opcode == static_cast<std::uint8_t>(ftms::OpCode::StopOrPause)) {
-            result = requestControl({Control::Speed, 0.0F}) == ControlResult::Applied
+            const bool native = trainerState().capabilities.supports(Control::RunState);
+            const ControlRequest request = native
+                ? ControlRequest{Control::RunState, command.statusParameters[0] == 0x02 ? 2.0F : 0.0F}
+                : ControlRequest{Control::Speed, 0.0F};
+            result = requestControl(request) == ControlResult::Applied
                 ? ftms::ResultCode::Success : ftms::ResultCode::OperationFailed;
         } else if (profile_ == MachineProfile::Treadmill &&
                    command.opcode == static_cast<std::uint8_t>(ftms::OpCode::StartOrResume)) {
-            // No start primitive exists in the core: never invent a target speed.
-            result = ftms::ResultCode::OperationFailed;
+            result = requestControl({Control::RunState, 1.0F}) == ControlResult::Applied
+                ? ftms::ResultCode::Success : ftms::ResultCode::OperationFailed;
         } else if (command.hasRequest) {
             // Always route through the core gate; never apply directly.
             result = ftms::resultCodeFor(requestControl(command.request));
@@ -272,6 +276,11 @@ void FtmsOutput::handleControlPoint(const PendingWrite& write) {
     response_ = ftms::encodeControlPointResponse(command.opcode, result);
     transportIndicateResponse();
     if (result != ftms::ResultCode::Success) return;
+    // A queued native command is not confirmation that the belt changed state.
+    if (profile_ == MachineProfile::Treadmill &&
+        (trainerState().capabilities.supports(Control::RunState) || telemetry().treadmillOperation) &&
+        (command.opcode == static_cast<std::uint8_t>(ftms::OpCode::StartOrResume) ||
+         command.opcode == static_cast<std::uint8_t>(ftms::OpCode::StopOrPause))) return;
     auto status = ftms::encodeMachineStatus(command);
     if (status.empty()) return;
     status_ = std::move(status);
@@ -308,6 +317,18 @@ void FtmsOutput::updateTrainingStatus() {
         const auto& speed = trainerState().sample(Metric::Speed);
         status = trainerState().connected && speed.valid && std::isfinite(speed.value) && speed.value > 0
             ? ftms::TrainingStatus::ManualMode : ftms::TrainingStatus::Idle;
+        if (trainerState().connected && telemetry().treadmillOperation) {
+            switch (*telemetry().treadmillOperation) {
+                case TreadmillOperation::Starting:
+                case TreadmillOperation::Running:
+                    status = ftms::TrainingStatus::ManualMode;
+                    break;
+                case TreadmillOperation::Stopped:
+                case TreadmillOperation::Stopping:
+                    status = ftms::TrainingStatus::Idle;
+                    break;
+            }
+        }
     }
     if (status == trainingStatus_ &&
         (profile_ != MachineProfile::Treadmill || !connected_ || trainingStatusSent_)) return;

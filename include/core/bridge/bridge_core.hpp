@@ -17,6 +17,7 @@ enum class Control : std::uint8_t {
     Incline,
     Resistance,
     Power,
+    RunState,  // 0 = stop, 1 = start/resume, 2 = pause
     Count
 };
 

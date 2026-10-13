@@ -12,6 +12,9 @@ on the ELECROW CrowPanel 1.28" round rotary display.
 > `src/core/protocols/` and `include/core/protocols/` are ported from
 > [`cagnulein/qdomyos-zwift`](https://github.com/cagnulein/qdomyos-zwift) (GPL-3.0),
 > which makes the firmware a derivative work.
+> Sportstech F15 support is ported from
+> [`syssi/esphome-treadmill-f15`](https://github.com/syssi/esphome-treadmill-f15)
+> (GPL-3.0), without an ESPHome dependency.
 
 ## Overview and project status
 
@@ -158,7 +161,7 @@ loop with one partial 240×40 RGB565 draw buffer (internal DMA RAM, PSRAM fallba
 Screens (same interactions as the web UI):
 
 - **Dashboard** – arc gauge for the selected metric (power, cadence, speed, heart
-  rate, incline, distance, time), target, connection/trainer/control state, machine
+  rate, incline, distance, time, energy), target, connection/trainer/control state, machine
   profile and FTMS client state. Press opens the menu.
 - **Devices** – start/stop scan, scan results (name, adapter, 4-bar signal-strength icon instead of numeric RSSI), pair/connect
   with optional adapter override (all adapters incl. `ifit-model-N` and WalkingPad
@@ -167,7 +170,8 @@ Screens (same interactions as the web UI):
   (fine steps) or the +/- buttons and applied with a knob press. Rejections show the
   `CommandResult` message. **Treadmill speed changes need an explicit Confirm**
   (Cancel is focused by default); the editor starts from the measured speed, and the
-  bridge never starts the belt by itself. "Stop belt" sends speed 0.
+  bridge never starts the belt by itself. "Stop belt" sends the native stop
+  command when available (Sportstech F15), otherwise speed 0.
 - **Settings** – FTMS name (presets or on-screen keyboard), FTMS output on/off, FTMS
   output profile, ANT on/off (requires hardware), save, load, factory reset (two
   confirmations), restart, firmware version, brightness, screen timeout and LED
@@ -331,6 +335,9 @@ the saved BLE source again. `save` persists that input toggle.
 See [supported devices](docs/supported-devices.md) for the complete adapter table,
 match rules, metrics, controls, attribution, and test status. Only the listed
 qdomyos-zwift ports exist; this is not support for its entire device catalogue.
+**Sportstech F15** is available as a treadmill in both protocol selectors
+(`sportstech-f15`); its native BLE port forwards all decoded measurements and
+operation states. See the [F15 protocol notes](docs/supported-devices.md#sportstech-f15).
 
 To add a protocol:
 1. Implement pure C++ `SourceProtocol` in `include/core/protocols/` and `src/core/protocols/`:
@@ -384,10 +391,11 @@ Enable Control Point indications and write Request Control `00` → `80 00 01`,
 then target **8 km/h** `02 20 03` → `80 02 01` if the source accepts it.
 **This speed command can cause real belt movement.** Test only with a clear belt
 and a person at the physical controls; the safety key and physical stop remain
-primary. Start/Resume never starts the belt. Disconnects and stale telemetry do
+primary. On Sportstech F15, an explicit FTMS Start/Resume **starts the belt**.
+Other treadmill adapters do not implement remote start. Disconnects and stale telemetry do
 not send stop or speed commands: do not rely on the bridge as an emergency stop.
-Treadmill Start/Resume returns Operation Failed (`80 07 04`) because there is no
-safe source start primitive.
+Treadmill Start/Resume returns Operation Failed (`80 07 04`) when the source has
+no native start primitive.
 
 ### Garmin
 
@@ -707,10 +715,12 @@ Parameter (`0x03`).
 Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnect events into a small lock-protected queue. `FtmsOutput::loop()` drains it, requires Request Control before any other command (otherwise Control Not Permitted `0x05`), and routes set commands through `requestControl()` → `BridgeCore::routeControl`. Core results map to FTMS result codes: Applied → Success `0x01`, Unsupported → Not Supported `0x02`, InvalidValue → Invalid Parameter `0x03`, AdapterRejected → Operation Failed `0x04`, Disconnected/NotTrainer/NoAdapter → Control Not Permitted `0x05`. A BLE disconnect revokes control, drops queued writes from that session and restarts advertising. `ftms-output off` disconnects the client and stops advertising; `ftms-output on` resumes advertising.
 
 ### Limitations
-- Treadmill Start/Resume **never starts the belt** and returns Operation Failed
-  (`0x04`): there is no safe source start primitive. Bike Start/Resume remains an
+- Sportstech F15 supports explicit treadmill Start/Resume through the core safety
+  gate. Other treadmill sources return Operation Failed (`0x04`).
+  Bike Start/Resume remains an
   acknowledgement without starting the source. Treadmill
-  Stop/Pause sends a gated speed-zero command when supported; failure or lack of
+  Stop/Pause uses the F15 native stop command (Pause is stop-backed), or sends a
+  gated speed-zero command on other sources; failure or lack of
   speed control returns Operation Failed (`0x04`), not a fictitious successful
   stop. Bike Stop/Pause remains an acknowledgement without stopping the source.
   Reset releases the output control grant; it does not reset the source or clear
@@ -861,6 +871,10 @@ text. Vendor protocol code is derived from
 Viola and contributors (GPL-3.0). Port headers retain upstream paths (no upstream
 commit revision is recorded); see the
 [supported-device attribution table](docs/supported-devices.md).
+Sportstech F15 protocol logic is derived from
+[`syssi/esphome-treadmill-f15`](https://github.com/syssi/esphome-treadmill-f15)
+by syssi (GPL-3.0), pinned to `61172d6448e00d0a4eb5d70c3c39a3427c292041`.
+See its [protocol description](docs/supported-devices.md#sportstech-f15).
 Redistribution must comply with the GPL, including corresponding source obligations.
 [HD-005](docs/hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports)
 records this decision. Dependency licenses remain their own; the vendored

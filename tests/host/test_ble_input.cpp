@@ -470,7 +470,8 @@ void testProtocolProfiles() {
         {"hrs", MachineProfile::IndoorBike}, {"ifit-bike", MachineProfile::IndoorBike},
         {"ifit-treadmill", MachineProfile::Treadmill}, {"ifit-freestride", MachineProfile::CrossTrainer},
         {"ifit-elliptical", MachineProfile::CrossTrainer}, {"ifit-el-trainer", MachineProfile::CrossTrainer},
-        {"bowflex-t216", MachineProfile::Treadmill}, {"schwinn-170", MachineProfile::IndoorBike}
+        {"bowflex-t216", MachineProfile::Treadmill}, {"schwinn-170", MachineProfile::IndoorBike},
+        {"sportstech-f15", MachineProfile::Treadmill}
     };
     assert(protocols::ifit_bowflex::modelCount() == 97);
     for (unsigned ordinal = 1; ordinal <= 97; ++ordinal) {

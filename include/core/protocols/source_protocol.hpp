@@ -48,6 +48,7 @@ public:
     // Translate a request already validated by BridgeCore into writes.
     virtual bool control(const ControlRequest& request, std::uint32_t nowMs);
     virtual TrainerCapabilities capabilities() const = 0;
+    virtual std::optional<TreadmillOperation> treadmillOperation() const { return std::nullopt; }
     // Trainer == the device currently accepts at least one control.
     bool isTrainer() const { return capabilities().controls != 0; }
     // Forget all per-connection state (called before connecting and on loss).

@@ -114,6 +114,12 @@ struct ReadRequest {
     Uuid characteristic;
 };
 
+struct WriteEndpoint {
+    Uuid service;
+    Uuid characteristic;
+    bool withResponse = true;
+};
+
 constexpr std::size_t kMaxSubscriptions = 8;
 constexpr std::size_t kMaxReads = 6;
 
@@ -124,6 +130,8 @@ struct ConnectPlan {
     // enumerates GATT. Writes are restricted to these characteristic UUIDs.
     bool discoverNotifications = false;
     std::array<Uuid, 2> discoveryWriteCharacteristics{};
+    // Fixed write endpoints: validate properties and report before Connected.
+    std::array<WriteEndpoint, 2> writeEndpoints{};
     std::uint8_t subscriptionCount = 0;
     std::array<Subscription, kMaxSubscriptions> subscriptions{};
     std::uint8_t readCount = 0;

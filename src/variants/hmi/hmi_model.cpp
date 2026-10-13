@@ -13,7 +13,7 @@ namespace {
 
 constexpr MetricFormat kMetricFormats[] = {
     {Str::MetricSpeed, "km/h", 1, 0.0F, 25.0F},      // Speed
-    {Str::MetricDistance, "km", 2, 0.0F, 50.0F},     // Distance (not on the gauge)
+    {Str::MetricDistance, "km", 2, 0.0F, 50000.0F},  // Distance (source metres)
     {Str::MetricCadence, "rpm", 0, 0.0F, 150.0F},    // Cadence
     {Str::MetricPower, "W", 0, 0.0F, 500.0F},        // Power
     {Str::MetricHeartRate, "bpm", 0, 40.0F, 200.0F}, // HeartRate
@@ -47,6 +47,7 @@ constexpr ControlSpec kControlSpecs[] = {
     {Control::Incline, Str::MetricIncline, "%", -10.0F, 20.0F, 0.5F, 1},
     {Control::Resistance, Str::MetricResistance, "%", 0.0F, 100.0F, 1.0F, 0},
     {Control::Power, Str::MetricPower, "W", 0.0F, 1000.0F, 5.0F, 0},
+    {Control::RunState, Str::OperationMode, "", 0.0F, 2.0F, 1.0F, 0},
 };
 static_assert(sizeof(kControlSpecs) / sizeof(kControlSpecs[0]) == static_cast<std::size_t>(Control::Count),
               "one spec per control");
@@ -70,7 +71,8 @@ const MetricFormat& metricFormat(Metric metric) {
 std::vector<Metric> dashboardMetrics(MachineProfile profile) {
     switch (profile) {
         case MachineProfile::Treadmill:
-            return {Metric::Speed, Metric::Incline, Metric::HeartRate, Metric::Power, Metric::Cadence};
+            return {Metric::Speed, Metric::Incline, Metric::HeartRate, Metric::Power, Metric::Cadence,
+                    Metric::Distance, Metric::ElapsedTime, Metric::TotalEnergy};
         case MachineProfile::Rower:
             return {Metric::Power, Metric::Cadence, Metric::HeartRate, Metric::Pace, Metric::Speed};
         case MachineProfile::CrossTrainer:
@@ -96,7 +98,8 @@ std::string formatValue(float value, int decimals) {
 
 std::string formatMetric(const MetricView& sample, Metric metric) {
     if (!sample.valid) return "--";
-    return formatValue(sample.value, metricFormat(metric).decimals);
+    return formatValue(metric == Metric::Distance ? sample.value / 1000.0F : sample.value,
+                       metricFormat(metric).decimals);
 }
 
 Metric MetricCycler::current(MachineProfile profile) const {
@@ -174,6 +177,16 @@ Str stateLabel(RuntimeState state) {
     }
 }
 
+Str treadmillStateLabel(TreadmillOperation state) {
+    switch (state) {
+        case TreadmillOperation::Starting: return Str::BeltStarting;
+        case TreadmillOperation::Running: return Str::BeltRunning;
+        case TreadmillOperation::Stopping: return Str::BeltStopping;
+        case TreadmillOperation::Stopped: return Str::BeltStopped;
+    }
+    return Str::Unknown;
+}
+
 const char* profileLabel(MachineProfile profile) {
     switch (profile) {
         case MachineProfile::Treadmill: return "Treadmill";
@@ -219,6 +232,9 @@ std::string ftmsLabel(const FtmsOutputView& ftms) {
 
 std::string targetLabel(const StatusView& status) {
     if (!status.hasTarget) return tr(Str::NoTarget);
+    if (status.target.control == Control::RunState)
+        return tr(status.target.value == 1.0F ? Str::BeltStart :
+                  status.target.value == 2.0F ? Str::BeltPause : Str::StopBelt);
     const auto& spec = controlSpec(status.target.control);
     return std::string(tr(spec.name)) + " " + formatValue(status.target.value, spec.decimals) + " " + spec.unit;
 }

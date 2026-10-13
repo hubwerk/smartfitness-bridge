@@ -336,6 +336,7 @@ StatusView BridgeController::statusView() const {
         view.telemetry[index].value = sample.value;
     }
     view.deviceName = bridge_.telemetry().deviceName;
+    view.treadmillOperation = bridge_.telemetry().treadmillOperation;
     view.trainer = state.trainerDetected;
     view.canControl = bridge_.canControl();
     for (std::size_t index = 0; index < view.controls.size(); ++index)

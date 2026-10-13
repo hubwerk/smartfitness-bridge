@@ -1,8 +1,18 @@
 #pragma once
+#include <cstdint>
 #include <optional>
 #include <string>
 
 #include "bridge/metric.hpp"
+
+namespace smartfitness {
+enum class TreadmillOperation : std::uint8_t {
+    Stopped = 0,
+    Starting = 2,
+    Running = 3,
+    Stopping = 4
+};
+}
 
 // Snapshot emitted by an input adapter. Every metric is optional: a value the
 // device did not send stays empty (never 0) and is not processed downstream.
@@ -35,6 +45,7 @@ struct FitnessTelemetry {
     std::optional<float> forceOnBelt;
     // Last control target acknowledged by the adapter (not a measurement).
     std::optional<float> targetPower;
+    std::optional<smartfitness::TreadmillOperation> treadmillOperation;
     bool trainerDetected = false;
     bool connected = false;
     std::string deviceName;
