@@ -131,9 +131,6 @@ notes for the exact version), then run `pio run -t clean` and rebuild with
 
 ## HMI variant (CrowPanel 1.28")
 
-> Tested on real CrowPanel hardware and functional for display output, rotary
-> encoder turning/direction, and knob press. Touch operation and the `TODO(verify)`
-> items (GPIO 2 5 V enable, LED count/order) remain unconfirmed.
 
 ### Board pins
 
