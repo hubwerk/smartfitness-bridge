@@ -22,6 +22,37 @@ std::string withValue(Str label, const std::string& value) { return std::string(
 
 std::string percent(std::uint8_t value) { return std::to_string(value) + " %"; }
 
+bool focusableBeyond(lv_obj_t* item, int step) {
+    lv_obj_t* list = lv_obj_get_parent(item);
+    const auto count = static_cast<int>(lv_obj_get_child_count(list));
+    for (int i = static_cast<int>(lv_obj_get_index(item)) + step; i >= 0 && i < count; i += step) {
+        lv_obj_t* sibling = lv_obj_get_child(list, i);
+        if (lv_obj_get_group(sibling) && !lv_obj_has_flag(sibling, LV_OBJ_FLAG_HIDDEN)) return true;
+    }
+    return false;
+}
+
+// Labels before the first or after the last focusable entry would otherwise
+// stay scrolled out, so the scrollbar never reached the end of its track.
+void revealListEnds(lv_obj_t* item) {
+    lv_obj_t* list = lv_obj_get_parent(item);
+    if (!lv_obj_has_flag(list, LV_OBJ_FLAG_SCROLLABLE)) return;
+    lv_area_t content;
+    lv_obj_get_content_coords(list, &content);
+    lv_area_t area;
+    lv_obj_get_coords(item, &area);
+    // The top wins: while a list is built its first entry is also the last.
+    if (!focusableBeyond(item, 1)) {
+        const int32_t dy = std::min(lv_obj_get_scroll_bottom(list), area.y1 - content.y1);
+        if (dy > 0) lv_obj_scroll_by(list, 0, -dy, LV_ANIM_OFF);
+        lv_obj_get_coords(item, &area);
+    }
+    if (!focusableBeyond(item, -1)) {
+        const int32_t dy = std::min(lv_obj_get_scroll_top(list), content.y2 - area.y2);
+        if (dy > 0) lv_obj_scroll_by(list, 0, dy, LV_ANIM_OFF);
+    }
+}
+
 }  // namespace
 
 void HmiUi::begin(lv_indev_t* encoder, const HmiSettings& settings, HmiActions actions) {
@@ -360,6 +391,7 @@ lv_obj_t* HmiUi::addButton(lv_obj_t* parent, const std::string& text, std::funct
         lv_obj_update_layout(button);
         lv_anim_delete(lv_obj_get_parent(button), nullptr);
         lv_obj_scroll_to_view_recursive(button, LV_ANIM_OFF);
+        revealListEnds(button);
     });
     if (action) {
         bind(button, LV_EVENT_CLICKED, [action](lv_event_t*) { action(); });
