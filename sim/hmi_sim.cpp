@@ -737,6 +737,48 @@ void knobWalkthrough() {
     std::printf("knob-only walkthrough passed\n");
 }
 
+// The first and last focusable entries reveal leading/trailing labels, so the
+// scrollbar thumb reaches both ends of its track; only a label too tall to fit
+// next to the focused entry may stay partly scrolled out.
+void checkListEnd(lv_obj_t* list, lv_obj_t* arc, bool top) {
+    lv_area_t content;
+    lv_obj_get_content_coords(list, &content);
+    lv_area_t focused;
+    lv_obj_get_coords(lv_group_get_focused(lv_indev_get_group(g_knob)), &focused);
+    if (top) {
+        assert(lv_obj_get_scroll_top(list) == 0 ? lv_arc_get_angle_end(arc) == 205 : focused.y2 == content.y2);
+    } else {
+        assert(lv_obj_get_scroll_bottom(list) == 0 ? lv_arc_get_angle_start(arc) == 155 : focused.y1 == content.y1);
+    }
+}
+
+void checkListEnds() {
+    for (Screen screen : {Screen::Menu, Screen::Devices, Screen::Settings, Screen::FtmsName}) {
+        g_ui.navigate(screen);
+        pump(400);
+        lv_obj_t* list = currentList();
+        lv_obj_t* arc = lv_obj_get_child(lv_obj_get_parent(list), lv_obj_get_index(list) + 1);
+        assert(lv_obj_check_type(arc, &lv_arc_class));
+        assert(lv_obj_get_scroll_top(list) + lv_obj_get_scroll_bottom(list) > 0);
+        checkListEnd(list, arc, true);
+        turn(static_cast<int>(lv_group_get_obj_count(lv_indev_get_group(g_knob))) - 1);
+        pump(400);
+        checkListEnd(list, arc, false);
+        turn(1);  // wraps to the first entry
+        pump(400);
+        checkListEnd(list, arc, true);
+    }
+    g_ui.navigate(Screen::Menu);
+    pump(400);
+    lv_obj_t* list = currentList();
+    turn(-1);  // Dashboard wraps to Settings; the back hint below it comes into view
+    pump(400);
+    assert(lv_obj_get_scroll_bottom(list) == 0);
+    g_ui.navigate(Screen::Dashboard);
+    pump(100);
+    std::printf("list scrollbar reaches both ends passed\n");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -767,6 +809,7 @@ int main(int argc, char** argv) {
     checkLcars();
     checkScrollbar();
     knobWalkthrough();
+    checkListEnds();
 
     g_ui.setStatus(bikeStatus());
     pump(100);
