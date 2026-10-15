@@ -38,7 +38,11 @@ STATUS = {
               "dropped": {"scans": 0, "events": 0, "notifications": 0, "commands": 0}},
     "ftmsOutput": {"enabled": True, "profile": "bike", "override": "auto",
                    "name": "SmartFitness", "advertising": True, "client": True, "control": True},
-    "ant": False, "unsaved": False,
+    "outputProtocol": "ble-ftms",
+    "antOutput": {"enabled": False, "available": True, "link": "disabled", "stick": False, "open": False,
+                  "deviceNumber": 4660, "profile": "bike", "display": False, "control": False,
+                  "hardware": "USB 0fcf:1008"},
+    "unsaved": False,
     "network": {"mode": "sta", "ssid": "Training room", "ip": "192.0.2.42",
                 "hostname": "smartfitness", "stations": 0},
 }
@@ -56,9 +60,9 @@ SCAN = {
     ],
 }
 CONFIG = {
-    "type": "config", "version": "1.0.0", "ftmsName": "SmartFitness", "ftmsOutput": True,
-    "ftmsOutputProfile": "auto", "ftmsInput": True, "ant": False,
-    "antRequiresHardware": True, "simulatedTrainer": True, "wifiSsid": "Training room",
+    "type": "config", "version": "1.0.0", "ftmsName": "SmartFitness", "outputProtocol": "ble-ftms",
+    "ftmsOutputProfile": "auto", "ftmsInput": True, "antAvailable": True,
+    "simulatedTrainer": True, "wifiSsid": "Training room",
     "wifiPasswordSet": True, "apPasswordDefault": True, "unsaved": False,
 }
 WIFI_SCAN = {
@@ -242,6 +246,9 @@ def render(browser, output, name, width, height):
     for number, panel in enumerate(panel_names, start=1 if name == "desktop" else 5):
         page.locator(f"#tab-{panel}").click()
         check_view(page, panel, width < 650)
+        if panel == "dash":
+            expect(page.locator("#s-out .pill").first).to_have_text("BLE FTMS")
+            expect(page.locator("#s-out")).to_contain_text("app connected")
         if panel == "dev":
             expect(page.get_by_label("Adapter for Training bike")).to_have_value("ftms")
             page.get_by_label("Pair Unknown peripheral", exact=True).click()
@@ -269,8 +276,8 @@ def render(browser, output, name, width, height):
             command(page.locator("#btn-save"), "config")
             expect(page.locator("#toast")).to_have_text("applied")
             assert commands[-1] == ("config", {
-                "ftmsName": "SmartFitness", "ftmsOutput": True, "ftmsOutputProfile": "auto",
-                "ant": False, "simulatedTrainer": True, "wifiSsid": "Training room", "save": True})
+                "ftmsName": "SmartFitness", "outputProtocol": "ble-ftms", "ftmsOutputProfile": "auto",
+                "simulatedTrainer": True, "wifiSsid": "Training room", "save": True})
             page.locator("#toast").evaluate("e => e.style.display = 'none'")
         # Remove interaction-only focus so screenshots have a stable resting state.
         page.evaluate("document.activeElement.blur()")
@@ -311,7 +318,9 @@ def render(browser, output, name, width, height):
         page.locator("#tab-set").click()
     expect(page.locator("#c-ftmsName")).to_have_value("SmartFitness")
     page.locator("#c-ftmsOutputProfile").select_option("treadmill")
-    page.locator("#c-ftmsOutput").uncheck()
+    expect(page.locator("#c-outputProtocol")).to_have_value("ble-ftms")
+    expect(page.locator('#c-outputProtocol option[value="ant-fec"]')).to_be_enabled()
+    page.locator("#c-outputProtocol").select_option("ant-fec")
     page.locator("#c-simulatedTrainer").uncheck()
     page.locator("#c-ftmsName").fill("Test treadmill")
     # Config WebSocket updates must not overwrite a field currently being edited.
@@ -320,8 +329,8 @@ def render(browser, output, name, width, height):
     page.locator("#c-wifiPassword").fill("test-fixture-only")
     command(page.locator("#btn-save"), "config")
     assert commands[-1] == ("config", {
-        "ftmsName": "Test treadmill", "ftmsOutput": False, "ftmsOutputProfile": "treadmill",
-        "ant": False, "simulatedTrainer": False, "wifiSsid": "Training room", "save": True,
+        "ftmsName": "Test treadmill", "outputProtocol": "ant-fec", "ftmsOutputProfile": "treadmill",
+        "simulatedTrainer": False, "wifiSsid": "Training room", "save": True,
         "wifiPassword": "test-fixture-only"}), commands[-1]
     # Wi-Fi scan: spinner while busy, then a listbox under the SSID field.
     ssid, wifi_list, wifi_button = (page.locator("#c-wifiSsid"), page.locator("#wifi-list"),

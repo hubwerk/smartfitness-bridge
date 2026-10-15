@@ -643,10 +643,9 @@ ConfigView configView() {
     ConfigView config;
     config.version = "0.3.0";
     config.ftmsName = "SmartFitness Bridge";
-    config.ftmsOutput = true;
+    config.outputProtocol = OutputProtocol::BleFtms;
     config.ftmsOutputProfile = FtmsOutputProfile::Auto;
-    config.ant = false;
-    config.antRequiresHardware = true;
+    config.antAvailable = false;
     config.unsaved = true;
     return config;
 }
@@ -713,7 +712,10 @@ void knobWalkthrough() {
     turn(3);
     press();
     assert(g_ui.current() == Screen::Settings);
-    turn(9);
+    turn(1);  // Output: BLE FTMS -> Off (no ANT radio on the HMI)
+    press();
+    assert(lastCommand(CommandType::OutputProtocol) && g_commands.back().text == "off");
+    turn(7);
     press();
     assert(g_ui.current() == Screen::Confirm);
     turn(1);
