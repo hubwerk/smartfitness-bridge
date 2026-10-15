@@ -34,8 +34,9 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--tan);color:#000;padding:12px 24px;border-radius:24px;display:none;max-width:90%;z-index:2}
 .combo{position:relative;max-width:100%;min-width:0}.combo input{width:100%}
 #wifi-list{position:absolute;left:0;right:0;top:100%;z-index:3;margin:0;padding:0;list-style:none;background:#000;border:2px solid var(--acc);border-top:0;max-height:264px;overflow-y:auto}
-#wifi-list li{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 10px;cursor:pointer;overflow-wrap:anywhere}#wifi-list li .small{flex-shrink:0;color:var(--light)}
-#wifi-list li:hover,#wifi-list li[aria-selected="true"]{background:var(--acc);color:#000}#wifi-list li:hover .small,#wifi-list li[aria-selected="true"] .small{color:#000}
+#wifi-list li{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;overflow-wrap:anywhere}#wifi-list li .ssid{flex:1;min-width:0}#wifi-list li .small{flex-shrink:0;color:var(--light)}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;width:22px;height:16px;flex-shrink:0;color:var(--light)}.bars i{width:4px;border-radius:1px;background:currentColor;opacity:.3}.bars i.on{opacity:1}.bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:8px}.bars i:nth-child(3){height:12px}.bars i:nth-child(4){height:16px}
+#wifi-list li:hover,#wifi-list li[aria-selected="true"]{background:var(--acc);color:#000}#wifi-list li:hover .small,#wifi-list li[aria-selected="true"] .small,#wifi-list li:hover .bars,#wifi-list li[aria-selected="true"] .bars{color:#000}
 .spin{display:none;width:16px;height:16px;margin-right:8px;vertical-align:-2px;border:3px solid #000;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}[aria-busy="true"] .spin{display:inline-block}@keyframes spin{to{transform:rotate(360deg)}}
 #toast.bad{background:var(--bad)}#toast.ok{background:var(--ok)}.small{font-size:16px;color:var(--fg);overflow-wrap:anywhere}
 .gray{color:#888888}tr.gray td{color:#888888}tr.gray select,tr.gray button.b{opacity:.8}
@@ -179,8 +180,12 @@ const ssid=$("c-wifiSsid"),wifiList=$("wifi-list");
 function wifiOpen(open){open=open&&wifiNets.length>0;wifiList.hidden=!open;ssid.setAttribute("aria-expanded",String(open));if(!open)wifiMark(-1)}
 function wifiMark(i){[...wifiList.children].forEach((li,k)=>li.setAttribute("aria-selected",String(k===i)));const li=wifiList.children[i];if(li){ssid.setAttribute("aria-activedescendant",li.id);li.scrollIntoView({block:"nearest"})}else ssid.removeAttribute("aria-activedescendant")}
 function wifiPick(n){ssid.value=n.ssid;wifiOpen(false);$("c-wifiPassword").focus()}
+// Same four-step pictogram and thresholds as the HMI scan list (hmi::signalLevel).
+function signalLevel(rssi){return rssi>=-60?4:rssi>=-70?3:rssi>=-80?2:1}
+function bars(rssi){const b=el("span",null,"bars"),level=signalLevel(rssi);b.setAttribute("aria-hidden","true");b.dataset.level=level;
+ for(let k=0;k<4;k++)b.append(el("i",null,k<level?"on":""));return b}
 function renderWifi(nets){wifiNets=nets;fill(wifiList,nets.map((n,i)=>{const li=el("li");li.id="wifi-opt-"+i;li.setAttribute("role","option");li.setAttribute("aria-selected","false");
- li.append(el("span",n.ssid),el("span",n.rssi+" dBm · "+(n.secure?"secured":"open"),"small"));li.onmousedown=e=>e.preventDefault();li.onclick=()=>wifiPick(n);return li}))}
+ li.append(bars(n.rssi),el("span",n.ssid,"ssid"),el("span",n.rssi+" dBm · "+(n.secure?"secured":"open"),"small"));li.onmousedown=e=>e.preventDefault();li.onclick=()=>wifiPick(n);return li}))}
 ssid.onkeydown=e=>{const items=wifiList.children,i=[...items].findIndex(li=>li.getAttribute("aria-selected")==="true");
  if(e.key==="ArrowDown"||e.key==="ArrowUp"){if(!wifiNets.length)return;e.preventDefault();if(wifiList.hidden){wifiOpen(true);wifiMark(e.key==="ArrowDown"?0:items.length-1);return}
   wifiMark(e.key==="ArrowDown"?(i+1)%items.length:(i<=0?items.length:i)-1)}

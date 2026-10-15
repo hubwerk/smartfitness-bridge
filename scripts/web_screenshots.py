@@ -337,6 +337,10 @@ def render(browser, output, name, width, height):
     expect(ssid).to_have_attribute("aria-expanded", "true")
     expect(wifi_list.get_by_role("option")).to_have_count(2)
     expect(wifi_list.get_by_role("option").first).to_contain_text("-45 dBm · secured")
+    # Signal pictogram: same thresholds as hmi::signalLevel (-45 dBm -> 4, -71 dBm -> 2).
+    assert wifi_list.locator(".bars").evaluate_all(
+        "bars => bars.map(b => [b.dataset.level, b.querySelectorAll('i.on').length, "
+        "b.getAttribute('aria-hidden')])") == [["4", 4, "true"], ["2", 2, "true"]]
     check_view(page, "set", width < 650)
     page.keyboard.press("ArrowDown")
     page.keyboard.press("ArrowDown")
