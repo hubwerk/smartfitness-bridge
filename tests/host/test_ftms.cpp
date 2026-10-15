@@ -407,6 +407,26 @@ public:
     std::function<void()> afterApply;
 };
 
+// A source that reports only the ramp angle still fills the FTMS
+// inclination/ramp-angle pair (inclination derived from the angle).
+void testRampAngleOnlyInclination() {
+    TrainerState state;
+    state.connected = true;
+    state.capabilities.setMetric(Metric::RampAngle, true);
+    state.setSample(Metric::RampAngle, 45.0F);
+    for (const auto profile : {MachineProfile::Treadmill, MachineProfile::CrossTrainer}) {
+        state.profile = profile;
+        const auto treadmill = ftms::treadmillDataFrom(state);
+        const auto cross = ftms::crossTrainerDataFrom(state);
+        const auto& inclination = profile == MachineProfile::Treadmill ? treadmill.inclination : cross.inclination;
+        const auto& ramp = profile == MachineProfile::Treadmill ? treadmill.rampAngleSetting : cross.rampAngleSetting;
+        assert(inclination && *inclination == 1000 && ramp && *ramp == 450);
+        const Bytes feature = ftms::encodeFeature(state.capabilities, profile);
+        assert(feature[0] & ftms::kFeatureInclination);
+    }
+    assert(!(ftms::encodeFeature(state.capabilities, MachineProfile::IndoorBike)[0] & ftms::kFeatureInclination));
+}
+
 void testTreadmillOutput() {
     FakeTreadmill adapter;
     AntOutput ant;
@@ -885,6 +905,7 @@ void runFtmsTests() {
     testProfileControlsAndFeatures();
     testTreadmillCodec();
     testTreadmillOutput();
+    testRampAngleOnlyInclination();
     testFtmsClientAddress();
     testIndoorBikeDataEncoding();
     testStaticCharacteristics();

@@ -22,8 +22,10 @@ on the ELECROW CrowPanel 1.28" round rotary display.
 
 Implemented: real BLE input scanning/pairing, FTMS and sensor decoders, initial
 qdomyos-zwift vendor ports, reconnect/backoff, stale-data handling, FTMS output,
-Wi-Fi setup and web UI, a shared console/API command layer, and NVS configuration.
-ANT output remains a stub; CPS/HRS output services and OTA are not implemented.
+Wi-Fi setup and web UI, a shared console/API command layer, NVS configuration, and
+a selectable output protocol: BLE FTMS, ANT+ FE-C (web variant, ANT+ USB stick on
+the USB-OTG port; see [ANT+ FE-C output](#ant-fe-c-output-usb-stick)) or off.
+CPS/HRS output services and OTA are not implemented.
 
 The CrowPanel HMI has been verified on real hardware: the display, rotary encoder
 (turning/direction), and knob button work. BLE equipment compatibility, app
@@ -48,7 +50,7 @@ Exactly one variant flag must be defined; `include/variant.h` stops the build wi
 simulation, `BridgeCore`, FTMS output, Serial console) and calls the variant hooks
 `variant::begin()` / `variant::loop()`. Both variants use the same `Command`s and the
 same `BridgeController`; the web variant renders its view model as JSON, the HMI
-variant renders it with LVGL. The stored configuration (schema v3, including the
+variant renders it with LVGL. The stored configuration (schema v4, including the
 Wi-Fi fields) is identical; the HMI variant simply never starts Wi-Fi.
 
 ## User interfaces
@@ -112,14 +114,15 @@ pio run -e esp32s3dev -t upload     # or: -e crowpanel128
 pio device monitor -b 115200
 ```
 
-- The DevKitC-1 has two USB ports; Serial output uses the native USB port labelled **USB** (`ARDUINO_USB_CDC_ON_BOOT=1`).
+- The DevKitC-1 has two USB ports. The web variant uses the port labelled **UART** for flashing, power and the Serial console (`ARDUINO_USB_CDC_ON_BOOT=0`), because the native port labelled **USB** is the USB host port for the ANT+ stick (see [ANT+ FE-C output](#ant-fe-c-output-usb-stick)).
 - If upload does not start, hold **BOOT**, press **RST**, release BOOT, and retry.
 - Select ports with `--upload-port` / `--port`, e.g. `COM5` or `/dev/ttyACM0`.
 - `crowpanel128` uploads at 115200 baud because esptool's switch to 921600 on the native USB port can fail with `A fatal error occurred: No serial data received.` Upload speed stays the same because the native USB port ignores the baud rate. If `esp32s3dev` shows the same error on its native **USB** port, add `-O "upload_speed=115200"` to `pio run` or use the **UART** port.
 
-Serial is **115200 baud** (USB CDC enabled); it prints boot/configuration and Wi-Fi
-information.
-ANT+ needs external hardware; see [hardware decisions](docs/hardware-decisions.md).
+Serial is **115200 baud** (web variant: UART port; HMI variant: USB CDC); it prints
+boot/configuration and Wi-Fi information.
+ANT+ FE-C needs an ANT+ USB stick on the web variant; see
+[ANT+ FE-C output](#ant-fe-c-output-usb-stick) and [hardware decisions](docs/hardware-decisions.md).
 
 **Optional host tests:** `make host-tests` (requires `make` and `g++` with C++17; on
 Windows, use WSL).
@@ -177,11 +180,12 @@ Screens (same interactions as the web UI):
   `CommandResult` message. **Treadmill speed changes need an explicit Confirm**
   (Cancel is focused by default); the editor starts from the measured speed, and the
   bridge never starts the belt by itself. "Stop belt" sends speed 0.
-- **Settings** – FTMS name (presets or on-screen keyboard), FTMS output on/off, FTMS
-  output profile, ANT on/off (requires hardware), save, load, factory reset (two
+- **Settings** – FTMS name (presets or on-screen keyboard), output protocol (a
+  press cycles BLE FTMS → Off; ANT+ FE-C is skipped because the CrowPanel has no
+  USB host port for an ANT+ stick), output profile, save, load, factory reset (two
   confirmations), restart, firmware version, brightness, screen timeout and LED
   ring. Brightness/timeout/LED ring are stored in a separate NVS namespace
-  (`sfhmi`), so the shared configuration stays at schema v3.
+  (`sfhmi`), not in the shared configuration (schema v4).
 
 The status refreshes at 5 Hz; UI callbacks only enqueue `Command`s that the main
 loop executes. UI strings are centralised in `src/variants/hmi/hmi_strings.cpp`
@@ -226,7 +230,8 @@ flowchart TD
     SIM["Simulation"] --> IS
     IS --> CORE["BridgeCore: trainer / capability / bounds gate"]
     CORE --> OUT["FTMS output"]
-    CORE --> ANT["ANT output stub"]
+    CORE --> ANT["ANT+ FE-C output"]
+    ANT --> USBH["USB host task: ANT+ USB stick"]
     API --> CMD["Shared Command layer / BridgeController"]
     HMI["HMI variant: LVGL UI command queue"] --> CMD
     CON["Serial console"] --> CMD
@@ -246,13 +251,13 @@ The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent 
 - `BtDeviceAdapter`: equipment input interface. Implementations: `SimulatedDeviceAdapter`, `BleInputAdapter` (real BLE devices) and `InputSelector`, which forwards to the BLE input when a device is paired and BLE input is enabled, otherwise to the simulation.
 - `BleInputAdapter` (`include/core/ble_input_adapter.h`): scanning, pairing, connection lifecycle, stale telemetry. It talks to the radio through the `CentralTransport` interface (`include/core/ble/central_transport.hpp`); `NimbleCentral` implements it on the firmware, `tests/host/fake_central.hpp` in host tests.
 - Protocols (`include/core/protocols/`): pure C++ `SourceProtocol` implementations (FTMS, sensors, vendor ports) and the adapter registry.
-- `AntOutput` / `FtmsOutput`: independent outputs. `AntOutput` is still a placeholder; `FtmsOutput` is a working BLE FTMS peripheral (see below).
+- `AntOutput` / `FtmsOutput`: the two outputs; the configured `OutputProtocol` (`include/core/bridge/output_protocol.hpp`) enables at most one of them. `FtmsOutput` is a BLE FTMS peripheral (see below); `AntOutput` is an ANT+ FE-C master channel on an external ANT radio reached through `smartfitness::ant::AntTransport` (`include/core/ant/ant_transport.hpp`; ANT serial messages in `ant_message.hpp`, FE-C pages in `fec_codec.hpp`). The web variant implements the transport with the ESP-IDF USB host (`include/variants/web/ant_usb_transport.h`); the HMI variant has none.
 - FTMS codec (`include/core/ftms/ftms_codec.hpp`): pure C++ encoding/decoding of FTMS characteristics, used by both the output and the FTMS input.
 - `BridgeController` (`include/core/bridge_controller.h`): the variant-neutral command executor. The Serial console, the web API and the HMI all produce `Command` values (`include/core/bridge_commands.h`) and run them through `BridgeController::execute`; it also builds the status/scan/config view model (`include/core/bridge_view_model.h`).
 - Web variant: `web_json` (`include/variants/web/web_json.h`) renders the view model as JSON; `ApiExchange` (`include/variants/web/web_api.h`) validates API JSON and hands jobs to the loop; `WebPortal` (`include/variants/web/web_portal.h`, firmware only) owns Wi-Fi, DNS/captive portal, mDNS and the HTTP/WebSocket server; `WifiPolicy` (`include/variants/web/wifi_policy.h`) decides AP/STA/fallback.
 - HMI variant: `hmi::Model` (pure C++, host-tested) turns the view model into screen content and UI actions into `Command`s; `HmiUi` builds the LVGL screens; `hmi_hal` drives display, touch, encoder, backlight and LED ring.
 - `ConfigStore` (`include/core/config_store.h`): configuration persisted through a `ConfigBackend` (NVS on the firmware, memory in host tests). See [Persistent configuration](#persistent-configuration).
-- `smartfitness::FtmsRoles` (`include/core/bridge/ftms_roles.hpp`): independent input/output role flags. `ftms.input` now means "use the paired BLE device as input (auto-connect)".
+- Input and output are configured independently: `ftmsInput` means "use the paired BLE device as input (auto-connect)"; `outputProtocol` (`off`, `ble-ftms`, `ant-fec`) selects the output.
 
 ## First setup walkthrough
 
@@ -379,7 +384,7 @@ unverified. Read-only treadmills remain read-only.
 
 ### nRF Connect smoke test
 
-1. Run `sim` (not `scan`) on Serial, and ensure `ftms-output on` and `trainer on`.
+1. Run `sim` (not `scan`) on Serial, and ensure `output ble-ftms` and `trainer on`.
 2. Scan for service `0x1826`, connect to `SmartFitness Bridge`, and subscribe to
    Indoor Bike Data `0x2AD2`. Expected simulation bytes:
    `44 02 C4 09 A0 00 96 00 78` (25 km/h, 80 rpm, 150 W, 120 bpm).
@@ -404,8 +409,9 @@ safe source start primitive.
 
 Do not assume the fenix 6/6 Pro can consume/control this FTMS output.
 [HD-002](docs/hardware-decisions.md#hd-002-garmin-watches-eg-fenix-6-pro-and-bluetooth-ftms)
-records the CPS/HRS output and multi-client work needed for recording, and the
-external ANT+ FE-C path needed for trainer control.
+records the CPS/HRS output and multi-client work needed for recording. Watches that
+support ANT+ FE-C trainers can use the [ANT+ FE-C output](#ant-fe-c-output-usb-stick)
+(web variant with an ANT+ USB stick; not verified on hardware).
 
 ## Serial console
 The Serial monitor (115200 baud, newline-terminated) accepts the same commands as the web UI:
@@ -420,15 +426,14 @@ The Serial monitor (115200 baud, newline-terminated) accepts the same commands a
 | `sim` | Use the simulated device as input (150 W, 80 rpm, 25 km/h, 120 bpm) |
 | `power <W>`, `resistance <%>`, `incline <%>`, `speed <km/h>` | Control through the `BridgeCore` gate; prints the rejection reason |
 | `trainer on/off` | Toggle simulated trainer detection only (does not promote real equipment) |
-| `ant on/off` | Enable/disable the ANT stub; does not transmit ANT+ |
+| `output off\|ble-ftms\|ant-fec` | Select the output protocol. `ble-ftms`: FTMS advertising; `ant-fec`: ANT+ FE-C on the ANT+ USB stick (rejected without ANT hardware); `off`: no output (the FTMS client is disconnected, advertising stops and the ANT channel is closed) |
 | `ftms-input on/off` | Select paired BLE input / simulation; independent of output |
-| `ftms-output on/off` | Enable advertising / disconnect client and stop advertising |
 | `ftms-name <name>` | Set 1–20 printable ASCII characters; spaces are allowed |
 | `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower\|step-climber\|stair-climber>` | Select output profile; `auto` follows input; every profile is sent natively; `save` persists |
 | `wifi <ssid> [password]`, `wifi-clear`, `ap-pass <password>` | Wi-Fi settings (save + restart to apply) |
 | `save`, `load`, `factory-reset`, `restart` | Persistence and reboot |
 
-`status` includes `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control.
+`status` includes `output=off|ble-ftms|ant-fec` and `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control. With `output=ant-fec` it adds `ant(link=…,device=…,display=…,control=…)`: the channel state (`waiting-for-stick`, `resetting`, `configuring`, `open`, `no-hardware`), the ANT+ device number, whether a display sent a page in the last 5 s and whether it controls the trainer.
 `input-profile`, `output-profile` and `ftms-profile` show the active input type,
 effective output type and configured override respectively.
 It also includes `dropped(scans=…,events=…,notifications=…,commands=…)` for BLE
@@ -442,10 +447,10 @@ except pairing/unpairing, which persist their own changes immediately.
 ## Web interface
 ### Using the UI
 The single-page app (`src/variants/web/assets/index.html`, web variant only, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
-- **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and FTMS output client state (WebSocket, ≤ 4 Hz).
+- **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and the active output (BLE FTMS client state, or ANT+ stick/channel/display state) (WebSocket, ≤ 4 Hz).
 - **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
 - **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
-- **Settings:** FTMS output name, on/off and machine-profile override, ANT on/off (requires hardware, see `docs/hardware-decisions.md`), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, save, factory reset, restart and firmware version.
+- **Settings:** output protocol (*BLE FTMS*, *ANT+ FE-C* – needs the ANT+ USB stick, disabled when the firmware has no ANT transport – or *Off*), FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, save, factory reset, restart and firmware version.
 
 ## REST / WebSocket API
 
@@ -469,7 +474,7 @@ fixed order and stop at the first failure, **without rollback**.
 | POST | `/api/connect`, `/api/disconnect`, `/api/simulate` | `{}` | Connect paired device / disconnect / use the simulation |
 | POST | `/api/control` | `{"control":"power","value":200}` | `power`, `resistance`, `incline` or `speed` through the core gate |
 | GET | `/api/config` | – | Settings (passwords are never returned; `wifiPasswordSet` instead) |
-| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","ftmsOutput":true,"ftmsInput":true,"ant":false,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","save":true}` | Any subset; order: profile, name, output, input, ANT, simulated trainer, Wi-Fi, AP password, save |
+| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","outputProtocol":"ble-ftms","ftmsInput":true,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","save":true}` | Any subset; order: profile, name, output protocol (`off`, `ble-ftms`, `ant-fec`), input, simulated trainer, Wi-Fi, AP password, save |
 | POST | `/api/factory-reset`, `/api/restart` | `{}` | Factory reset / reboot |
 | POST | `/api/wifi-scan` | `{}` | `202 {"scanning":true}`; scan Wi-Fi networks for 15 s (repeated passes merged by SSID, strongest signal first; a station still connecting pauses until the scan ends) |
 | GET | `/api/wifi-scan/results` | – | `{"type":"wifi-scan","scanning":…,"networks":[{"ssid","rssi","secure"}]}` (max. 32, hidden networks omitted) |
@@ -554,7 +559,10 @@ or `null` when invalid. Example disconnected snapshot:
     "scanning":false,"error":"","reconnectAttempts":0,"nextAttemptMs":0,"autoConnect":false,"paired":null,
     "dropped":{"scans":0,"events":0,"notifications":0,"commands":0}},
   "ftmsOutput":{"enabled":true,"profile":"bike","override":"auto","name":"SmartFitness Bridge","advertising":true,"client":false,"control":false},
-  "ant":true,"unsaved":false,
+  "outputProtocol":"ble-ftms",
+  "antOutput":{"enabled":false,"available":true,"link":"disabled","stick":false,"open":false,"deviceNumber":4660,
+    "profile":"bike","display":false,"control":false,"hardware":""},
+  "unsaved":false,
   "network":{"mode":"ap","ssid":"SmartFitness-XXXX","ip":"192.168.4.1","hostname":"smartfitness.local","stations":1}
 }
 ```
@@ -562,6 +570,10 @@ or `null` when invalid. Example disconnected snapshot:
 `version` is the build version (`0.3.0` by default); actual network/link values vary.
 `input.profile` is the active input machine type; `ftmsOutput.profile` is the
 effective output and `ftmsOutput.override` is the configured selection.
+`outputProtocol` is the selected output; `antOutput` describes the ANT+ FE-C
+output (`available`: firmware has an ANT transport, `stick`: USB stick attached,
+`open`: FE-C channel open, `display`: a display sent a page within 5 s,
+`control`: a display's control page was applied, `hardware`: `USB vid:pid`).
 States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 `target` when set is `{"control":"power","value":200}`.
 `input.paired` when set is
@@ -583,7 +595,7 @@ States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 ```json
 {
   "type":"config","version":"0.3.0","ftmsName":"SmartFitness Bridge",
-  "ftmsOutput":true,"ftmsOutputProfile":"auto","ftmsInput":false,"ant":true,"antRequiresHardware":true,
+  "outputProtocol":"ble-ftms","antAvailable":true,"ftmsOutputProfile":"auto","ftmsInput":false,
   "simulatedTrainer":true,"wifiSsid":"","wifiPasswordSet":false,
   "apPasswordDefault":true,"unsaved":false
 }
@@ -616,15 +628,16 @@ Settings changed on the console are edited in RAM; `status` ends with `unsaved=1
 | `unpair` | Disconnects, clears the paired device and persists only that change immediately. |
 | `factory-reset` | Disconnects, erases the `sfbridge` NVS namespace and restores the defaults. |
 
-On boot the stored configuration is loaded before the outputs are enabled, so `ftms-name`, the output-profile override, the ANT/FTMS toggles, the simulated trainer flag and the pairing survive a reboot. A missing, corrupt or unknown-version record falls back to the defaults (the record is replaced on the next `save`).
+On boot the stored configuration is loaded before the outputs are enabled, so `ftms-name`, the output-profile override, the output protocol, the FTMS input toggle, the simulated trainer flag and the pairing survive a reboot. A missing, corrupt or unknown-version record falls back to the defaults (the record is replaced on the next `save`).
 
 NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little endian:
 
 | Field | Size | Notes |
 |---|---|---|
 | magic | 2 | `'S' 'F'` |
-| schema version | 1 | `3`; decoder accepts `1`, `2` and `3` |
-| `antEnabled`, `ftms.input`, `ftms.output`, `simulatedTrainer` | 4 × 1 | Each `0` or `1`; defaults: `1`, `0`, `1`, `1` |
+| schema version | 1 | `4`; decoder accepts `1` … `4` |
+| `outputProtocol` | 1 | `0` off, `1` BLE FTMS (default), `2` ANT+ FE-C. v1–v3 stored four flags (`antEnabled`, `ftms.input`, `ftms.output`, `simulatedTrainer`) instead; `ftms.output` migrates to BLE FTMS/off, the former ANT placeholder flag is dropped |
+| `ftmsInput`, `simulatedTrainer` | 2 × 1 | Each `0` or `1`; defaults: `0`, `1` |
 | `ftmsName` | 1 + n | ≤ 20 printable ASCII bytes; default empty means `SmartFitness Bridge` |
 | `pairedDeviceName` | 1 + n | ≤ 32 printable ASCII bytes, default empty; pairing sanitizes/truncates names |
 | `pairedAdapterId` (v2) | 1 + n | ≤ 16 bytes, lowercase `[a-z0-9_-]`; default empty; pairing requires a registered, nonempty id |
@@ -638,15 +651,17 @@ NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little
 | CRC-32 | 4 | Little endian; over all preceding bytes, reflected polynomial `0xEDB88320`, initial/final XOR `0xffffffff` |
 
 Each text field is a one-byte length followed by exactly that many bytes (no NUL).
-The v3 record is **26 + all six text lengths** bytes: maximum **252 bytes**,
+The v4 record is **25 + all six text lengths** bytes: maximum **251 bytes**,
 below the backend's **256 B** limit. Decoder rejects bad CRC/magic/versions,
 truncation, invalid booleans/text/source, oversize records, and trailing bytes.
 
-**v1/v2 → v3 migration:** v1 contains the same first two text fields and
+**v1/v2/v3 → v4 migration:** v1 contains the same first two text fields and
 paired-source tail, but omits adapter id, SSID, Wi-Fi password and AP password.
 Loading preserves legacy fields and fills missing fields with defaults. Both v1
-and v2 migrate to output profile `auto`. Migration does not write during boot;
-the next `save` serializes v3 and replaces the legacy blob. A legacy source with
+and v2 migrate to output profile `auto`. v1–v3 flags migrate as described in
+the table (`ftms.output` on → BLE FTMS, off → off; ANT+ FE-C is never selected
+by a migration). Migration does not write during boot; the next `save`
+serializes v4 and replaces the legacy blob. A legacy source with
 an empty adapter id is not auto-connected: scan and pair it again.
 
 Write avoidance compares serialized bytes with the stored record. Unchanged
@@ -717,7 +732,7 @@ trainer. Only the bike accepts Set Indoor Bike Simulation Parameters `0x11`
 Other opcodes return Not Supported (`0x02`); wrong lengths return Invalid
 Parameter (`0x03`).
 
-Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnect events into a small lock-protected queue. `FtmsOutput::loop()` drains it, requires Request Control before any other command (otherwise Control Not Permitted `0x05`), and routes set commands through `requestControl()` → `BridgeCore::routeControl`. Core results map to FTMS result codes: Applied → Success `0x01`, Unsupported → Not Supported `0x02`, InvalidValue → Invalid Parameter `0x03`, AdapterRejected → Operation Failed `0x04`, Disconnected/NotTrainer/NoAdapter → Control Not Permitted `0x05`. A BLE disconnect revokes control, drops queued writes from that session and restarts advertising. `ftms-output off` disconnects the client and stops advertising; `ftms-output on` resumes advertising.
+Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnect events into a small lock-protected queue. `FtmsOutput::loop()` drains it, requires Request Control before any other command (otherwise Control Not Permitted `0x05`), and routes set commands through `requestControl()` → `BridgeCore::routeControl`. Core results map to FTMS result codes: Applied → Success `0x01`, Unsupported → Not Supported `0x02`, InvalidValue → Invalid Parameter `0x03`, AdapterRejected → Operation Failed `0x04`, Disconnected/NotTrainer/NoAdapter → Control Not Permitted `0x05`. A BLE disconnect revokes control, drops queued writes from that session and restarts advertising. `output off` (or `output ant-fec`) disconnects the client and stops advertising; `output ble-ftms` resumes advertising.
 
 ### Limitations
 - Treadmill Start/Resume **never starts the belt** and returns Operation Failed
@@ -740,6 +755,70 @@ Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnec
 - Only one client is served at a time (advertising stops while connected). No bonding/security, no Cycling Power or Heart Rate services.
 - The Feature characteristic follows the connected device's capabilities; clients usually read it once on connection, so connect the source device before pairing the app.
 - Changing the name while a client is connected applies on the next advertising cycle.
+
+## ANT+ FE-C output (USB stick)
+
+Select it with `output ant-fec`, the web *Settings → Output protocol* field, or
+`/api/config` `{"outputProtocol":"ant-fec"}` (then `save`). Only one output
+protocol is active at a time: selecting ANT+ FE-C stops BLE FTMS advertising and
+disconnects its client; selecting BLE FTMS or Off closes the ANT channel.
+
+**Hardware (web variant only):**
+
+- An ANT+ USB stick of the Dynastream ANTUSB2/ANTUSB-m class (USB `0fcf:1008`
+  / `0fcf:1009`); the integration basis is the **COOSPO ANT+ USB stick**, which
+  reports these IDs. Other IDs are ignored (`antOutput.stick` stays `false`).
+- Plug the stick into the DevKitC-1 port labelled **USB** (native USB-OTG, GPIO19/20)
+  with a USB-OTG adapter (USB-C/Micro-USB to USB-A female).
+- The port must supply 5 V: bridge the board's **USB-OTG** solder jumper (see the
+  Espressif ESP32-S3-DevKitC-1 user guide) and power the board through the
+  **UART** port, which then also carries flashing and the Serial console.
+- The CrowPanel (HMI variant) has a single USB-C port and no USB host, so ANT+ FE-C
+  cannot be selected there; its *Output* setting cycles BLE FTMS ↔ Off.
+
+**Channel:** ANT+ network key, RF 2457 MHz, channel period 8192 (4 Hz),
+bidirectional master, device type 17, transmission type 5, device number derived
+from the MAC address. The stick is reset and the channel reconfigured after a
+replug, an error response or a channel-closed event (retry every 2 s).
+
+**Data pages** follow the active output profile (the same `ftms-profile`
+override as FTMS); every field the source sends is mapped when the FE-C page has
+a matching field, invalid fields use the FE-C "invalid" value instead of 0:
+
+| Source metric | FE-C page / field |
+|---|---|
+| speed (or pace) | 16 speed (0.001 m/s) |
+| distance | 16 distance (rollover 256 m, capability bit set) |
+| heart rate | 16 heart rate (source: hand contact) |
+| elapsed time | 16 elapsed time (0.25 s); counted locally while connected if the source sends none |
+| incline (or ramp angle) | 17 incline (0.01 %) |
+| resistance | 17 resistance level (0.5 %) |
+| MET, kcal/h (or kcal/min × 60), total energy | 18 metabolic data |
+| cadence, power | 25 trainer (event count, accumulated power), 20 elliptical, 22 rower, 23 climber |
+| positive/negative elevation gain | 19 treadmill, 20 elliptical (positive only) |
+| stride count (climber: or step count) | 20 elliptical, 23 climber |
+| stroke count | 22 rower |
+
+The broadcast cycle is 16 → specific → 17/18 (alternating, only when the source
+has such data; otherwise 16) → specific, with the common pages 80/81 every 65th
+message. FE-C carries one 8-byte page per 250 ms, so all fields are refreshed
+within about 1–2 s, not in one packet like an FTMS record. Fields FE-C cannot
+carry (averages, remaining time, floors, force on belt, average pace) are only
+available over BLE FTMS.
+
+**Control from the display** goes through the same `BridgeCore` gate as FTMS:
+page 48 (basic resistance, 0.5 %) → resistance, page 49 (target power, 0.25 W) →
+power, page 51 (track resistance, grade) → incline. Wind resistance (50) and user
+configuration (55) are acknowledged without a source command. Results are
+reported in page 71 (command status: pass / fail / not supported / rejected);
+page 70 requests are answered for pages 16, 17, 18, the profile's specific page,
+54, 71, 80 and 81. FE-C has no
+speed target, so treadmill speed cannot be set over ANT+.
+
+**Limitations:** not verified on hardware (COOSPO stick, Zwift, Garmin);
+only the Dynastream VID/PID class above is supported; using the ANT+ network
+key in a product requires accepting the ANT+ adopter terms (override with
+`-DSF_ANT_NETWORK_KEY=…` for private networks).
 
 ## Trainer gating
 Commands require a connected device, trainer detection, a supported control, a finite value in range, and adapter acceptance. A command cannot promote a device to trainer mode. Rejected commands never replace the accepted target.
@@ -792,8 +871,8 @@ runtime free heap or PSRAM usage. The board has 16 MB flash / 8 MB PSRAM; the
 partition and allocations determine usable capacity. Web assets are gzipped
 into flash; no separate filesystem upload is required.
 
-There is no API authentication/TLS or BLE bonding/security. ANT enablement is
-only a stub setting, not ANT transmission.
+There is no API authentication/TLS or BLE bonding/security. The ANT+ FE-C channel
+is unencrypted like every ANT+ device profile.
 
 ## Development
 
@@ -863,7 +942,7 @@ green CI as hardware validation.
   reconnect/persistence, nRF Connect, Zwift/MyWhoosh and BLE/Wi-Fi load tests.
 - API authentication and access protection.
 - CPS/HRS outputs and multi-client support for Garmin recording.
-- ANT+ FE-C using a USB ANT+ stick/USB host transport (HD-001).
+- ANT+ FE-C hardware validation (COOSPO stick, Zwift/Garmin displays).
 - More qdomyos-zwift device ports with attribution and byte-sample tests.
 - OTA updates and CI release builds with downloadable firmware.
 
