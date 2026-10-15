@@ -336,7 +336,13 @@ def render(browser, output, name, width, height):
     assert wifi_scans == [{}], wifi_scans
     expect(ssid).to_have_attribute("aria-expanded", "true")
     expect(wifi_list.get_by_role("option")).to_have_count(2)
-    expect(wifi_list.get_by_role("option").first).to_contain_text("-45 dBm · secured")
+    expect(wifi_list.get_by_role("option").first).to_have_text("Training roomsecured")
+    expect(wifi_list.get_by_role("option").first).to_have_attribute(
+        "aria-label", "Training room, signal 4 of 4, secured")
+    expect(wifi_list).not_to_contain_text("dBm")
+    # SSID field is 1.5x its former intrinsic width (203px -> 305px), capped on narrow screens.
+    ssid_width = ssid.evaluate("i => [i.offsetWidth, Math.min(305, i.closest('.row').clientWidth)]")
+    assert ssid_width[0] == ssid_width[1], ssid_width
     # Signal pictogram: same thresholds as hmi::signalLevel (-45 dBm -> 4, -71 dBm -> 2).
     assert wifi_list.locator(".bars").evaluate_all(
         "bars => bars.map(b => [b.dataset.level, b.querySelectorAll('i.on').length, "
