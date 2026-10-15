@@ -59,7 +59,7 @@ CONFIG = {
     "type": "config", "version": "1.0.0", "ftmsName": "SmartFitness", "ftmsOutput": True,
     "ftmsOutputProfile": "auto", "ftmsInput": True, "ant": False,
     "antRequiresHardware": True, "simulatedTrainer": True, "wifiSsid": "Training room",
-    "wifiPasswordSet": True, "apPasswordDefault": True, "unsaved": False,
+    "wifiPasswordSet": True, "apPasswordDefault": True, "https": True, "unsaved": False,
 }
 WIFI_SCAN = {
     "type": "wifi-scan", "scanning": False,
@@ -131,6 +131,7 @@ def render(browser, output, name, width, height):
                                   device_scale_factor=1, reduced_motion="reduce")
     page = context.new_page()
     errors, external, commands, sockets, results, wifi_scans = [], [], [], [], {}, []
+    config = dict(CONFIG)  # saved settings change what /api/config returns
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("websocket", lambda ws: external.append(ws.url)
             if ws.url != "ws://bridge.test/ws" else None)
@@ -159,6 +160,8 @@ def render(browser, output, name, width, height):
         if request.method == "POST":
             endpoint = url.path.removeprefix("/api/")
             commands.append((endpoint, request.post_data_json))
+            if endpoint == "config" and "https" in request.post_data_json:
+                config["https"] = request.post_data_json["https"]
             ident = len(commands)
             result = {"type": "result", "id": ident, "done": True,
                       "ok": endpoint != "control",
@@ -170,7 +173,7 @@ def render(browser, output, name, width, height):
                 page.evaluate(
                     "(result) => setTimeout(() => window.__fixtureResult(result), 50)", result)
             return
-        fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": CONFIG,
+        fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": config,
                     "/api/wifi-scan/results": WIFI_SCAN}
         if url.path == "/api/result":
             request_route.fulfill(json=results[int(parse_qs(url.query)["id"][0])])
@@ -270,7 +273,8 @@ def render(browser, output, name, width, height):
             expect(page.locator("#toast")).to_have_text("applied")
             assert commands[-1] == ("config", {
                 "ftmsName": "SmartFitness", "ftmsOutput": True, "ftmsOutputProfile": "auto",
-                "ant": False, "simulatedTrainer": True, "wifiSsid": "Training room", "save": True})
+                "ant": False, "simulatedTrainer": True, "wifiSsid": "Training room", "https": True,
+                "save": True})
             page.locator("#toast").evaluate("e => e.style.display = 'none'")
         # Remove interaction-only focus so screenshots have a stable resting state.
         page.evaluate("document.activeElement.blur()")
@@ -318,11 +322,15 @@ def render(browser, output, name, width, height):
     sockets[0].send(json.dumps(CONFIG))
     expect(page.locator("#c-ftmsName")).to_have_value("Test treadmill")
     page.locator("#c-wifiPassword").fill("test-fixture-only")
+    # This fixture page is served over http://, so HTTPS off keeps the restart on this origin.
+    expect(page.locator("#c-https")).to_be_checked()
+    page.locator("#c-https").uncheck()
     command(page.locator("#btn-save"), "config")
     assert commands[-1] == ("config", {
         "ftmsName": "Test treadmill", "ftmsOutput": False, "ftmsOutputProfile": "treadmill",
-        "ant": False, "simulatedTrainer": False, "wifiSsid": "Training room", "save": True,
-        "wifiPassword": "test-fixture-only"}), commands[-1]
+        "ant": False, "simulatedTrainer": False, "wifiSsid": "Training room", "https": False,
+        "save": True, "wifiPassword": "test-fixture-only"}), commands[-1]
+    expect(page.locator("#c-https")).not_to_be_checked()
     # Wi-Fi scan: spinner while busy, then a listbox under the SSID field.
     ssid, wifi_list, wifi_button = (page.locator("#c-wifiSsid"), page.locator("#wifi-list"),
                                     page.locator("#btn-wifi-scan"))

@@ -30,6 +30,7 @@ BridgeConfig customConfig() {
     config.wifiPassword = "secret-pass";
     config.apPassword = "bridge-pass";
     config.ftmsOutputProfile = FtmsOutputProfile::Treadmill;
+    config.httpsEnabled = false;
     return config;
 }
 
@@ -67,6 +68,7 @@ void testMigrationFromV1() {
     expected.wifiPassword.clear();
     expected.apPassword = BridgeConfig{}.apPassword;
     expected.ftmsOutputProfile = FtmsOutputProfile::Auto;
+    expected.httpsEnabled = true;
     assert(decoded == expected);
 
     MemoryConfigBackend backend;
@@ -120,11 +122,12 @@ void testV2Limits() {
 
 void testMigrationFromV2() {
     auto body = ConfigStore::serialize(customConfig());
-    body.resize(body.size() - 5);  // Remove v3 profile and CRC.
+    body.resize(body.size() - 6);  // Remove v3 profile, v4 HTTPS flag and CRC.
     body[2] = 2;
     const auto legacy = withCrc(body);
     BridgeConfig expected = customConfig();
     expected.ftmsOutputProfile = FtmsOutputProfile::Auto;
+    expected.httpsEnabled = true;
     MemoryConfigBackend backend;
     backend.setRecord(legacy);
     ConfigStore store(backend);
@@ -132,10 +135,27 @@ void testMigrationFromV2() {
     assert(store.config() == expected && !store.hasUnsavedChanges());
     assert(backend.writes() == 0);
     assert(store.save() == ConfigSaveResult::Written);
-    assert(backend.record()[2] == 3);
+    assert(backend.record()[2] == ConfigStore::kSchemaVersion);
     assert(store.save() == ConfigSaveResult::Unchanged);
     ConfigStore rebooted(backend);
     assert(rebooted.begin() == ConfigLoadResult::Loaded && rebooted.config() == expected);
+}
+
+void testMigrationFromV3() {
+    auto body = ConfigStore::serialize(customConfig());
+    body.resize(body.size() - 5);  // Remove v4 HTTPS flag and CRC.
+    body[2] = 3;
+    BridgeConfig expected = customConfig();
+    expected.httpsEnabled = true;  // records from before the setting keep the HTTPS default
+    MemoryConfigBackend backend;
+    backend.setRecord(withCrc(body));
+    ConfigStore store(backend);
+    assert(store.begin() == ConfigLoadResult::Loaded);
+    assert(store.config() == expected && !store.hasUnsavedChanges() && backend.writes() == 0);
+    store.config().httpsEnabled = false;
+    assert(store.save() == ConfigSaveResult::Written && backend.record()[2] == ConfigStore::kSchemaVersion);
+    ConfigStore rebooted(backend);
+    assert(rebooted.begin() == ConfigLoadResult::Loaded && !rebooted.config().httpsEnabled);
 }
 
 void testOutputProfilePersistence() {
@@ -221,6 +241,14 @@ void testNonFiniteScanDurations() {
         std::string error;
         assert(!parseConsoleCommand(std::string("scan ") + value, command, error));
     }
+}
+
+void testHttpsConsoleCommand() {
+    Command command;
+    std::string error;
+    assert(parseConsoleCommand("https off", command, error) && command.type == CommandType::Https && !command.flag);
+    assert(parseConsoleCommand("https on", command, error) && command.type == CommandType::Https && command.flag);
+    assert(!parseConsoleCommand("https maybe", command, error) && error == "expected on or off");
 }
 
 void testRoundTripAcrossInstances() {
@@ -310,8 +338,11 @@ void testCorruptAndOldVersionFallback() {
     longName.insert(longName.begin() + 8, 10, 'x');
     bad.push_back(withCrc(longName));
     auto badAddressType = body;
-    badAddressType[badAddressType.size() - 8] = 9;
+    badAddressType[badAddressType.size() - 9] = 9;
     bad.push_back(withCrc(badAddressType));
+    auto badHttps = body;
+    badHttps.back() = 2;
+    bad.push_back(withCrc(badHttps));
 
     for (const auto& record : bad) {
         assert(!ConfigStore::deserialize(record, decoded));
@@ -481,10 +512,12 @@ void runConfigStoreTests() {
     testValidation();
     testMigrationFromV1();
     testMigrationFromV2();
+    testMigrationFromV3();
     testOutputProfilePersistence();
     testV2Limits();
     testApPasswordValidationAndFallback();
     testNonFiniteScanDurations();
+    testHttpsConsoleCommand();
     testUnpairPersistence();
     testFactoryReset();
     testFailedFactoryReset();

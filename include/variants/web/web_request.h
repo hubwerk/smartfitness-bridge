@@ -7,17 +7,66 @@
 
 namespace web {
 
-inline bool trustedOrigin(std::string_view origin, std::string_view staIp, std::string_view apIp) {
+// The web UI is served either over HTTPS (port 443; port 80 just redirects) or,
+// with the "https" setting off, over plain HTTP (port 80). Only origins of the
+// active scheme are trusted.
+inline bool trustedOrigin(std::string_view origin, std::string_view staIp, std::string_view apIp, bool https = true) {
     for (const auto host : {std::string_view("smartfitness.local"), staIp, apIp}) {
         if (host.empty() || host == "0.0.0.0") continue;
-        const std::string expected = "http://" + std::string(host);
-        if (origin == expected || origin == expected + ":80") return true;
+        const std::string expected = (https ? "https://" : "http://") + std::string(host);
+        if (origin == expected || origin == expected + (https ? ":443" : ":80")) return true;
     }
     return false;
 }
 
+// Host header value without an optional ":port" suffix.
+inline std::string_view hostName(std::string_view host) {
+    const std::size_t colon = host.find(':');
+    return colon == std::string_view::npos ? host : host.substr(0, colon);
+}
+
+// True if `host` (Host header, optional port) names this bridge.
+inline bool ownHost(std::string_view host, std::string_view staIp, std::string_view apIp) {
+    const std::string_view name = hostName(host);
+    for (const auto own : {std::string_view("smartfitness.local"), staIp, apIp}) {
+        if (!own.empty() && own != "0.0.0.0" && name == own) return true;
+    }
+    return false;
+}
+
+// Target of the plain-HTTP redirect: the same path on HTTPS for the bridge's own
+// names; captive-portal probes and foreign hosts land on the UI root of the
+// SoftAP (or, without an AP, the station) address.
+inline std::string httpsRedirect(std::string_view host, std::string_view uri, std::string_view staIp,
+                                 std::string_view apIp) {
+    bool cleanPath = !uri.empty() && uri.front() == '/' && (uri.size() < 2 || uri[1] != '/');
+    for (const char c : uri) {
+        if (static_cast<unsigned char>(c) <= ' ' || c == 0x7f) cleanPath = false;
+    }
+    if (ownHost(host, staIp, apIp)) return "https://" + std::string(hostName(host)) + (cleanPath ? std::string(uri) : "/");
+    const std::string_view fallback = !apIp.empty() && apIp != "0.0.0.0" ? apIp : staIp;
+    return "https://" + std::string(fallback) + "/";
+}
+
+// Status line for esp_http_server (it needs the reason phrase).
+inline const char* statusLine(int status) {
+    switch (status) {
+        case 200: return "200 OK";
+        case 202: return "202 Accepted";
+        case 302: return "302 Found";
+        case 400: return "400 Bad Request";
+        case 403: return "403 Forbidden";
+        case 404: return "404 Not Found";
+        case 413: return "413 Payload Too Large";
+        case 415: return "415 Unsupported Media Type";
+        case 503: return "503 Service Unavailable";
+        default: return "500 Internal Server Error";
+    }
+}
+
 inline int postRequestStatus(std::string_view contentType, bool hasOrigin, std::string_view origin,
-                             std::string_view staIp, std::string_view apIp, bool transferEncoding = false) {
+                             std::string_view staIp, std::string_view apIp, bool transferEncoding = false,
+                             bool https = true) {
     contentType = contentType.substr(0, contentType.find(';'));
     while (!contentType.empty() && (contentType.front() == ' ' || contentType.front() == '\t'))
         contentType.remove_prefix(1);
@@ -28,13 +77,13 @@ inline int postRequestStatus(std::string_view contentType, bool hasOrigin, std::
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
     }
     if (mediaType != "application/json") return 415;
-    if (hasOrigin && !trustedOrigin(origin, staIp, apIp)) return 403;
-    // The server's body callback does not provide a final decoded total for chunked requests.
+    if (hasOrigin && !trustedOrigin(origin, staIp, apIp, https)) return 403;
+    // Bodies are read by Content-Length; chunked requests are not supported.
     if (transferEncoding) return 400;
     return 200;
 }
 
-// Trivially destructible metadata followed by a zero-initialized total+1 byte buffer.
+// Tracks a request body received in pieces into a zero-initialized total+1 byte buffer.
 struct BodyReceipt {
     std::size_t total;
     std::size_t received;

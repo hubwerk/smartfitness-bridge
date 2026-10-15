@@ -170,6 +170,7 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
         {"ant", CommandType::Ant},
         {"ftms-input", CommandType::FtmsInput},
         {"ftms-output", CommandType::FtmsOutput},
+        {"https", CommandType::Https},
     };
     for (const auto& entry : kToggles) {
         if (key == entry.name) {

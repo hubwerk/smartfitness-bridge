@@ -68,7 +68,7 @@ so it does not independently lock the core to 2.0.17.
   BLE callbacks enqueue scan reports/events and FTMS Control Point writes;
   protocol decoding, control gating and state mutation stay in the main loop.
 - Hand HTTP requests to the same loop through `ApiExchange`; do not access
-  `BridgeCore` from BLE or AsyncTCP callbacks.
+  `BridgeCore` from BLE or HTTPS server callbacks.
 
 ### Consequences
 - The connection budget is not multi-client FTMS support: advertising currently
@@ -80,33 +80,50 @@ so it does not independently lock the core to 2.0.17.
 - Upgrading the platform/core or disabling modem sleep requires renewed
   compatibility/coexistence validation.
 
-## HD-004: ESPAsyncWebServer rather than core WebServer
+## HD-004: ESP-IDF HTTPS server (esp_https_server)
 
-**Status:** Accepted
+**Status:** Accepted (supersedes ESPAsyncWebServer/AsyncTCP)
 
 ### Context
 The UI needs concurrent HTTP requests, WebSocket telemetry and BLE work without
-moving mutable bridge state into networking callbacks. The Arduino core
-`WebServer` is synchronous; the current implementation uses ESPAsyncWebServer
-and its AsyncTCP backend.
+moving mutable bridge state into networking callbacks, and the web interface must
+be encrypted. ESPAsyncWebServer 3.x/AsyncTCP 3.x have no TLS support; the
+Arduino core `WebServer` is synchronous and plain HTTP. Core 2.0.17 ships ESP-IDF
+4.4's `esp_https_server` (WebSocket support enabled) and mbedTLS 2.28.
 
 ### Decision
-- Use pinned **ESPAsyncWebServer 3.12.1** and **AsyncTCP 3.5.0** with ArduinoJson
-  **7.4.3** for REST validation and snapshots.
-- Async handlers validate JSON, enqueue commands and read locked result/snapshot
-  caches. The main loop executes up to two API jobs per iteration.
+- Serve the UI, REST API and `wss://…/ws` with `esp_https_server` on port 443;
+  a plain `esp_http_server` on port 80 only redirects to HTTPS (captive-portal
+  probes included). ArduinoJson **7.4.3** remains for REST validation/snapshots.
+- Each device generates an ECDSA P-256 key and a self-signed certificate
+  (notAfter 9999-12-31 23:59:59 UTC, i.e. no expiry) on first boot and keeps them
+  in NVS namespace `sftls`, outside the configuration blob.
+- Handlers run on the server task, validate JSON, enqueue commands and read locked
+  result/snapshot caches. The main loop executes up to two API jobs per iteration
+  and queues WebSocket broadcasts onto the server task (`httpd_queue_work`), so a
+  TLS session is never used by two tasks at once; one broadcast is in flight at a time.
 - Serve the self-contained gzipped web app from flash; provide captive DNS/probe
-  redirects, mDNS, REST and server-to-client `/ws` telemetry.
+  redirects, mDNS (`_https._tcp`), REST and server-to-client `/ws` telemetry.
+- HTTPS is a persisted setting (`httpsEnabled`, config schema v4, default on).
+  When it is off, or the certificate/TLS server cannot start, the same handlers
+  run on a plain `esp_http_server` on port 80 (`ws://…/ws`, up to 7 connections,
+  `_http._tcp`), and only `http://` origins are trusted. Changes apply after restart.
 
 ### Consequences
-- Extra dependencies and an AsyncTCP task are required; callbacks must not call
-  `BridgeCore` or NVS directly.
+- No extra libraries; the HTTPS task (10 kB stack) replaces the AsyncTCP task.
+  Callbacks must not call `BridgeCore` or NVS directly.
+- mbedTLS allocates ~35 kB internal RAM per TLS session, so HTTPS is limited to 4
+  connections (LRU purge) and the redirect server to 2. Heap headroom with BLE
+  active still needs hardware verification.
+- Browsers warn about the self-signed certificate until the user accepts it;
+  captive-portal mini browsers may refuse it. Apple platforms reject trusted
+  certificates valid for more than 825 days, so there only the exception works.
 - API bodies are limited to 1024 bytes, job capacity to 8 and retained results to
   16. `202` means queued, not applied; clients must observe results.
 - Status broadcasts are limited to 4 Hz; scan changes are checked every 1000 ms
   (also refreshed after API jobs).
   Configuration snapshots are available through GET, not broadcast on `/ws`.
-- There is currently no API authentication or TLS. Restrict the network and
+- The API is encrypted but has no authentication. Restrict the network and
   change the default AP password; authentication remains roadmap work.
 
 ## HD-005: GPL-3.0 licensing for qdomyos-zwift ports
