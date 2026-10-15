@@ -18,8 +18,8 @@ namespace {
 BridgeConfig customConfig() {
     BridgeConfig config;
     config.pairedDeviceName = "Kickr";
-    config.antEnabled = false;
-    config.ftms = {true, false};
+    config.ftmsInput = true;
+    config.outputProtocol = OutputProtocol::Off;
     config.ftmsName = "Garage Bike";
     config.simulatedTrainer = false;
     config.pairedSource.valid = true;
@@ -56,6 +56,42 @@ std::vector<std::uint8_t> v1Record() {
     const std::vector<std::uint8_t> source{1, 1, 0xC0, 0x11, 0x22, 0x33, 0x44, 0x55};
     body.insert(body.end(), source.begin(), source.end());
     return withCrc(body);
+}
+
+// A record as written by schema version 3 firmware: four leading flags
+// (antEnabled ftmsInput ftmsOutput simulatedTrainer) and the profile byte.
+std::vector<std::uint8_t> v3Record(bool ftmsOutput) {
+    std::vector<std::uint8_t> body{'S', 'F', 3, 1, 0, static_cast<std::uint8_t>(ftmsOutput), 1};
+    for (const std::string text : {"Garage Bike", "Kickr", "ftms", "Home", "pw-12345", "bridge-pass"}) {
+        body.push_back(static_cast<std::uint8_t>(text.size()));
+        body.insert(body.end(), text.begin(), text.end());
+    }
+    const std::vector<std::uint8_t> source{1, 1, 0xC0, 0x11, 0x22, 0x33, 0x44, 0x55};
+    body.insert(body.end(), source.begin(), source.end());
+    body.push_back(static_cast<std::uint8_t>(FtmsOutputProfile::Rower));
+    return withCrc(body);
+}
+
+void testMigrationFromV3() {
+    BridgeConfig decoded;
+    assert(ConfigStore::deserialize(v3Record(true), decoded));
+    assert(decoded.outputProtocol == OutputProtocol::BleFtms && !decoded.ftmsInput && decoded.simulatedTrainer);
+    assert(decoded.ftmsName == "Garage Bike" && decoded.pairedAdapterId == "ftms" && decoded.wifiSsid == "Home");
+    assert(decoded.ftmsOutputProfile == FtmsOutputProfile::Rower && decoded.pairedSource.valid);
+    // The former ANT placeholder flag never selects ANT+ FE-C.
+    assert(ConfigStore::deserialize(v3Record(false), decoded));
+    assert(decoded.outputProtocol == OutputProtocol::Off);
+
+    MemoryConfigBackend backend;
+    backend.setRecord(v3Record(true));
+    ConfigStore store(backend);
+    assert(store.begin() == ConfigLoadResult::Loaded && !store.hasUnsavedChanges());
+    store.config().outputProtocol = OutputProtocol::AntFec;
+    assert(store.save() == ConfigSaveResult::Written);
+    assert(backend.record()[2] == 4 && backend.record()[3] == static_cast<std::uint8_t>(OutputProtocol::AntFec));
+    ConfigStore rebooted(backend);
+    assert(rebooted.begin() == ConfigLoadResult::Loaded);
+    assert(rebooted.config().outputProtocol == OutputProtocol::AntFec);
 }
 
 void testMigrationFromV1() {
@@ -122,6 +158,10 @@ void testMigrationFromV2() {
     auto body = ConfigStore::serialize(customConfig());
     body.resize(body.size() - 5);  // Remove v3 profile and CRC.
     body[2] = 2;
+    // v2 header flags: antEnabled ftmsInput ftmsOutput simulatedTrainer.
+    const std::vector<std::uint8_t> flags{1, body[4], 0, body[5]};
+    body.erase(body.begin() + 3, body.begin() + 6);
+    body.insert(body.begin() + 3, flags.begin(), flags.end());
     const auto legacy = withCrc(body);
     BridgeConfig expected = customConfig();
     expected.ftmsOutputProfile = FtmsOutputProfile::Auto;
@@ -132,7 +172,7 @@ void testMigrationFromV2() {
     assert(store.config() == expected && !store.hasUnsavedChanges());
     assert(backend.writes() == 0);
     assert(store.save() == ConfigSaveResult::Written);
-    assert(backend.record()[2] == 3);
+    assert(backend.record()[2] == ConfigStore::kSchemaVersion);
     assert(store.save() == ConfigSaveResult::Unchanged);
     ConfigStore rebooted(backend);
     assert(rebooted.begin() == ConfigLoadResult::Loaded && rebooted.config() == expected);
@@ -253,13 +293,13 @@ void testNoWriteWhenUnchanged() {
     // Defaults with no record are treated as already stored.
     assert(store.save() == ConfigSaveResult::Unchanged);
     assert(backend.writes() == 0);
-    store.config().antEnabled = false;
+    store.config().outputProtocol = OutputProtocol::Off;
     assert(store.save() == ConfigSaveResult::Written);
     assert(store.save() == ConfigSaveResult::Unchanged);
     assert(backend.writes() == 1);
     // Toggling back and forth without a net change does not write.
-    store.config().antEnabled = true;
-    store.config().antEnabled = false;
+    store.config().outputProtocol = OutputProtocol::AntFec;
+    store.config().outputProtocol = OutputProtocol::Off;
     assert(!store.hasUnsavedChanges());
     assert(store.save() == ConfigSaveResult::Unchanged);
     assert(backend.writes() == 1);
@@ -299,15 +339,18 @@ void testCorruptAndOldVersionFallback() {
     auto newVersion = body;
     newVersion[2] = ConfigStore::kSchemaVersion + 1;
     bad.push_back(withCrc(newVersion));
+    auto badProtocol = body;
+    badProtocol[3] = kOutputProtocolCount;
+    bad.push_back(withCrc(badProtocol));
     auto badBoolean = body;
-    badBoolean[3] = 2;
+    badBoolean[4] = 2;
     bad.push_back(withCrc(badBoolean));
     auto badName = body;
-    badName[8] = '\t';  // first ftmsName character
+    badName[7] = '\t';  // first ftmsName character
     bad.push_back(withCrc(badName));
     auto longName = body;
-    longName[7] = 21;
-    longName.insert(longName.begin() + 8, 10, 'x');
+    longName[6] = 21;
+    longName.insert(longName.begin() + 7, 10, 'x');
     bad.push_back(withCrc(longName));
     auto badAddressType = body;
     badAddressType[badAddressType.size() - 8] = 9;
@@ -354,7 +397,7 @@ void testUnpairPersistence() {
     store.begin();
     store.config() = customConfig();
     store.save();
-    store.config().antEnabled = true;  // unsaved edit stays unsaved
+    store.config().outputProtocol = OutputProtocol::AntFec;  // unsaved edit stays unsaved
     store.config().ftmsOutputProfile = FtmsOutputProfile::Rower;
     assert(store.unpair());
     assert(!store.hasPairedDevice());
@@ -366,7 +409,7 @@ void testUnpairPersistence() {
     assert(!rebooted.config().pairedSource.valid);
     assert(rebooted.config().pairedAdapterId.empty());
     assert(rebooted.config().wifiSsid == "Home WLAN");
-    assert(!rebooted.config().antEnabled);
+    assert(rebooted.config().outputProtocol == OutputProtocol::Off);
     assert(rebooted.config().ftmsOutputProfile == FtmsOutputProfile::Treadmill);
     assert(store.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
     assert(rebooted.config().ftmsName == "Garage Bike");
@@ -384,7 +427,7 @@ void testFailedFactoryReset() {
     store.begin();
     store.config() = customConfig();
     assert(store.save() == ConfigSaveResult::Written);
-    store.config().antEnabled = true;
+    store.config().outputProtocol = OutputProtocol::AntFec;
     assert(!store.factoryReset());
     assert(store.config() == BridgeConfig{} && store.hasUnsavedChanges());
     assert(store.save() == ConfigSaveResult::Written);
@@ -424,7 +467,7 @@ void testConsolePersistence() {
         assert(ui.handleCommand("save") == "configuration unchanged; nothing written");
         ui.handleCommand("ftms-name Garage Bike");
         ui.handleCommand("ftms-profile treadmill");
-        ui.handleCommand("ftms-output off");
+        ui.handleCommand("output off");
         ui.handleCommand("scan");
         assert(ui.status().find("unsaved=1") != std::string::npos);
         assert(ui.handleCommand("save") == "configuration saved");
@@ -480,6 +523,7 @@ void runConfigStoreTests() {
     testCorruptAndOldVersionFallback();
     testValidation();
     testMigrationFromV1();
+    testMigrationFromV3();
     testMigrationFromV2();
     testOutputProfilePersistence();
     testV2Limits();

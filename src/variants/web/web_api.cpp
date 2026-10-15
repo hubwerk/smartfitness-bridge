@@ -200,8 +200,8 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
 
     if (endpoint == "config") {
         if (!onlyKeys(object,
-                      {"ftmsName", "ftmsOutputProfile", "ftmsOutput", "ftmsInput", "ant", "simulatedTrainer", "wifiSsid", "wifiPassword",
-                       "apPassword", "save"},
+                      {"ftmsName", "ftmsOutputProfile", "outputProtocol", "ftmsInput", "simulatedTrainer",
+                       "wifiSsid", "wifiPassword", "apPassword", "save"},
                       error))
             return false;
         std::string text;
@@ -227,13 +227,22 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
             command.text = text;
             commands.push_back(command);
         }
+        if (!optionalText(object, "outputProtocol", text, present, error)) return false;
+        if (present) {
+            OutputProtocol protocol;
+            if (!parseOutputProtocol(text, protocol)) {
+                error = "outputProtocol must be off, ble-ftms or ant-fec";
+                return false;
+            }
+            Command command = simple(CommandType::OutputProtocol);
+            command.text = text;
+            commands.push_back(command);
+        }
         struct Toggle {
             const char* key;
             CommandType type;
         };
-        static const Toggle kToggles[] = {{"ftmsOutput", CommandType::FtmsOutput},
-                                          {"ftmsInput", CommandType::FtmsInput},
-                                          {"ant", CommandType::Ant},
+        static const Toggle kToggles[] = {{"ftmsInput", CommandType::FtmsInput},
                                           {"simulatedTrainer", CommandType::Trainer}};
         for (const auto& toggle : kToggles) {
             Command command = simple(toggle.type);

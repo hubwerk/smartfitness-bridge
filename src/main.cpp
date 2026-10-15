@@ -1,5 +1,5 @@
 // Firmware entry point shared by both build variants: sets up the core
-// (BLE input, BridgeCore, FTMS output, configuration, Serial console) and
+// (BLE input, BridgeCore, FTMS/ANT+ FE-C output, configuration, Serial console) and
 // hands over to the selected variant through variant::begin()/variant::loop().
 #include <Arduino.h>
 #include "variant.h"
@@ -55,6 +55,11 @@ void setup() {
     }
 
     if (!bleCentral.begin()) Serial.println("[BLE] central could not be started");
+    antOutput.setTransport(variant::antTransport());
+    antOutput.setClock([] { return static_cast<std::uint32_t>(millis()); });
+    // Stable, per-device ANT+ device number from the factory MAC.
+    const std::uint64_t mac = ESP.getEfuseMac();
+    antOutput.setDeviceNumber(static_cast<std::uint16_t>((mac >> 32) ^ (mac >> 16)));
     bridge.attach(inputSelector, antOutput, ftmsOutput);
     bridge.begin();
     controller.attachBleInput(inputSelector, bleInput);

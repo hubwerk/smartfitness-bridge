@@ -1,5 +1,5 @@
 #include "bridge/bridge_core.hpp"
-#include "bridge/ftms_roles.hpp"
+#include "bridge/output_protocol.hpp"
 #include "bt_device_adapter.h"
 #include "ant_output.h"
 #include "ftms_output.h"
@@ -79,16 +79,18 @@ void testCapabilitiesAndSamples() {
     assert(!state.sample(static_cast<Metric>(255)).valid);
 }
 
-void testFtmsRolesAreIndependent() {
-    constexpr FtmsRoles inputOnly{true, false};
-    constexpr FtmsRoles outputOnly{false, true};
-    constexpr FtmsRoles both{true, true};
-    constexpr FtmsRoles disabled{};
-
-    static_assert(inputOnly.enabled());
-    static_assert(outputOnly.enabled());
-    static_assert(both.enabled());
-    static_assert(!disabled.enabled());
+void testOutputProtocolNames() {
+    OutputProtocol protocol = OutputProtocol::Off;
+    for (std::uint8_t index = 0; index < kOutputProtocolCount; ++index) {
+        const auto candidate = static_cast<OutputProtocol>(index);
+        assert(parseOutputProtocol(outputProtocolName(candidate), protocol) && protocol == candidate);
+    }
+    assert(std::string(outputProtocolName(OutputProtocol::BleFtms)) == "ble-ftms");
+    assert(std::string(outputProtocolName(OutputProtocol::AntFec)) == "ant-fec");
+    assert(std::string(outputProtocolLabel(OutputProtocol::AntFec)) == "ANT+ FE-C");
+    assert(std::string(outputProtocolLabel(OutputProtocol::BleFtms)) == "BLE FTMS");
+    assert(std::string(outputProtocolLabel(OutputProtocol::Off)) == "Off");
+    assert(!parseOutputProtocol("ant", protocol) && !parseOutputProtocol("", protocol));
 }
 
 void testControlGating() {
@@ -234,17 +236,24 @@ void testConsoleAndConfig() {
     assert(ui.handleCommand("power ") == "invalid value");
     assert(ui.handleCommand("trainer maybe") == "expected on or off");
     assert(ui.handleCommand(std::string(97, 'a')) == "command too long");
-    ui.handleCommand("ant off");
-    assert(!ant.enabled());
-    assert(!ant.hasControlTarget());
-    assert(ant.requestControl({Control::Power, 150}) == ControlResult::NoAdapter);
+    // Without an ANT radio, ANT+ FE-C cannot be selected.
+    assert(ui.handleCommand("output ant-fec") == "ANT+ FE-C needs an ANT+ USB stick (web variant, USB-OTG port)");
+    assert(ui.handleCommand("output ant") == "output must be off, ble-ftms or ant-fec");
+    assert(!ant.enabled() && ftms.enabled());
+    assert(config.config().outputProtocol == OutputProtocol::BleFtms);
+    ui.handleCommand("output off");
+    assert(!ant.enabled() && !ftms.enabled());
+    assert(!ftms.hasControlTarget());
+    assert(ftms.requestControl({Control::Power, 150}) == ControlResult::NoAdapter);
     assert(adapter.telemetry().targetPower == 175);
-    ui.handleCommand("ant on");
-    assert(ant.telemetry().power == 175);
-    assert(ant.hasControlTarget() && ant.controlTarget().value == 175);
+    assert(ui.status().find("output=off") != std::string::npos);
+    ui.handleCommand("output ble-ftms");
+    assert(ftms.telemetry().power == 175);
+    assert(ftms.hasControlTarget() && ftms.controlTarget().value == 175);
+    assert(!ant.enabled());
     ui.handleCommand("ftms-input on");
-    ui.handleCommand("ftms-output off");
-    assert(config.config().ftms.input && !config.config().ftms.output);
+    ui.handleCommand("output off");
+    assert(config.config().ftmsInput && config.config().outputProtocol == OutputProtocol::Off);
     assert(!ftms.enabled());
     ui.handleCommand("save");
     ui.handleCommand("unpair");
@@ -254,7 +263,7 @@ void testConsoleAndConfig() {
     ui.handleCommand("load");
     assert(!config.hasPairedDevice());  // unpair is persisted immediately
     assert(config.config().simulatedTrainer);
-    assert(config.config().ftms.input && !config.config().ftms.output);
+    assert(config.config().ftmsInput && config.config().outputProtocol == OutputProtocol::Off);
     assert(bridge.state() == RuntimeState::Disconnected);
     ui.handleCommand("scan");
     ui.handleCommand("trainer off");
@@ -264,7 +273,7 @@ void testConsoleAndConfig() {
     ConfigStore freshStore;
     freshStore.begin();
     assert(!freshStore.hasPairedDevice());
-    assert(!freshStore.config().ftms.input && freshStore.config().ftms.output);
+    assert(!freshStore.config().ftmsInput && freshStore.config().outputProtocol == OutputProtocol::BleFtms);
 }
 
 void testAuthoritativeAdapterState() {
@@ -392,7 +401,7 @@ void testOptionalTreadmillTotals() {
 
 void runBridgeCoreTests() {
     testCapabilitiesAndSamples();
-    testFtmsRolesAreIndependent();
+    testOutputProtocolNames();
     testControlGating();
     testDisconnectedAndMissingAdapter();
     testRuntimeRouting();

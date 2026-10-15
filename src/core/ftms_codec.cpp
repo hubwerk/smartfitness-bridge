@@ -338,6 +338,13 @@ public:
         if (const auto grade = value(Metric::Incline)) return std::atan(*grade / 100.0F) * 180.0F / kPi;
         return std::nullopt;
     }
+    // Grade in % from the reported value, else derived from the ramp angle
+    // (FTMS carries inclination and ramp angle only together).
+    std::optional<float> incline() const {
+        if (const auto grade = value(Metric::Incline)) return grade;
+        if (const auto angle = value(Metric::RampAngle)) return std::tan(*angle * kPi / 180.0F) * 100.0F;
+        return std::nullopt;
+    }
     // Pace in s/500 m from the reported value, else derived from a speed.
     std::optional<float> pace(Metric paceMetric, Metric speedMetric) const {
         if (const auto pace = value(paceMetric)) return pace;
@@ -378,7 +385,7 @@ TreadmillData treadmillDataFrom(const TrainerState& state) {
     data.instantaneousSpeed = in.u16(Metric::Speed, 100.0F);
     data.averageSpeed = in.u16(Metric::AverageSpeed, 100.0F);
     data.totalDistance = in.u24(Metric::Distance, 1.0F);
-    data.inclination = in.s16(Metric::Incline, 10.0F);
+    data.inclination = StateReader::s16(in.incline(), 10.0F);
     if (data.inclination) data.rampAngleSetting = StateReader::s16(in.rampAngle(), 10.0F);
     data.positiveElevationGain = in.u16(Metric::PositiveElevationGain, 10.0F);
     data.negativeElevationGain = in.u16(Metric::NegativeElevationGain, 10.0F);
@@ -401,7 +408,7 @@ CrossTrainerData crossTrainerDataFrom(const TrainerState& state) {
     data.strideCount = in.u16(Metric::StrideCount, 10.0F);
     data.positiveElevationGain = in.u16(Metric::PositiveElevationGain, 1.0F);
     data.negativeElevationGain = in.u16(Metric::NegativeElevationGain, 1.0F);
-    data.inclination = in.s16(Metric::Incline, 10.0F);
+    data.inclination = StateReader::s16(in.incline(), 10.0F);
     if (data.inclination) data.rampAngleSetting = StateReader::s16(in.rampAngle(), 10.0F);
     data.resistanceLevel = in.s16(Metric::Resistance, 10.0F);
     data.instantaneousPower = in.s16(Metric::Power, 1.0F);
@@ -519,7 +526,8 @@ Bytes encodeFeature(const TrainerCapabilities& capabilities, MachineProfile prof
     if ((bike || rower) && has({Metric::Cadence})) features |= kFeatureCadence;
     if (!climber && has({Metric::Distance})) features |= kFeatureTotalDistance;
     // Bikes take inclination through the indoor bike simulation target.
-    if ((bike || treadmill || cross) && has({Metric::Incline})) features |= kFeatureInclination;
+    if (bike && has({Metric::Incline})) features |= kFeatureInclination;
+    if ((treadmill || cross) && has({Metric::Incline, Metric::RampAngle})) features |= kFeatureInclination;
     if ((treadmill || cross) && has({Metric::PositiveElevationGain, Metric::NegativeElevationGain}))
         features |= kFeatureElevationGain;
     if (climber && has({Metric::PositiveElevationGain})) features |= kFeatureElevationGain;

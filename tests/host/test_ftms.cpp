@@ -301,9 +301,9 @@ void testFtmsNameAndConsole() {
     ftms.notifyClientConnected();
     write(ftms, bridge, {0x00});
     assert(ui.status().find("ftms-out(advertising=0,client=1,control=1)") != std::string::npos);
-    ui.handleCommand("ftms-output off");
+    ui.handleCommand("output off");
     assert(ui.status().find("ftms-out(advertising=0,client=0,control=0)") != std::string::npos);
-    ui.handleCommand("ftms-output on");
+    ui.handleCommand("output ble-ftms");
     assert(ui.status().find("ftms-out(advertising=1,client=0,control=0)") != std::string::npos);
 }
 

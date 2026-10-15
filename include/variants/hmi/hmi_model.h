@@ -95,6 +95,9 @@ const char* ftmsProfileLabel(smartfitness::FtmsOutputProfile profile);
 std::string inputLabel(const smartfitness::StatusView& status);
 // "App connected" / "Advertising" / "FTMS off".
 std::string ftmsLabel(const smartfitness::FtmsOutputView& ftms);
+// Active output for the dashboard: "APP LINK" / "Advertising" / "ANT+ link" /
+// "No ANT+ stick" / "Output off".
+std::string outputLabel(const smartfitness::StatusView& status);
 // "Power 180 W" / "No target".
 std::string targetLabel(const smartfitness::StatusView& status);
 // Two-line scan list entry: name (or address) / "ftms"; the signal strength is
@@ -133,6 +136,8 @@ std::vector<std::uint8_t> serialize(const HmiSettings& settings);
 bool deserialize(const std::vector<std::uint8_t>& data, HmiSettings& settings);
 
 smartfitness::FtmsOutputProfile nextFtmsProfile(smartfitness::FtmsOutputProfile profile);
+// Off -> BLE FTMS -> ANT+ FE-C (only when an ANT radio exists) -> Off.
+smartfitness::OutputProtocol nextOutputProtocol(smartfitness::OutputProtocol protocol, bool antAvailable);
 // FTMS name presets for knob-only entry; the first one is the default name.
 const std::vector<std::string>& ftmsNamePresets();
 

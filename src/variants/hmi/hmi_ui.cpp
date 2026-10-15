@@ -262,8 +262,8 @@ std::string HmiUi::signature() const {
             for (const bool supported : status_.controls) sig += supported ? "1" : "0";
             break;
         case Screen::Settings:
-            sig += config_.ftmsName + std::to_string(config_.ftmsOutput) +
-                   std::to_string(static_cast<int>(config_.ftmsOutputProfile)) + std::to_string(config_.ant) +
+            sig += config_.ftmsName + std::to_string(static_cast<int>(config_.outputProtocol)) +
+                   std::to_string(static_cast<int>(config_.ftmsOutputProfile)) + std::to_string(config_.antAvailable) +
                    std::to_string(config_.unsaved) + std::to_string(settings_.brightness) +
                    std::to_string(settings_.screenTimeoutS) + std::to_string(settings_.ledRing);
             break;
@@ -504,7 +504,7 @@ void HmiUi::updateDashboard() {
     lv_obj_set_style_text_color(dash_.state, lv_color_black(), 0);
     lv_label_set_text(dash_.target, lcars::uppercase(targetLabel(status_)).c_str());
     const std::string info = std::string(profileLabel(status_.input.profile)) + " | " +
-                             (status_.ftmsOutput.client ? "APP LINK" : ftmsLabel(status_.ftmsOutput)) +
+                             outputLabel(status_) +
                              "\n" + (status_.input.bleSelected ? "BLE " + status_.input.link : "SIMULATION");
     lv_label_set_text(dash_.info, lcars::uppercase(info).c_str());
 }
@@ -822,14 +822,13 @@ void HmiUi::buildSettings() {
     lv_obj_t* list = makeList(root_);
     addLabel(list, tr(config_.unsaved ? Str::Unsaved : Str::SavedState));
     addButton(list, withValue(Str::FtmsName, config_.ftmsName), [this] { navigate(Screen::FtmsName); });
-    addButton(list, withValue(Str::FtmsOutput, onOff(config_.ftmsOutput)),
-              [this] { submit(makeFlag(CommandType::FtmsOutput, !config_.ftmsOutput)); });
+    addButton(list, withValue(Str::OutputProtocol, outputProtocolLabel(config_.outputProtocol)), [this] {
+        submit(makeText(CommandType::OutputProtocol,
+                        outputProtocolName(nextOutputProtocol(config_.outputProtocol, config_.antAvailable))));
+    });
     addButton(list, withValue(Str::FtmsProfile, ftmsProfileLabel(config_.ftmsOutputProfile)), [this] {
         submit(makeText(CommandType::FtmsProfile, ftmsOutputProfileName(nextFtmsProfile(config_.ftmsOutputProfile))));
     });
-    std::string ant = withValue(Str::Ant, onOff(config_.ant));
-    if (config_.antRequiresHardware) ant += "\n(" + std::string(tr(Str::AntRequiresHardware)) + ")";
-    addButton(list, ant, [this] { submit(makeFlag(CommandType::Ant, !config_.ant)); });
     addButton(list, withValue(Str::Brightness, percent(settings_.brightness)), [this] {
         HmiSettings next = settings_;
         next.brightness = nextBrightness(settings_.brightness);

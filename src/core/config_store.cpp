@@ -5,14 +5,17 @@ static_assert(ConfigStore::kMaxFtmsNameLength == FtmsOutput::kMaxNameLength,
               "persisted FTMS name limit must match the output");
 
 namespace {
-// Record layout (schema version 3):
-//   'S' 'F' version antEnabled ftmsInput ftmsOutput simulatedTrainer
+// Record layout (schema version 4):
+//   'S' 'F' version outputProtocol ftmsInput simulatedTrainer
 //   ftmsNameLength ftmsName[...] pairedNameLength pairedName[...]
 //   adapterIdLength adapterId[...] ssidLength ssid[...]
 //   wifiPasswordLength wifiPassword[...] apPasswordLength apPassword[...]
 //   sourceValid sourceAddressType sourceAddress[6] ftmsOutputProfile crc32 (little endian)
 // Version 1 records lack the four v2 text fields; v1/v2 lack the profile byte.
-// Missing fields take their defaults on load. Worst case size is 252 bytes.
+// v1-v3 start with four flags (antEnabled ftmsInput ftmsOutput simulatedTrainer)
+// instead of outputProtocol ftmsInput simulatedTrainer: ftmsOutput migrates to
+// BLE FTMS/Off, the former ANT placeholder flag is dropped.
+// Missing fields take their defaults on load. Worst case size is 251 bytes.
 constexpr std::uint8_t kMagic0 = 'S';
 constexpr std::uint8_t kMagic1 = 'F';
 // Header (3) + booleans (4) + two empty name lengths (2) + paired source (8) + CRC (4).
@@ -115,12 +118,12 @@ bool ConfigStore::pairSource(const PairedSourceDevice& source, const std::string
     next.pairedSource = source;
     next.pairedDeviceName = sanitized;
     next.pairedAdapterId = adapterId;
-    next.ftms.input = true;
+    next.ftmsInput = true;
     if (!persistPartial(next)) return false;
     config_.pairedSource = source;
     config_.pairedDeviceName = sanitized;
     config_.pairedAdapterId = adapterId;
-    config_.ftms.input = true;
+    config_.ftmsInput = true;
     return true;
 }
 
@@ -218,6 +221,7 @@ bool ConfigStore::isValidApPassword(const std::string& password) {
 }
 
 bool ConfigStore::isValid(const BridgeConfig& config) {
+    if (static_cast<std::uint8_t>(config.outputProtocol) >= smartfitness::kOutputProtocolCount) return false;
     if (static_cast<std::uint8_t>(config.ftmsOutputProfile) >
         static_cast<std::uint8_t>(smartfitness::FtmsOutputProfile::StairClimber)) return false;
     if (!isValidFtmsName(config.ftmsName)) return false;
@@ -234,9 +238,8 @@ bool ConfigStore::isValid(const BridgeConfig& config) {
 
 std::vector<std::uint8_t> ConfigStore::serialize(const BridgeConfig& config) {
     std::vector<std::uint8_t> data{kMagic0, kMagic1, kSchemaVersion,
-                                   static_cast<std::uint8_t>(config.antEnabled),
-                                   static_cast<std::uint8_t>(config.ftms.input),
-                                   static_cast<std::uint8_t>(config.ftms.output),
+                                   static_cast<std::uint8_t>(config.outputProtocol),
+                                   static_cast<std::uint8_t>(config.ftmsInput),
                                    static_cast<std::uint8_t>(config.simulatedTrainer)};
     const auto appendText = [&data](const std::string& value) {
         data.push_back(static_cast<std::uint8_t>(value.size()));
@@ -272,9 +275,20 @@ bool ConfigStore::deserialize(const std::vector<std::uint8_t>& data, BridgeConfi
 
     BridgeConfig next;
     std::uint8_t sourceValid = 0;
-    if (!reader.readBool(next.antEnabled) || !reader.readBool(next.ftms.input) ||
-        !reader.readBool(next.ftms.output) || !reader.readBool(next.simulatedTrainer) ||
-        !reader.readText(next.ftmsName, kMaxFtmsNameLength) ||
+    if (version >= 4) {
+        std::uint8_t protocol = 0;
+        if (!reader.readByte(protocol) || protocol >= smartfitness::kOutputProtocolCount ||
+            !reader.readBool(next.ftmsInput) || !reader.readBool(next.simulatedTrainer))
+            return false;
+        next.outputProtocol = static_cast<smartfitness::OutputProtocol>(protocol);
+    } else {
+        bool antPlaceholder = false, ftmsOutput = false;
+        if (!reader.readBool(antPlaceholder) || !reader.readBool(next.ftmsInput) || !reader.readBool(ftmsOutput) ||
+            !reader.readBool(next.simulatedTrainer))
+            return false;
+        next.outputProtocol = ftmsOutput ? smartfitness::OutputProtocol::BleFtms : smartfitness::OutputProtocol::Off;
+    }
+    if (!reader.readText(next.ftmsName, kMaxFtmsNameLength) ||
         !reader.readText(next.pairedDeviceName, kMaxPairedNameLength))
         return false;
     if (version >= 2 &&

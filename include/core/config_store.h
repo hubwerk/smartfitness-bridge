@@ -5,8 +5,8 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "bridge/ftms_roles.hpp"
 #include "bridge/machine_profile.hpp"
+#include "bridge/output_protocol.hpp"
 #include "config_backend.h"
 
 // The paired BLE source device (used by the BLE input adapter on boot).
@@ -23,8 +23,7 @@ struct PairedSourceDevice {
 
 struct BridgeConfig {
     std::string pairedDeviceName;
-    bool antEnabled = true;
-    smartfitness::FtmsRoles ftms{false, true};
+    bool ftmsInput = false;  // use the paired BLE device as input (auto-connect)
     std::string ftmsName;  // advertised FTMS output name; empty uses the default
     bool simulatedTrainer = true;
     PairedSourceDevice pairedSource;
@@ -34,11 +33,13 @@ struct BridgeConfig {
     std::string wifiPassword;     // empty (open network) or 8..63 characters
     std::string apPassword = "smartfitness";  // SoftAP WPA2 password, 8..63 printable ASCII characters
     // Schema v3:
-    smartfitness::FtmsOutputProfile ftmsOutputProfile = smartfitness::FtmsOutputProfile::Auto;
+    smartfitness::FtmsOutputProfile ftmsOutputProfile = smartfitness::FtmsOutputProfile::Auto;  // also the FE-C type
+    // Schema v4 (replaces the FTMS output and ANT flags):
+    smartfitness::OutputProtocol outputProtocol = smartfitness::OutputProtocol::BleFtms;
 
     bool operator==(const BridgeConfig& other) const {
-        return pairedDeviceName == other.pairedDeviceName && antEnabled == other.antEnabled &&
-               ftms.input == other.ftms.input && ftms.output == other.ftms.output &&
+        return pairedDeviceName == other.pairedDeviceName && ftmsInput == other.ftmsInput &&
+               outputProtocol == other.outputProtocol &&
                ftmsName == other.ftmsName && simulatedTrainer == other.simulatedTrainer &&
                pairedSource == other.pairedSource && pairedAdapterId == other.pairedAdapterId &&
                wifiSsid == other.wifiSsid && wifiPassword == other.wifiPassword &&
@@ -52,7 +53,7 @@ enum class ConfigSaveResult { Written, Unchanged, Invalid, Failed };
 
 class ConfigStore {
 public:
-    static constexpr std::uint8_t kSchemaVersion = 3;
+    static constexpr std::uint8_t kSchemaVersion = 4;
     static constexpr std::size_t kMaxFtmsNameLength = 20;
     static constexpr std::size_t kMaxPairedNameLength = 32;
     static constexpr std::size_t kMaxAdapterIdLength = 16;
