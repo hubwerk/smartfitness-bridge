@@ -104,6 +104,10 @@ Arduino core `WebServer` is synchronous and plain HTTP. Core 2.0.17 ships ESP-ID
   TLS session is never used by two tasks at once; one broadcast is in flight at a time.
 - Serve the self-contained gzipped web app from flash; provide captive DNS/probe
   redirects, mDNS (`_https._tcp`), REST and server-to-client `/ws` telemetry.
+- HTTPS is a persisted setting (`httpsEnabled`, config schema v4, default on).
+  When it is off, or the certificate/TLS server cannot start, the same handlers
+  run on a plain `esp_http_server` on port 80 (`ws://…/ws`, up to 7 connections,
+  `_http._tcp`), and only `http://` origins are trusted. Changes apply after restart.
 
 ### Consequences
 - No extra libraries; the HTTPS task (10 kB stack) replaces the AsyncTCP task.

@@ -37,6 +37,7 @@ enum class CommandType : std::uint8_t {
     WifiClear,
     ApPassword,
     Restart,
+    Https,        // web interface over HTTPS (on) or plain HTTP (off); save + restart
 };
 
 struct Command {

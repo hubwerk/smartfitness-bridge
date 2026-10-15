@@ -48,8 +48,8 @@ Exactly one variant flag must be defined; `include/variant.h` stops the build wi
 simulation, `BridgeCore`, FTMS output, Serial console) and calls the variant hooks
 `variant::begin()` / `variant::loop()`. Both variants use the same `Command`s and the
 same `BridgeController`; the web variant renders its view model as JSON, the HMI
-variant renders it with LVGL. The stored configuration (schema v3, including the
-Wi-Fi fields) is identical; the HMI variant simply never starts Wi-Fi.
+variant renders it with LVGL. The stored configuration (schema v4, including the
+Wi-Fi and HTTPS fields) is identical; the HMI variant simply never starts Wi-Fi.
 
 ## User interfaces
 
@@ -181,7 +181,7 @@ Screens (same interactions as the web UI):
   output profile, ANT on/off (requires hardware), save, load, factory reset (two
   confirmations), restart, firmware version, brightness, screen timeout and LED
   ring. Brightness/timeout/LED ring are stored in a separate NVS namespace
-  (`sfhmi`), so the shared configuration stays at schema v3.
+  (`sfhmi`), so the shared configuration stays at schema v4.
 
 The status refreshes at 5 Hz; UI callbacks only enqueue `Command`s that the main
 loop executes. UI strings are centralised in `src/variants/hmi/hmi_strings.cpp`
@@ -280,12 +280,13 @@ The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent 
    and no AP clients remain, the fallback AP closes. Policy is checked once/second.
 
 **Security warning:** change the shared default password before normal use.
-The web UI and API are encrypted with TLS (HTTPS, self-signed certificate) but have
-**no authentication**; anyone on the AP/home network can
+The web UI and API are encrypted with TLS (HTTPS, self-signed certificate; can be
+switched off, see below) but have **no authentication**; anyone on the AP/home network can
 control, pair, erase settings, or restart the bridge. Do not port-forward it or
 use an untrusted network. POST requests require `Content-Type: application/json`,
 even with no body. A supplied `Origin` must be `https://smartfitness.local`, the
 current STA IP, or the SoftAP IP (optional `:443`); foreign/null and `http://` origins are rejected.
+With HTTPS switched off the same hosts are accepted only as `http://` (optional `:80`).
 No CORS access is enabled. This blocks browser CSRF, **not** clients already on
 your network; there is no API token. WebSocket upgrades also reject foreign origins.
 Passwords are never returned by API snapshots/results. Serial prints only the
@@ -298,7 +299,18 @@ Wi-Fi/AP edits (including factory reset) require a restart to change the running
 
 ### HTTPS and the self-signed certificate
 
-- The web UI, REST API and WebSocket (`wss://<host>/ws`) are served only over
+- HTTPS is **on by default** and can be switched off in **Settings → HTTPS**
+  (or console `https off`, then `save` and `restart`; API `{"https":false,"save":true}`).
+  The change applies after a restart; the settings page then opens the new
+  address itself. With HTTPS off the web UI, REST API and WebSocket
+  (`ws://<host>/ws`) run **unencrypted on port 80** (up to 7 connections), there is
+  no port-443 listener, captive-portal probes go to `http://<SoftAP IP>/`, and
+  mDNS announces `_http._tcp`. Passwords entered in the UI then cross the network
+  in clear text. If the certificate cannot be created or the HTTPS server fails to
+  start, the bridge falls back to plain HTTP so the interface stays reachable.
+  Factory reset switches HTTPS back on. The stored certificate is kept while
+  HTTPS is off.
+- With HTTPS on, the web UI, REST API and WebSocket (`wss://<host>/ws`) are served only over
   **HTTPS on port 443** (ESP-IDF `esp_https_server`, TLS 1.2). Port 80 only answers
   with `302` redirects to the same path on HTTPS; captive-portal probes and foreign
   hosts are sent to `https://<SoftAP IP>/`.
@@ -462,6 +474,7 @@ The Serial monitor (115200 baud, newline-terminated) accepts the same commands a
 | `ftms-name <name>` | Set 1–20 printable ASCII characters; spaces are allowed |
 | `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower\|step-climber\|stair-climber>` | Select output profile; `auto` follows input; every profile is sent natively; `save` persists |
 | `wifi <ssid> [password]`, `wifi-clear`, `ap-pass <password>` | Wi-Fi settings (save + restart to apply) |
+| `https on/off` | Web interface over HTTPS (default) or plain HTTP (save + restart to apply; web variant only) |
 | `save`, `load`, `factory-reset`, `restart` | Persistence and reboot |
 
 `status` includes `ftms-out(advertising=…,client=…,control=…)`: whether the FTMS output is advertising, whether a BLE client is connected, and whether that client has been granted control via Request Control.
@@ -481,12 +494,13 @@ The single-page app (`src/variants/web/assets/index.html`, web variant only, pla
 - **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and FTMS output client state (WebSocket, ≤ 4 Hz).
 - **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
 - **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
-- **Settings:** FTMS output name, on/off and machine-profile override, ANT on/off (requires hardware, see `docs/hardware-decisions.md`), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, save, factory reset, restart and firmware version.
+- **Settings:** FTMS output name, on/off and machine-profile override, ANT on/off (requires hardware, see `docs/hardware-decisions.md`), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version.
 
 ## REST / WebSocket API
 
 The API runs on HTTPS port 443 (`https://smartfitness.local/api/...`, WebSocket
-`wss://smartfitness.local/ws`); port 80 only redirects. Self-signed certificate:
+`wss://smartfitness.local/ws`); port 80 only redirects. With HTTPS switched off it
+runs on HTTP port 80 instead (`http://...`, `ws://...`). Self-signed certificate:
 use e.g. `curl --cacert bridge.pem` or `curl -k`. POST bodies are JSON objects (max. **1024 bytes**, nesting
 limit 2, unknown keys rejected); an empty body is treated as `{}`. All POSTs
 require `Content-Type: application/json` (an optional charset parameter is allowed)
@@ -507,7 +521,7 @@ fixed order and stop at the first failure, **without rollback**.
 | POST | `/api/connect`, `/api/disconnect`, `/api/simulate` | `{}` | Connect paired device / disconnect / use the simulation |
 | POST | `/api/control` | `{"control":"power","value":200}` | `power`, `resistance`, `incline` or `speed` through the core gate |
 | GET | `/api/config` | – | Settings (passwords are never returned; `wifiPasswordSet` instead) |
-| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","ftmsOutput":true,"ftmsInput":true,"ant":false,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","save":true}` | Any subset; order: profile, name, output, input, ANT, simulated trainer, Wi-Fi, AP password, save |
+| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","ftmsOutput":true,"ftmsInput":true,"ant":false,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","https":true,"save":true}` | Any subset; order: profile, name, output, input, ANT, simulated trainer, Wi-Fi, AP password, HTTPS, save |
 | POST | `/api/factory-reset`, `/api/restart` | `{}` | Factory reset / reboot |
 | POST | `/api/wifi-scan` | `{}` | `202 {"scanning":true}`; scan Wi-Fi networks for 15 s (repeated passes merged by SSID, strongest signal first; a station still connecting pauses until the scan ends) |
 | GET | `/api/wifi-scan/results` | – | `{"type":"wifi-scan","scanning":…,"networks":[{"ssid","rssi","secure"}]}` (max. 32, hidden networks omitted) |
@@ -623,7 +637,7 @@ States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
   "type":"config","version":"0.3.0","ftmsName":"SmartFitness Bridge",
   "ftmsOutput":true,"ftmsOutputProfile":"auto","ftmsInput":false,"ant":true,"antRequiresHardware":true,
   "simulatedTrainer":true,"wifiSsid":"","wifiPasswordSet":false,
-  "apPasswordDefault":true,"unsaved":false
+  "apPasswordDefault":true,"https":true,"unsaved":false
 }
 ```
 
@@ -661,7 +675,7 @@ NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little
 | Field | Size | Notes |
 |---|---|---|
 | magic | 2 | `'S' 'F'` |
-| schema version | 1 | `3`; decoder accepts `1`, `2` and `3` |
+| schema version | 1 | `4`; decoder accepts `1`–`4` |
 | `antEnabled`, `ftms.input`, `ftms.output`, `simulatedTrainer` | 4 × 1 | Each `0` or `1`; defaults: `1`, `0`, `1`, `1` |
 | `ftmsName` | 1 + n | ≤ 20 printable ASCII bytes; default empty means `SmartFitness Bridge` |
 | `pairedDeviceName` | 1 + n | ≤ 32 printable ASCII bytes, default empty; pairing sanitizes/truncates names |
@@ -673,18 +687,19 @@ NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little
 | paired source address type | 1 | `0`–`3`; console/API accepts public (`0`) or random (`1`) |
 | paired source address | 6 | Address bytes in display order; invalid source requires type/address all zero |
 | `ftmsOutputProfile` (v3) | 1 | After source address, before CRC: `0` auto (default), `1` bike, `2` treadmill, `3` cross-trainer, `4` rower, `5` step-climber, `6` stair-climber |
+| `httpsEnabled` (v4) | 1 | After output profile, before CRC: `0` plain HTTP, `1` HTTPS (default) |
 | CRC-32 | 4 | Little endian; over all preceding bytes, reflected polynomial `0xEDB88320`, initial/final XOR `0xffffffff` |
 
 Each text field is a one-byte length followed by exactly that many bytes (no NUL).
-The v3 record is **26 + all six text lengths** bytes: maximum **252 bytes**,
+The v4 record is **27 + all six text lengths** bytes: maximum **253 bytes**,
 below the backend's **256 B** limit. Decoder rejects bad CRC/magic/versions,
 truncation, invalid booleans/text/source, oversize records, and trailing bytes.
 
-**v1/v2 → v3 migration:** v1 contains the same first two text fields and
+**v1/v2/v3 → v4 migration:** v1 contains the same first two text fields and
 paired-source tail, but omits adapter id, SSID, Wi-Fi password and AP password.
 Loading preserves legacy fields and fills missing fields with defaults. Both v1
-and v2 migrate to output profile `auto`. Migration does not write during boot;
-the next `save` serializes v3 and replaces the legacy blob. A legacy source with
+and v2 migrate to output profile `auto`; v1–v3 migrate with HTTPS on. Migration does not write during boot;
+the next `save` serializes v4 and replaces the legacy blob. A legacy source with
 an empty adapter id is not auto-connected: scan and pair it again.
 
 Write avoidance compares serialized bytes with the stored record. Unchanged
@@ -709,7 +724,7 @@ The shared machine-profile names are
 and FTMS input derives it from discovered data characteristics and FTMS service
 data rather than treating every `0x1826` source as a bike. Simulation and sensor
 sources default to bike. An explicit output-profile override is saved in schema
-v3; it changes presentation, not the source's controls or safety limits.
+v3+; it changes presentation, not the source's controls or safety limits.
 For ambiguous FTMS subscriptions, the first valid data notification fixes the
 input profile; other machine-data UUIDs are ignored. An explicit supported FTMS
 advertised type can change that selection and clears old metrics/freshness.
@@ -797,7 +812,7 @@ Normalized units: speed in km/h, cadence in rpm, power in watts, heart rate in b
 | FTMS Control Point queue | 8 writes, 20 bytes per write; full queue drops a write |
 | API | 8 jobs; up to 2 processed/loop; 16 cached results; body ≤ 1024 bytes |
 | Serial | 96-character command; at most 64 input characters consumed/loop |
-| Configuration | One NVS blob ≤ 256 B; maximum valid v3 record 252 B |
+| Configuration | One NVS blob ≤ 256 B; maximum valid v4 record 253 B |
 
 NimBLE host callbacks/central worker and HTTPS server handlers hand off through
 bounded queues/locked caches; the bridge and codecs run cooperatively in the

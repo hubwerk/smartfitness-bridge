@@ -99,7 +99,9 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
  <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
   <div class="row"><label for="c-wifiSsid">Network (SSID)</label><div class="combo"><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="wifi-list" autocomplete="off"><ul id="wifi-list" role="listbox" aria-label="Wi-Fi networks" hidden></ul></div><button class="b sec" id="btn-wifi-scan" aria-busy="false"><span class="spin" aria-hidden="true"></span>Scan</button></div>
   <div class="row"><label for="c-wifiPassword">Password</label><input id="c-wifiPassword" type="password" maxlength="63" placeholder="unchanged"></div>
-  <div class="row"><label for="c-apPassword">Access point password</label><input id="c-apPassword" type="password" maxlength="63" placeholder="unchanged"></div></div>
+  <div class="row"><label for="c-apPassword">Access point password</label><input id="c-apPassword" type="password" maxlength="63" placeholder="unchanged"></div>
+  <div class="row"><label for="c-https">HTTPS</label><input id="c-https" type="checkbox"></div>
+  <p class="small">HTTPS uses a self-signed certificate. Off serves the web interface unencrypted over http://. After the restart this page opens the new address.</p></div>
  <div class="row"><button class="b" id="btn-save">Save</button><button class="b sec" id="btn-restart">Restart</button><button class="b danger" id="btn-reset">Factory reset</button></div>
  <p class="small">Firmware <span id="fw"></span> · <span id="unsaved"></span></p>
 </section>
@@ -160,7 +162,9 @@ function renderScan(sc){
    btn.disabled=true;await run("pair",{address:d.address,addressType:d.addressType,adapter:sel.value});btn.disabled=false};
   const svc=el("td",(d.services||[]).join(" "),"small"),ad=el("td"),act=el("td");ad.append(sel);act.append(btn);
   const rssi=el("td",d.rssi);rssi.dataset.label="RSSI";svc.dataset.label="Services";ad.dataset.label="Adapter";tr.append(name,rssi,svc,ad,act);return tr}));}
+let cfgHttps=location.protocol==="https:";
 function renderConfig(c){
+ cfgHttps=c.https!==false;$("c-https").checked=cfgHttps;
  $("c-ftmsName").value=c.ftmsName||"";for(const k of["ftmsOutput","ant","simulatedTrainer"])$("c-"+k).checked=!!c[k];
  $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
@@ -172,7 +176,7 @@ $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run(
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
 $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
  const r=await run("control",{control:$("ctl-kind").value,value:v},true);if(r){$("ctl-result").textContent=r.message;$("ctl-result").className="small "+(r.ok?"ok":"bad")}};
-$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutput:$("c-ftmsOutput").checked,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ant:$("c-ant").checked,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
+$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutput:$("c-ftmsOutput").checked,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ant:$("c-ant").checked,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,https:$("c-https").checked,save:true};
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
  const r=await run("config",b);if(r&&r.ok)loadConfig()};
 let wifiNets=[];
@@ -198,7 +202,8 @@ $("btn-wifi-scan").onclick=async()=>{const b=$("btn-wifi-scan");if(b.getAttribut
   const end=Date.now()+30000;let s;do{await new Promise(res=>setTimeout(res,1000));s=await(await fetch("/api/wifi-scan/results")).json()}while(s.scanning&&Date.now()<end);
   renderWifi(s.networks||[]);if(wifiNets.length){ssid.focus();wifiOpen(true)}else toast("no Wi-Fi networks found",false)}
  catch(e){toast("Wi-Fi scan failed: "+e.message,false)}finally{b.setAttribute("aria-busy","false")}};
-$("btn-restart").onclick=()=>{if(confirm("Restart the bridge?"))run("restart")};
+$("btn-restart").onclick=async()=>{if(!confirm("Restart the bridge?"))return;const r=await run("restart");
+ if(r&&r.ok&&cfgHttps!==(location.protocol==="https:"))setTimeout(()=>{location.href=(cfgHttps?"https://":"http://")+location.hostname+"/"},8000)};
 $("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?"))run("factory-reset").then(loadConfig)};
 function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m)};

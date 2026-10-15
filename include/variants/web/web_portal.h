@@ -4,9 +4,12 @@
 //  * Wi-Fi: SoftAP "SmartFitness-XXXX" (WPA2) with captive portal when no
 //    credentials are stored, station mode otherwise with AP fallback
 //    (WifiPolicy). mDNS "smartfitness.local".
-//  * ESP-IDF esp_https_server on port 443 with the device's self-signed,
-//    never-expiring certificate (tls_cert.h) serves the UI, REST API and
-//    wss://.../ws. Port 80 only redirects to HTTPS (captive portal included).
+//  * HTTPS (setting "https", default on): ESP-IDF esp_https_server on port
+//    443 with the device's self-signed, never-expiring certificate
+//    (tls_cert.h) serves the UI, REST API and wss://.../ws; port 80 only
+//    redirects to HTTPS (captive portal included). If HTTPS is off, or the
+//    certificate/TLS server cannot start, the same handlers run over plain
+//    HTTP on port 80 (ws://.../ws).
 //  * Handlers run on the HTTPS server task and only read snapshots or
 //    enqueue requests in ApiExchange; the main loop executes them through
 //    BridgeController and publishes fresh snapshots via loop(). WebSocket
@@ -36,7 +39,7 @@ public:
 
     WebPortal(BridgeController& ui, ApiExchange& api);
     // Starts Wi-Fi and the server; credentials come from the configuration.
-    void begin(const std::string& ssid, const std::string& password, const std::string& apPassword);
+    void begin(const std::string& ssid, const std::string& password, const std::string& apPassword, bool https);
     // Main loop: run queued API jobs, publish snapshots, Wi-Fi policy, DNS.
     void loop();
 
@@ -56,6 +59,7 @@ private:
     WifiPolicy policy_;
     WifiMode applied_ = WifiMode::Ap;
     bool started_ = false;
+    bool https_ = true;  // scheme actually served
     std::string ssid_;
     std::string password_;
     std::string apSsid_;

@@ -124,6 +124,7 @@ struct ConfigView {
     std::string wifiSsid;
     bool wifiPasswordSet = false;  // passwords are never exposed
     bool apPasswordDefault = true;
+    bool https = true;  // web interface over HTTPS (applied after restart)
     bool unsaved = false;
 };
 

@@ -27,7 +27,9 @@ constexpr std::uint16_t kDnsPort = 53;
 constexpr std::uint32_t kPolicyIntervalMs = 1000;
 // Each TLS session holds ~35 kB of internal RAM (mbedTLS record buffers).
 constexpr std::size_t kMaxHttpsSockets = 4;
-constexpr std::size_t kMaxHttpSockets = 2;
+constexpr std::size_t kMaxRedirectSockets = 2;
+constexpr std::size_t kMaxPlainSockets = 7;  // HTTPS off: UI/API on port 80
+constexpr std::size_t kMaxClientSockets = kMaxPlainSockets;
 constexpr std::uint16_t kHttpsCtrlPort = 32768;
 constexpr std::uint16_t kHttpCtrlPort = 32769;
 constexpr std::size_t kMaxSocketFrame = 128;  // clients only listen; anything larger closes the socket
@@ -36,6 +38,10 @@ constexpr int kBodyRecvRetries = 3;
 const char* const kPostEndpoints[] = {"scan",     "pair",    "unpair", "connect",       "disconnect", "simulate",
                                       "control",  "config",  "factory-reset", "restart",    "wifi-scan"};
 
+// Scheme of the web interface; written in WebPortal::begin() before any server task starts.
+bool secureWeb = true;
+
+const char* scheme() { return secureWeb ? "https://" : "http://"; }
 std::string staIp() { return WiFi.localIP().toString().c_str(); }
 std::string apIp() { return WiFi.softAPIP().toString().c_str(); }
 
@@ -104,16 +110,18 @@ esp_err_t notFound(httpd_req_t* request, httpd_err_code_t) {
     std::string host;
     header(request, "Host", host);
     if (request->method == HTTP_GET && !web::ownHost(host, staIp(), apIp()) && (WiFi.getMode() & WIFI_AP))
-        return redirectTo(request, "https://" + apIp() + "/");
+        return redirectTo(request, scheme() + apIp() + "/");
     return reject(request, 404, "{\"error\":\"not found\"}");
 }
 
-// Port 80 only redirects to HTTPS (captive-portal probes included).
+// HTTPS mode: port 80 only redirects to HTTPS (captive-portal probes included).
 esp_err_t redirectToHttps(httpd_req_t* request) {
     std::string host;
     header(request, "Host", host);
     return redirectTo(request, web::httpsRedirect(host, request->uri, staIp(), apIp()));
 }
+// HTTPS off: OS connectivity checks land on the UI.
+esp_err_t redirectToPortal(httpd_req_t* request) { return redirectTo(request, "http://" + apIp() + "/"); }
 }  // namespace
 
 struct WebPortal::Impl {
@@ -123,8 +131,8 @@ struct WebPortal::Impl {
     };
 
     WebPortal& portal;
-    httpd_handle_t https = nullptr;
-    httpd_handle_t http = nullptr;
+    httpd_handle_t server = nullptr;    // UI, REST API and WebSocket (HTTPS on 443, or HTTP on 80)
+    httpd_handle_t redirect = nullptr;  // HTTPS mode only: port 80 -> HTTPS
     web::TlsIdentity tls;
     DNSServer dns;
     bool dnsRunning = false;
@@ -176,7 +184,7 @@ struct WebPortal::Impl {
         header(request, "Content-Type", contentType);
         const bool hasOrigin = header(request, "Origin", origin);
         const int policy = web::postRequestStatus(contentType, hasOrigin, origin, staIp(), apIp(),
-                                                  hasHeader(request, "Transfer-Encoding"));
+                                                  hasHeader(request, "Transfer-Encoding"), secureWeb);
         if (policy != 200) {
             return reject(request, policy, policy == 415 ? "{\"error\":\"Content-Type must be application/json\"}" :
                 policy == 403 ? "{\"error\":\"foreign origin\"}" : "{\"error\":\"chunked bodies not supported\"}");
@@ -196,11 +204,11 @@ struct WebPortal::Impl {
         return sendJson(request, response.status, response.body);
     }
 
-    // Server-to-client telemetry on wss://<host>/ws. Clients only listen; requests go through the REST API.
+    // Server-to-client telemetry on wss://<host>/ws (ws:// with HTTPS off). Clients only listen; requests go through the REST API.
     static esp_err_t socket(httpd_req_t* request) {
         if (request->method == HTTP_GET) {  // called right after the handshake
             std::string origin;
-            if (header(request, "Origin", origin) && !web::trustedOrigin(origin, staIp(), apIp()))
+            if (header(request, "Origin", origin) && !web::trustedOrigin(origin, staIp(), apIp(), secureWeb))
                 return ESP_FAIL;  // closes the socket before anything is sent
             const std::string status = of(request).portal.api_.snapshot(ApiExchange::Snapshot::Status);
             httpd_ws_frame_t frame{};
@@ -217,11 +225,11 @@ struct WebPortal::Impl {
         return frame.len ? httpd_ws_recv_frame(request, &frame, frame.len) : ESP_OK;
     }
 
-    // Runs on the HTTPS server task, so TLS sessions are never written concurrently.
+    // Runs on the server task, so TLS sessions are never written concurrently.
     static void sendBroadcast(void* argument) {
         std::unique_ptr<Broadcast> job(static_cast<Broadcast*>(argument));
-        httpd_handle_t server = job->impl->https;
-        std::array<int, kMaxHttpsSockets> fds{};
+        httpd_handle_t server = job->impl->server;
+        std::array<int, kMaxClientSockets> fds{};
         std::size_t count = fds.size();
         if (httpd_get_client_list(server, &count, fds.data()) == ESP_OK) {
             httpd_ws_frame_t frame{};
@@ -241,23 +249,34 @@ struct WebPortal::Impl {
     }
 
     bool broadcast(const std::string& message) {
-        if (!https) return false;
-        std::array<int, kMaxHttpsSockets> fds{};
+        if (!server) return false;
+        std::array<int, kMaxClientSockets> fds{};
         std::size_t count = fds.size();
-        if (httpd_get_client_list(https, &count, fds.data()) != ESP_OK) return false;
+        if (httpd_get_client_list(server, &count, fds.data()) != ESP_OK) return false;
         std::size_t listeners = 0;
-        for (std::size_t i = 0; i < count; ++i) listeners += httpd_ws_get_fd_info(https, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET;
+        for (std::size_t i = 0; i < count; ++i) listeners += httpd_ws_get_fd_info(server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET;
         // One broadcast in flight at a time; slow clients make the loop skip updates instead of queueing them.
         if (!web::canBroadcast(listeners, !sending)) return false;
         auto* job = new (std::nothrow) Broadcast{this, message};
         if (!job) return false;
         sending = true;
-        if (httpd_queue_work(https, sendBroadcast, job) != ESP_OK) {
+        if (httpd_queue_work(server, sendBroadcast, job) != ESP_OK) {
             delete job;
             sending = false;
             return false;
         }
         return true;
+    }
+
+    void registerHandlers() {
+        const httpd_uri_t handlers[] = {
+            {"/", HTTP_GET, index, this, false, false, nullptr},
+            {"/ws", HTTP_GET, socket, this, true, false, nullptr},
+            {"/api/*", HTTP_GET, apiGet, this, false, false, nullptr},
+            {"/api/*", HTTP_POST, apiPost, this, false, false, nullptr},
+        };
+        for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(server, &handler);
+        httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, notFound);
     }
 
     bool startHttps() {
@@ -272,18 +291,11 @@ struct WebPortal::Impl {
         config.httpd.max_open_sockets = kMaxHttpsSockets;
         config.httpd.lru_purge_enable = true;
         config.httpd.uri_match_fn = httpd_uri_match_wildcard;
-        if (httpd_ssl_start(&https, &config) != ESP_OK) {
-            https = nullptr;
+        if (httpd_ssl_start(&server, &config) != ESP_OK) {
+            server = nullptr;
             return false;
         }
-        const httpd_uri_t handlers[] = {
-            {"/", HTTP_GET, index, this, false, false, nullptr},
-            {"/ws", HTTP_GET, socket, this, true, false, nullptr},
-            {"/api/*", HTTP_GET, apiGet, this, false, false, nullptr},
-            {"/api/*", HTTP_POST, apiPost, this, false, false, nullptr},
-        };
-        for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(https, &handler);
-        httpd_register_err_handler(https, HTTPD_404_NOT_FOUND, notFound);
+        registerHandlers();
         return true;
     }
 
@@ -291,27 +303,51 @@ struct WebPortal::Impl {
         httpd_config_t config = HTTPD_DEFAULT_CONFIG();
         config.server_port = kHttpPort;
         config.ctrl_port = kHttpCtrlPort;
-        config.max_open_sockets = kMaxHttpSockets;
+        config.max_open_sockets = kMaxRedirectSockets;
         config.lru_purge_enable = true;
         config.uri_match_fn = httpd_uri_match_wildcard;
-        if (httpd_start(&http, &config) != ESP_OK) {
-            http = nullptr;
+        if (httpd_start(&redirect, &config) != ESP_OK) {
+            redirect = nullptr;
             return false;
         }
         const httpd_uri_t handlers[] = {
             {"/*", HTTP_GET, redirectToHttps, this, false, false, nullptr},
             {"/*", HTTP_HEAD, redirectToHttps, this, false, false, nullptr},
         };
-        for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(http, &handler);
+        for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(redirect, &handler);
+        return true;
+    }
+
+    // HTTPS off: the same UI/API/WebSocket over plain HTTP on port 80.
+    bool startHttp() {
+        httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+        config.server_port = kHttpPort;
+        config.ctrl_port = kHttpCtrlPort;
+        config.max_open_sockets = kMaxPlainSockets;
+        config.max_uri_handlers = 12;
+        config.lru_purge_enable = true;
+        config.uri_match_fn = httpd_uri_match_wildcard;
+        if (httpd_start(&server, &config) != ESP_OK) {
+            server = nullptr;
+            return false;
+        }
+        registerHandlers();
+        for (const char* probe : {"/generate_204", "/hotspot-detect.html", "/connecttest.txt", "/ncsi.txt"}) {
+            const httpd_uri_t handler{probe, HTTP_GET, redirectToPortal, this, false, false, nullptr};
+            httpd_register_uri_handler(server, &handler);
+        }
         return true;
     }
 };
 
 WebPortal::WebPortal(BridgeController& ui, ApiExchange& api) : ui_(ui), api_(api) {}
 
-void WebPortal::begin(const std::string& ssid, const std::string& password, const std::string& apPassword) {
+void WebPortal::begin(const std::string& ssid, const std::string& password, const std::string& apPassword,
+                      bool https) {
     if (started_) return;
     started_ = true;
+    https_ = https;
+    secureWeb = https;
     impl_ = new Impl(*this);
     ssid_ = ssid;
     password_ = password;
@@ -327,11 +363,25 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     applyMode(policy_.begin(!ssid_.empty(), millis()));
     api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
 
-    if (!impl_->startHttps()) Serial.println("[Web] HTTPS server start failed; web UI unavailable");
-    if (!impl_->startHttpRedirect()) Serial.println("[Web] HTTP redirect server start failed");
+    if (https_ && !impl_->startHttps()) {
+        // Keep the web interface reachable (e.g. to switch HTTPS off) rather than losing it.
+        Serial.println("[Web] HTTPS server start failed; falling back to plain HTTP");
+        https_ = false;
+        secureWeb = false;
+    }
+    if (https_) {
+        if (!impl_->startHttpRedirect()) Serial.println("[Web] HTTP redirect server start failed");
+    } else if (!impl_->startHttp()) {
+        Serial.println("[Web] HTTP server start failed; web UI unavailable");
+    }
 
     impl_->mdnsRunning = MDNS.begin(kHostname);
-    if (impl_->mdnsRunning) MDNS.addService("https", "tcp", kHttpsPort);
+    if (impl_->mdnsRunning) {
+        if (https_) MDNS.addService("https", "tcp", kHttpsPort);
+        else MDNS.addService("http", "tcp", kHttpPort);
+    }
+    Serial.printf("[Web] %s%s.local/ (or the address shown above)%s\n", https_ ? "https://" : "http://", kHostname,
+                  https_ ? "; self-signed certificate" : "; HTTPS is off");
 }
 
 void WebPortal::applyMode(WifiMode mode) {
@@ -349,9 +399,9 @@ void WebPortal::applyMode(WifiMode mode) {
             impl_->dns.setErrorReplyCode(DNSReplyCode::NoError);
             impl_->dnsRunning = impl_->dns.start(kDnsPort, "*", WiFi.softAPIP());
         }
-        Serial.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at https://%s/\n", apSsid_.c_str(),
+        Serial.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at %s%s/\n", apSsid_.c_str(),
                       apPassword_ == BridgeConfig{}.apPassword ? apPassword_.c_str() : "(custom)",
-                      WiFi.softAPIP().toString().c_str());
+                      https_ ? "https://" : "http://", WiFi.softAPIP().toString().c_str());
     } else if (impl_ && impl_->dnsRunning) {
         impl_->dns.stop();
         impl_->dnsRunning = false;

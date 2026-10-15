@@ -35,6 +35,8 @@ struct BridgeConfig {
     std::string apPassword = "smartfitness";  // SoftAP WPA2 password, 8..63 printable ASCII characters
     // Schema v3:
     smartfitness::FtmsOutputProfile ftmsOutputProfile = smartfitness::FtmsOutputProfile::Auto;
+    // Schema v4:
+    bool httpsEnabled = true;  // web variant: HTTPS (self-signed) or plain HTTP web interface
 
     bool operator==(const BridgeConfig& other) const {
         return pairedDeviceName == other.pairedDeviceName && antEnabled == other.antEnabled &&
@@ -42,7 +44,8 @@ struct BridgeConfig {
                ftmsName == other.ftmsName && simulatedTrainer == other.simulatedTrainer &&
                pairedSource == other.pairedSource && pairedAdapterId == other.pairedAdapterId &&
                wifiSsid == other.wifiSsid && wifiPassword == other.wifiPassword &&
-               apPassword == other.apPassword && ftmsOutputProfile == other.ftmsOutputProfile;
+               apPassword == other.apPassword && ftmsOutputProfile == other.ftmsOutputProfile &&
+               httpsEnabled == other.httpsEnabled;
     }
     bool operator!=(const BridgeConfig& other) const { return !(*this == other); }
 };
@@ -52,7 +55,7 @@ enum class ConfigSaveResult { Written, Unchanged, Invalid, Failed };
 
 class ConfigStore {
 public:
-    static constexpr std::uint8_t kSchemaVersion = 3;
+    static constexpr std::uint8_t kSchemaVersion = 4;
     static constexpr std::size_t kMaxFtmsNameLength = 20;
     static constexpr std::size_t kMaxPairedNameLength = 32;
     static constexpr std::size_t kMaxAdapterIdLength = 16;

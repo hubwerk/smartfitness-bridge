@@ -7,12 +7,14 @@
 
 namespace web {
 
-// The web UI is only served over HTTPS (port 443); port 80 just redirects.
-inline bool trustedOrigin(std::string_view origin, std::string_view staIp, std::string_view apIp) {
+// The web UI is served either over HTTPS (port 443; port 80 just redirects) or,
+// with the "https" setting off, over plain HTTP (port 80). Only origins of the
+// active scheme are trusted.
+inline bool trustedOrigin(std::string_view origin, std::string_view staIp, std::string_view apIp, bool https = true) {
     for (const auto host : {std::string_view("smartfitness.local"), staIp, apIp}) {
         if (host.empty() || host == "0.0.0.0") continue;
-        const std::string expected = "https://" + std::string(host);
-        if (origin == expected || origin == expected + ":443") return true;
+        const std::string expected = (https ? "https://" : "http://") + std::string(host);
+        if (origin == expected || origin == expected + (https ? ":443" : ":80")) return true;
     }
     return false;
 }
@@ -63,7 +65,8 @@ inline const char* statusLine(int status) {
 }
 
 inline int postRequestStatus(std::string_view contentType, bool hasOrigin, std::string_view origin,
-                             std::string_view staIp, std::string_view apIp, bool transferEncoding = false) {
+                             std::string_view staIp, std::string_view apIp, bool transferEncoding = false,
+                             bool https = true) {
     contentType = contentType.substr(0, contentType.find(';'));
     while (!contentType.empty() && (contentType.front() == ' ' || contentType.front() == '\t'))
         contentType.remove_prefix(1);
@@ -74,7 +77,7 @@ inline int postRequestStatus(std::string_view contentType, bool hasOrigin, std::
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
     }
     if (mediaType != "application/json") return 415;
-    if (hasOrigin && !trustedOrigin(origin, staIp, apIp)) return 403;
+    if (hasOrigin && !trustedOrigin(origin, staIp, apIp, https)) return 403;
     // Bodies are read by Content-Length; chunked requests are not supported.
     if (transferEncoding) return 400;
     return 200;
