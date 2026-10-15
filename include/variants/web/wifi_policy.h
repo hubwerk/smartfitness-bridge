@@ -9,8 +9,10 @@
 //    apHoldMs and no client is using the SoftAP.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 enum class WifiMode : std::uint8_t { Ap, Sta, ApSta };
 
@@ -42,4 +44,34 @@ private:
     std::uint32_t disconnectedSinceMs_ = 0;
     bool wasConnected_ = false;
     std::uint32_t connectedSinceMs_ = 0;
+};
+
+// Wi-Fi network scan requested from the web UI: repeated scan passes during
+// a fixed window, merged by SSID (strongest signal wins, hidden networks are
+// skipped). The firmware drives the passes; this class only keeps the state.
+struct WifiNetwork {
+    std::string ssid;
+    int rssi = 0;  // dBm
+    bool secure = false;
+};
+
+class WifiScan {
+public:
+    static constexpr std::uint32_t kDurationMs = 15000;
+    static constexpr std::size_t kMaxNetworks = 32;
+
+    // Starts a new window and clears previous results; false while one runs.
+    bool start(std::uint32_t nowMs);
+    // True while further scan passes may be started.
+    bool windowOpen(std::uint32_t nowMs) const { return scanning_ && nowMs - startedMs_ < kDurationMs; }
+    void add(const WifiNetwork& network);
+    void finish() { scanning_ = false; }
+    bool scanning() const { return scanning_; }
+    // Sorted by signal strength, strongest first.
+    const std::vector<WifiNetwork>& networks() const { return networks_; }
+
+private:
+    bool scanning_ = false;
+    std::uint32_t startedMs_ = 0;
+    std::vector<WifiNetwork> networks_;
 };

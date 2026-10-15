@@ -155,4 +155,18 @@ std::string configJson(const ConfigView& config) {
     return serialized(document);
 }
 
+std::string wifiScanJson(const WifiScan& scan) {
+    JsonDocument document;
+    document["type"] = "wifi-scan";
+    document["scanning"] = scan.scanning();
+    JsonArray networks = document["networks"].to<JsonArray>();
+    for (const auto& network : scan.networks()) {
+        JsonObject entry = networks.add<JsonObject>();
+        entry["ssid"] = network.ssid;
+        entry["rssi"] = network.rssi;
+        entry["secure"] = network.secure;
+    }
+    return serialized(document);
+}
+
 }  // namespace web

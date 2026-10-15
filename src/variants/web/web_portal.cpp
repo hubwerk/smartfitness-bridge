@@ -87,6 +87,7 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     // Modem sleep must stay enabled while Bluetooth is active (coexistence).
     WiFi.setSleep(true);
     applyMode(policy_.begin(!ssid_.empty(), millis()));
+    api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
 
     AsyncWebServer& server = impl_->server;
     server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -102,6 +103,9 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     server.on("/api/scan/results", HTTP_GET, [this](AsyncWebServerRequest* request) {
         sendJson(request, 200, api_.snapshot(ApiExchange::Snapshot::Scan));
     });
+    server.on("/api/wifi-scan/results", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        sendJson(request, 200, api_.snapshot(ApiExchange::Snapshot::WifiScan));
+    });
     server.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest* request) {
         sendJson(request, 200, api_.snapshot(ApiExchange::Snapshot::Config));
     });
@@ -112,7 +116,8 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     });
 
     static const char* const kPostEndpoints[] = {"scan",   "pair", "unpair",  "connect",       "disconnect",
-                                                 "simulate", "control", "config", "factory-reset", "restart"};
+                                                 "simulate", "control", "config", "factory-reset", "restart",
+                                                 "wifi-scan"};
     for (const char* endpoint : kPostEndpoints) {
         const std::string name = endpoint;
         server.on(
@@ -137,6 +142,11 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
                 if (bodyStatus != 200) {
                     sendJson(request, bodyStatus, bodyStatus == 500 ? "{\"error\":\"body allocation failed\"}" :
                         "{\"error\":\"incomplete or invalid body\"}");
+                    return;
+                }
+                if (name == "wifi-scan") {  // handled by the Wi-Fi manager, not BridgeController
+                    wifiScanRequested_ = true;
+                    sendJson(request, 202, "{\"scanning\":true}");
                     return;
                 }
                 const ApiResponse response = api_.submit(name, bodyOf(request));
@@ -203,12 +213,48 @@ void WebPortal::applyMode(WifiMode mode) {
         impl_->dns.stop();
         impl_->dnsRunning = false;
     }
-    if (wantSta && WiFi.status() != WL_CONNECTED) {
-        WiFi.begin(ssid_.c_str(), password_.empty() ? nullptr : password_.c_str());
-        WiFi.setAutoReconnect(true);
-        Serial.printf("[WiFi] connecting to \"%s\"\n", ssid_.c_str());
-    }
     applied_ = mode;
+    if (wantSta && !wifiScan_.scanning()) beginStation();
+}
+
+void WebPortal::beginStation() {
+    if (WiFi.status() == WL_CONNECTED) return;
+    WiFi.begin(ssid_.c_str(), password_.empty() ? nullptr : password_.c_str());
+    WiFi.setAutoReconnect(true);
+    Serial.printf("[WiFi] connecting to \"%s\"\n", ssid_.c_str());
+}
+
+void WebPortal::updateWifiScan(std::uint32_t now) {
+    if (wifiScanRequested_.exchange(false) && wifiScan_.start(now)) {
+        // A station that is still connecting blocks scans; resume it afterwards.
+        if (applied_ != WifiMode::Ap && WiFi.status() != WL_CONNECTED) WiFi.disconnect();
+        WiFi.scanDelete();
+        lastWifiScanAttemptMs_ = now - kWifiScanRetryMs;
+        api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
+        Serial.println("[WiFi] network scan started");
+    }
+    if (!wifiScan_.scanning()) return;
+    const std::int16_t found = WiFi.scanComplete();
+    if (found == WIFI_SCAN_RUNNING) return;
+    if (found > 0) {
+        for (std::int16_t index = 0; index < found; ++index)
+            wifiScan_.add({WiFi.SSID(index).c_str(), static_cast<int>(WiFi.RSSI(index)),
+                           WiFi.encryptionType(index) != WIFI_AUTH_OPEN});
+        api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
+    }
+    if (found >= 0) WiFi.scanDelete();
+    if (wifiScan_.windowOpen(now)) {
+        if (now - lastWifiScanAttemptMs_ >= kWifiScanRetryMs) {
+            lastWifiScanAttemptMs_ = now;
+            WiFi.scanNetworks(true);
+        }
+        return;
+    }
+    wifiScan_.finish();
+    if (applied_ == WifiMode::Ap) WiFi.enableSTA(false);  // scanning switched the station interface on
+    else beginStation();
+    api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
+    Serial.printf("[WiFi] network scan finished: %u network(s)\n", static_cast<unsigned>(wifiScan_.networks().size()));
 }
 
 NetworkStatus WebPortal::networkStatus() const {
@@ -263,6 +309,7 @@ void WebPortal::loop() {
         lastScanMs_ = now - kScanIntervalMs;
     }
     publish(now);
+    updateWifiScan(now);
     if (impl_->dnsRunning) impl_->dns.processNextRequest();
     if (now - lastPolicyMs_ >= kPolicyIntervalMs) {
         lastPolicyMs_ = now;

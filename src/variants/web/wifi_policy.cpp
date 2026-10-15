@@ -1,5 +1,6 @@
 #include "wifi_policy.h"
 
+#include <algorithm>
 #include <cstdio>
 
 const char* wifiModeName(WifiMode mode) {
@@ -39,4 +40,28 @@ WifiMode WifiPolicy::update(bool stationConnected, int apStations, std::uint32_t
     wasConnected_ = false;
     if (mode_ == WifiMode::Sta && nowMs - disconnectedSinceMs_ >= timing_.fallbackMs) mode_ = WifiMode::ApSta;
     return mode_;
+}
+
+bool WifiScan::start(std::uint32_t nowMs) {
+    if (scanning_) return false;
+    scanning_ = true;
+    startedMs_ = nowMs;
+    networks_.clear();
+    return true;
+}
+
+void WifiScan::add(const WifiNetwork& network) {
+    if (network.ssid.empty() || network.ssid.size() > 32) return;
+    auto existing = std::find_if(networks_.begin(), networks_.end(),
+                                 [&](const WifiNetwork& known) { return known.ssid == network.ssid; });
+    if (existing != networks_.end()) {
+        if (network.rssi <= existing->rssi) return;
+        networks_.erase(existing);
+    } else if (networks_.size() >= kMaxNetworks) {
+        if (network.rssi <= networks_.back().rssi) return;
+        networks_.pop_back();
+    }
+    const auto position = std::find_if(networks_.begin(), networks_.end(),
+                                       [&](const WifiNetwork& known) { return known.rssi < network.rssi; });
+    networks_.insert(position, network);
 }
