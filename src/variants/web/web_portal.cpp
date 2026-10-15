@@ -3,68 +3,306 @@
 #include "web_portal.h"
 
 #include <Arduino.h>
-#include <AsyncTCP.h>
 #include <DNSServer.h>
-#include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_http_server.h>
+#include <esp_https_server.h>
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
 
 #include "generated/web_assets.h"
 #include "config_store.h"
+#include "tls_cert.h"
 #include "web_request.h"
 
 namespace {
 constexpr std::uint16_t kDnsPort = 53;
 constexpr std::uint32_t kPolicyIntervalMs = 1000;
-constexpr const char* kBodyAllocationFailed = "sf-body-allocation-failed";
+// Each TLS session holds ~35 kB of internal RAM (mbedTLS record buffers).
+constexpr std::size_t kMaxHttpsSockets = 4;
+constexpr std::size_t kMaxHttpSockets = 2;
+constexpr std::uint16_t kHttpsCtrlPort = 32768;
+constexpr std::uint16_t kHttpCtrlPort = 32769;
+constexpr std::size_t kMaxSocketFrame = 128;  // clients only listen; anything larger closes the socket
+constexpr int kBodyRecvRetries = 3;
 
-void sendJson(AsyncWebServerRequest* request, int status, const std::string& body) {
-    AsyncWebServerResponse* response = request->beginResponse(status, "application/json", body.c_str());
-    response->addHeader("Cache-Control", "no-store");
-    request->send(response);
+const char* const kPostEndpoints[] = {"scan",     "pair",    "unpair", "connect",       "disconnect", "simulate",
+                                      "control",  "config",  "factory-reset", "restart",    "wifi-scan"};
+
+std::string staIp() { return WiFi.localIP().toString().c_str(); }
+std::string apIp() { return WiFi.softAPIP().toString().c_str(); }
+
+// False if the header is absent; an empty header is present with an empty value.
+bool header(httpd_req_t* request, const char* name, std::string& value) {
+    value.clear();
+    const std::size_t length = httpd_req_get_hdr_value_len(request, name);
+    std::string buffer(length + 1, '\0');
+    if (httpd_req_get_hdr_value_str(request, name, &buffer[0], buffer.size()) != ESP_OK) return false;
+    value.assign(buffer.c_str(), length);
+    return true;
 }
 
-// The library frees _tempObject, so metadata and bytes share one calloc allocation.
-void collectBody(AsyncWebServerRequest* request, std::uint8_t* data, std::size_t length, std::size_t index,
-                 std::size_t total) {
-    if (total > ApiExchange::kMaxBodySize || request->hasHeader("Transfer-Encoding") ||
-        request->getAttribute(kBodyAllocationFailed, false)) return;
-    if (!request->_tempObject) {
-        if (index != 0) return;
-        void* memory = std::calloc(sizeof(web::BodyReceipt) + total + 1, 1);
-        if (!memory) {
-            request->setAttribute(kBodyAllocationFailed, true);
-            return;
-        }
-        request->_tempObject = new (memory) web::BodyReceipt{total, 0, false};
+bool hasHeader(httpd_req_t* request, const char* name) {
+    std::string ignored;
+    return header(request, name, ignored);
+}
+
+std::string pathOf(httpd_req_t* request) {
+    const char* uri = request->uri;
+    return std::string(uri, std::strcspn(uri, "?"));
+}
+
+esp_err_t sendJson(httpd_req_t* request, int status, const std::string& body) {
+    httpd_resp_set_status(request, web::statusLine(status));
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, body.data(), body.size());
+}
+
+esp_err_t redirectTo(httpd_req_t* request, const std::string& location) {
+    httpd_resp_set_status(request, web::statusLine(302));
+    httpd_resp_set_hdr(request, "Location", location.c_str());
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, nullptr, 0);
+}
+
+// Answers and, if the request body was not read, closes the connection
+// instead of draining a body nobody wants.
+esp_err_t reject(httpd_req_t* request, int status, const char* body) {
+    sendJson(request, status, body);
+    return request->content_len > 0 ? ESP_FAIL : ESP_OK;
+}
+
+// Reads exactly Content-Length bytes (max ApiExchange::kMaxBodySize).
+int readBody(httpd_req_t* request, std::string& body) {
+    const std::size_t total = request->content_len;
+    std::string storage(total + 1, '\0');
+    web::BodyReceipt receipt{total, 0, false};
+    char chunk[256];
+    int retries = 0;
+    while (receipt.received < total && !receipt.invalid) {
+        const std::size_t wanted = std::min(sizeof(chunk), total - receipt.received);
+        const int got = httpd_req_recv(request, chunk, wanted);
+        if (got == HTTPD_SOCK_ERR_TIMEOUT && ++retries < kBodyRecvRetries) continue;
+        if (got <= 0) break;
+        receipt.append(&storage[0], chunk, static_cast<std::size_t>(got), receipt.received, total);
     }
-    auto* receipt = static_cast<web::BodyReceipt*>(request->_tempObject);
-    receipt->append(reinterpret_cast<char*>(receipt + 1), data, length, index, total);
+    const int status = web::bodyStatus(&receipt, total, false);
+    if (status == 200) body.assign(storage.c_str(), receipt.received);
+    return status;
 }
 
-std::string bodyOf(AsyncWebServerRequest* request) {
-    if (!request->_tempObject) return std::string();
-    const auto* receipt = static_cast<const web::BodyReceipt*>(request->_tempObject);
-    return std::string(reinterpret_cast<const char*>(receipt + 1), receipt->received);
+// Captive portal: OS connectivity checks and unknown hosts land on the UI.
+esp_err_t notFound(httpd_req_t* request, httpd_err_code_t) {
+    std::string host;
+    header(request, "Host", host);
+    if (request->method == HTTP_GET && !web::ownHost(host, staIp(), apIp()) && (WiFi.getMode() & WIFI_AP))
+        return redirectTo(request, "https://" + apIp() + "/");
+    return reject(request, 404, "{\"error\":\"not found\"}");
+}
+
+// Port 80 only redirects to HTTPS (captive-portal probes included).
+esp_err_t redirectToHttps(httpd_req_t* request) {
+    std::string host;
+    header(request, "Host", host);
+    return redirectTo(request, web::httpsRedirect(host, request->uri, staIp(), apIp()));
 }
 }  // namespace
 
 struct WebPortal::Impl {
-    AsyncWebServer server{80};
-    AsyncWebSocket socket{"/ws"};
+    struct Broadcast {
+        Impl* impl;
+        std::string message;
+    };
+
+    WebPortal& portal;
+    httpd_handle_t https = nullptr;
+    httpd_handle_t http = nullptr;
+    web::TlsIdentity tls;
     DNSServer dns;
     bool dnsRunning = false;
     bool mdnsRunning = false;
     bool scanPending = false;
     bool configPending = false;
+    std::atomic<bool> sending{false};
+
+    explicit Impl(WebPortal& owner) : portal(owner) {}
+
+    static Impl& of(httpd_req_t* request) { return *static_cast<Impl*>(request->user_ctx); }
+
+    static esp_err_t index(httpd_req_t* request) {
+        httpd_resp_set_type(request, "text/html");
+        httpd_resp_set_hdr(request, "Content-Encoding", "gzip");
+        httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
+        return httpd_resp_send(request, reinterpret_cast<const char*>(kIndexHtmlGz), sizeof(kIndexHtmlGz));
+    }
+
+    static esp_err_t apiGet(httpd_req_t* request) {
+        ApiExchange& api = of(request).portal.api_;
+        const std::string path = pathOf(request);
+        if (path == "/api/status") return sendJson(request, 200, api.snapshot(ApiExchange::Snapshot::Status));
+        if (path == "/api/scan/results") return sendJson(request, 200, api.snapshot(ApiExchange::Snapshot::Scan));
+        if (path == "/api/wifi-scan/results")
+            return sendJson(request, 200, api.snapshot(ApiExchange::Snapshot::WifiScan));
+        if (path == "/api/config") return sendJson(request, 200, api.snapshot(ApiExchange::Snapshot::Config));
+        if (path == "/api/result") {
+            char query[64] = {};
+            char id[16] = {};
+            const bool found = httpd_req_get_url_query_str(request, query, sizeof(query)) == ESP_OK &&
+                               httpd_query_key_value(query, "id", id, sizeof(id)) == ESP_OK;
+            const ApiResponse response =
+                api.result(found ? static_cast<std::uint32_t>(std::strtoul(id, nullptr, 10)) : 0);
+            return sendJson(request, response.status, response.body);
+        }
+        return notFound(request, HTTPD_404_NOT_FOUND);
+    }
+
+    static esp_err_t apiPost(httpd_req_t* request) {
+        WebPortal& portal = of(request).portal;
+        const std::string name = pathOf(request).substr(std::strlen("/api/"));
+        bool known = false;
+        for (const char* endpoint : kPostEndpoints) known = known || name == endpoint;
+        if (!known) return reject(request, 404, "{\"error\":\"not found\"}");
+
+        std::string contentType;
+        std::string origin;
+        header(request, "Content-Type", contentType);
+        const bool hasOrigin = header(request, "Origin", origin);
+        const int policy = web::postRequestStatus(contentType, hasOrigin, origin, staIp(), apIp(),
+                                                  hasHeader(request, "Transfer-Encoding"));
+        if (policy != 200) {
+            return reject(request, policy, policy == 415 ? "{\"error\":\"Content-Type must be application/json\"}" :
+                policy == 403 ? "{\"error\":\"foreign origin\"}" : "{\"error\":\"chunked bodies not supported\"}");
+        }
+        if (request->content_len > ApiExchange::kMaxBodySize)
+            return reject(request, 413, "{\"error\":\"request body too large\"}");
+        std::string body;
+        if (readBody(request, body) != 200) {
+            sendJson(request, 400, "{\"error\":\"incomplete or invalid body\"}");
+            return ESP_FAIL;  // the rest of the body is unknown; do not reuse the connection
+        }
+        if (name == "wifi-scan") {  // handled by the Wi-Fi manager, not BridgeController
+            portal.wifiScanRequested_ = true;
+            return sendJson(request, 202, "{\"scanning\":true}");
+        }
+        const ApiResponse response = portal.api_.submit(name, body);
+        return sendJson(request, response.status, response.body);
+    }
+
+    // Server-to-client telemetry on wss://<host>/ws. Clients only listen; requests go through the REST API.
+    static esp_err_t socket(httpd_req_t* request) {
+        if (request->method == HTTP_GET) {  // called right after the handshake
+            std::string origin;
+            if (header(request, "Origin", origin) && !web::trustedOrigin(origin, staIp(), apIp()))
+                return ESP_FAIL;  // closes the socket before anything is sent
+            const std::string status = of(request).portal.api_.snapshot(ApiExchange::Snapshot::Status);
+            httpd_ws_frame_t frame{};
+            frame.final = true;
+            frame.type = HTTPD_WS_TYPE_TEXT;
+            frame.payload = reinterpret_cast<std::uint8_t*>(const_cast<char*>(status.data()));
+            frame.len = status.size();
+            return httpd_ws_send_frame(request, &frame);
+        }
+        httpd_ws_frame_t frame{};
+        if (httpd_ws_recv_frame(request, &frame, 0) != ESP_OK || frame.len > kMaxSocketFrame) return ESP_FAIL;
+        std::uint8_t ignored[kMaxSocketFrame];
+        frame.payload = ignored;
+        return frame.len ? httpd_ws_recv_frame(request, &frame, frame.len) : ESP_OK;
+    }
+
+    // Runs on the HTTPS server task, so TLS sessions are never written concurrently.
+    static void sendBroadcast(void* argument) {
+        std::unique_ptr<Broadcast> job(static_cast<Broadcast*>(argument));
+        httpd_handle_t server = job->impl->https;
+        std::array<int, kMaxHttpsSockets> fds{};
+        std::size_t count = fds.size();
+        if (httpd_get_client_list(server, &count, fds.data()) == ESP_OK) {
+            httpd_ws_frame_t frame{};
+            frame.final = true;
+            frame.type = HTTPD_WS_TYPE_TEXT;
+            frame.payload = reinterpret_cast<std::uint8_t*>(&job->message[0]);
+            frame.len = job->message.size();
+            for (std::size_t i = 0; i < count; ++i) {
+                if (httpd_ws_get_fd_info(server, fds[i]) != HTTPD_WS_CLIENT_WEBSOCKET) continue;
+                if (httpd_ws_send_frame_async(server, fds[i], &frame) == ESP_OK)
+                    httpd_sess_update_lru_counter(server, fds[i]);  // listeners never send; keep them off the LRU purge
+                else
+                    httpd_sess_trigger_close(server, fds[i]);
+            }
+        }
+        job->impl->sending = false;
+    }
 
     bool broadcast(const std::string& message) {
-        if (!web::canBroadcast(socket.count(), socket.availableForWriteAll())) return false;
-        socket.textAll(message.c_str());
+        if (!https) return false;
+        std::array<int, kMaxHttpsSockets> fds{};
+        std::size_t count = fds.size();
+        if (httpd_get_client_list(https, &count, fds.data()) != ESP_OK) return false;
+        std::size_t listeners = 0;
+        for (std::size_t i = 0; i < count; ++i) listeners += httpd_ws_get_fd_info(https, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET;
+        // One broadcast in flight at a time; slow clients make the loop skip updates instead of queueing them.
+        if (!web::canBroadcast(listeners, !sending)) return false;
+        auto* job = new (std::nothrow) Broadcast{this, message};
+        if (!job) return false;
+        sending = true;
+        if (httpd_queue_work(https, sendBroadcast, job) != ESP_OK) {
+            delete job;
+            sending = false;
+            return false;
+        }
+        return true;
+    }
+
+    bool startHttps() {
+        if (!web::loadOrCreateTlsIdentity(std::string(kHostname) + ".local", {192, 168, 4, 1}, tls)) return false;
+        httpd_ssl_config_t config = HTTPD_SSL_CONFIG_DEFAULT();
+        config.cacert_pem = reinterpret_cast<const std::uint8_t*>(tls.certificatePem.c_str());
+        config.cacert_len = tls.certificatePem.size() + 1;
+        config.prvtkey_pem = reinterpret_cast<const std::uint8_t*>(tls.privateKeyPem.c_str());
+        config.prvtkey_len = tls.privateKeyPem.size() + 1;
+        config.port_secure = kHttpsPort;
+        config.httpd.ctrl_port = kHttpsCtrlPort;
+        config.httpd.max_open_sockets = kMaxHttpsSockets;
+        config.httpd.lru_purge_enable = true;
+        config.httpd.uri_match_fn = httpd_uri_match_wildcard;
+        if (httpd_ssl_start(&https, &config) != ESP_OK) {
+            https = nullptr;
+            return false;
+        }
+        const httpd_uri_t handlers[] = {
+            {"/", HTTP_GET, index, this, false, false, nullptr},
+            {"/ws", HTTP_GET, socket, this, true, false, nullptr},
+            {"/api/*", HTTP_GET, apiGet, this, false, false, nullptr},
+            {"/api/*", HTTP_POST, apiPost, this, false, false, nullptr},
+        };
+        for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(https, &handler);
+        httpd_register_err_handler(https, HTTPD_404_NOT_FOUND, notFound);
+        return true;
+    }
+
+    bool startHttpRedirect() {
+        httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+        config.server_port = kHttpPort;
+        config.ctrl_port = kHttpCtrlPort;
+        config.max_open_sockets = kMaxHttpSockets;
+        config.lru_purge_enable = true;
+        config.uri_match_fn = httpd_uri_match_wildcard;
+        if (httpd_start(&http, &config) != ESP_OK) {
+            http = nullptr;
+            return false;
+        }
+        const httpd_uri_t handlers[] = {
+            {"/*", HTTP_GET, redirectToHttps, this, false, false, nullptr},
+            {"/*", HTTP_HEAD, redirectToHttps, this, false, false, nullptr},
+        };
+        for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(http, &handler);
         return true;
     }
 };
@@ -74,7 +312,7 @@ WebPortal::WebPortal(BridgeController& ui, ApiExchange& api) : ui_(ui), api_(api
 void WebPortal::begin(const std::string& ssid, const std::string& password, const std::string& apPassword) {
     if (started_) return;
     started_ = true;
-    impl_ = new Impl;
+    impl_ = new Impl(*this);
     ssid_ = ssid;
     password_ = password;
     apPassword_ = apPassword;
@@ -89,106 +327,11 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     applyMode(policy_.begin(!ssid_.empty(), millis()));
     api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
 
-    AsyncWebServer& server = impl_->server;
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-        AsyncWebServerResponse* response =
-            request->beginResponse(200, "text/html", kIndexHtmlGz, sizeof(kIndexHtmlGz));
-        response->addHeader("Content-Encoding", "gzip");
-        response->addHeader("Cache-Control", "no-cache");
-        request->send(response);
-    });
-    server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        sendJson(request, 200, api_.snapshot(ApiExchange::Snapshot::Status));
-    });
-    server.on("/api/scan/results", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        sendJson(request, 200, api_.snapshot(ApiExchange::Snapshot::Scan));
-    });
-    server.on("/api/wifi-scan/results", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        sendJson(request, 200, api_.snapshot(ApiExchange::Snapshot::WifiScan));
-    });
-    server.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        sendJson(request, 200, api_.snapshot(ApiExchange::Snapshot::Config));
-    });
-    server.on("/api/result", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        const AsyncWebParameter* id = request->getParam("id");
-        const ApiResponse response = api_.result(id ? static_cast<std::uint32_t>(std::strtoul(id->value().c_str(), nullptr, 10)) : 0);
-        sendJson(request, response.status, response.body);
-    });
-
-    static const char* const kPostEndpoints[] = {"scan",   "pair", "unpair",  "connect",       "disconnect",
-                                                 "simulate", "control", "config", "factory-reset", "restart",
-                                                 "wifi-scan"};
-    for (const char* endpoint : kPostEndpoints) {
-        const std::string name = endpoint;
-        server.on(
-            AsyncURIMatcher::exact((std::string("/api/") + name).c_str()), HTTP_POST,
-            [this, name](AsyncWebServerRequest* request) {
-                const bool hasOrigin = request->hasHeader("Origin");
-                const std::string origin = hasOrigin ? request->getHeader("Origin")->value().c_str() : "";
-                const int policy = web::postRequestStatus(request->contentType().c_str(), hasOrigin, origin,
-                    WiFi.localIP().toString().c_str(), WiFi.softAPIP().toString().c_str(),
-                    request->hasHeader("Transfer-Encoding"));
-                if (policy != 200) {
-                    sendJson(request, policy, policy == 415 ? "{\"error\":\"Content-Type must be application/json\"}" :
-                        policy == 403 ? "{\"error\":\"foreign origin\"}" : "{\"error\":\"chunked bodies not supported\"}");
-                    return;
-                }
-                if (request->contentLength() > ApiExchange::kMaxBodySize) {
-                    sendJson(request, 413, "{\"error\":\"request body too large\"}");
-                    return;
-                }
-                const int bodyStatus = web::bodyStatus(static_cast<const web::BodyReceipt*>(request->_tempObject),
-                    request->contentLength(), request->getAttribute(kBodyAllocationFailed, false));
-                if (bodyStatus != 200) {
-                    sendJson(request, bodyStatus, bodyStatus == 500 ? "{\"error\":\"body allocation failed\"}" :
-                        "{\"error\":\"incomplete or invalid body\"}");
-                    return;
-                }
-                if (name == "wifi-scan") {  // handled by the Wi-Fi manager, not BridgeController
-                    wifiScanRequested_ = true;
-                    sendJson(request, 202, "{\"scanning\":true}");
-                    return;
-                }
-                const ApiResponse response = api_.submit(name, bodyOf(request));
-                sendJson(request, response.status, response.body);
-            },
-            nullptr, collectBody);
-    }
-
-    impl_->socket.onEvent([this](AsyncWebSocket*, AsyncWebSocketClient* client, AwsEventType type, void*,
-                                 std::uint8_t*, std::size_t) {
-        // Clients only listen; requests go through the REST API.
-        if (type == WS_EVT_CONNECT) client->text(api_.snapshot(ApiExchange::Snapshot::Status).c_str());
-    });
-    impl_->socket.setFilter([](AsyncWebServerRequest* request) {
-        return !request->hasHeader("Origin") ||
-            web::trustedOrigin(request->getHeader("Origin")->value().c_str(), WiFi.localIP().toString().c_str(),
-                               WiFi.softAPIP().toString().c_str());
-    });
-    server.addHandler(&impl_->socket);
-
-    // Captive portal: OS connectivity checks and unknown hosts land on the UI.
-    const auto redirect = [](AsyncWebServerRequest* request) {
-        request->redirect(String("http://") + WiFi.softAPIP().toString() + "/");
-    };
-    server.on("/generate_204", HTTP_GET, redirect);
-    server.on("/hotspot-detect.html", HTTP_GET, redirect);
-    server.on("/connecttest.txt", HTTP_GET, redirect);
-    server.on("/ncsi.txt", HTTP_GET, redirect);
-    server.onNotFound([](AsyncWebServerRequest* request) {
-        const String host = request->host();
-        const bool foreignHost = host != WiFi.softAPIP().toString() && host != WiFi.localIP().toString() &&
-                                 host != String(kHostname) + ".local";
-        if (request->method() == HTTP_GET && foreignHost && (WiFi.getMode() & WIFI_AP)) {
-            request->redirect(String("http://") + WiFi.softAPIP().toString() + "/");
-            return;
-        }
-        sendJson(request, 404, "{\"error\":\"not found\"}");
-    });
-    server.begin();
+    if (!impl_->startHttps()) Serial.println("[Web] HTTPS server start failed; web UI unavailable");
+    if (!impl_->startHttpRedirect()) Serial.println("[Web] HTTP redirect server start failed");
 
     impl_->mdnsRunning = MDNS.begin(kHostname);
-    if (impl_->mdnsRunning) MDNS.addService("http", "tcp", 80);
+    if (impl_->mdnsRunning) MDNS.addService("https", "tcp", kHttpsPort);
 }
 
 void WebPortal::applyMode(WifiMode mode) {
@@ -206,7 +349,7 @@ void WebPortal::applyMode(WifiMode mode) {
             impl_->dns.setErrorReplyCode(DNSReplyCode::NoError);
             impl_->dnsRunning = impl_->dns.start(kDnsPort, "*", WiFi.softAPIP());
         }
-        Serial.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at http://%s/\n", apSsid_.c_str(),
+        Serial.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at https://%s/\n", apSsid_.c_str(),
                       apPassword_ == BridgeConfig{}.apPassword ? apPassword_.c_str() : "(custom)",
                       WiFi.softAPIP().toString().c_str());
     } else if (impl_ && impl_->dnsRunning) {
@@ -313,7 +456,6 @@ void WebPortal::loop() {
     if (impl_->dnsRunning) impl_->dns.processNextRequest();
     if (now - lastPolicyMs_ >= kPolicyIntervalMs) {
         lastPolicyMs_ = now;
-        impl_->socket.cleanupClients();
         const int stations = applied_ != WifiMode::Sta ? WiFi.softAPgetStationNum() : 0;
         const WifiMode mode = policy_.update(WiFi.status() == WL_CONNECTED, stations, now);
         if (mode != applied_) applyMode(mode);

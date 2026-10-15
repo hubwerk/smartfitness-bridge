@@ -582,12 +582,13 @@ void testRequestProtection() {
         return web::postRequestStatus(type, present, origin, "192.168.1.12", "192.168.4.1");
     };
     assert(policy("application/json", "", false) == 200);
-    for (const auto* origin : {"http://smartfitness.local", "http://smartfitness.local:80",
-                              "http://192.168.1.12", "http://192.168.4.1"})
+    for (const auto* origin : {"https://smartfitness.local", "https://smartfitness.local:443",
+                              "https://192.168.1.12", "https://192.168.4.1"})
         assert(policy(" Application/JSON; charset=utf-8", origin) == 200);
-    for (const auto* origin : {"", "null", "https://smartfitness.local", "http://smartfitness.local.evil",
-                              "http://smartfitness.local@evil", "http://smartfitness.local:8080",
-                              "http://smartfitness.local/", "http://192.168.1.13", "http://0.0.0.0"})
+    for (const auto* origin : {"", "null", "http://smartfitness.local", "http://smartfitness.local:80",
+                              "http://192.168.4.1", "https://smartfitness.local.evil",
+                              "https://smartfitness.local@evil", "https://smartfitness.local:8443",
+                              "https://smartfitness.local/", "https://192.168.1.13", "https://0.0.0.0"})
         assert(policy("application/json", origin) == 403);
     for (const auto* type : {"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data",
                             "application/jsonp"})
@@ -597,6 +598,30 @@ void testRequestProtection() {
     assert(!web::canBroadcast(0, true));
     assert(!web::canBroadcast(1, false));
     assert(web::canBroadcast(2, true));
+}
+
+void testHttpsRedirect() {
+    const auto redirect = [](const std::string& host, const std::string& uri, const std::string& sta = "192.168.1.12",
+                             const std::string& ap = "192.168.4.1") {
+        return web::httpsRedirect(host, uri, sta, ap);
+    };
+    assert(web::hostName("192.168.4.1:80") == "192.168.4.1");
+    assert(web::ownHost("smartfitness.local:80", "", "192.168.4.1"));
+    assert(!web::ownHost("0.0.0.0", "0.0.0.0", ""));
+    assert(redirect("smartfitness.local", "/") == "https://smartfitness.local/");
+    assert(redirect("192.168.1.12:80", "/api/status?x=1") == "https://192.168.1.12/api/status?x=1");
+    assert(redirect("192.168.4.1", "/generate_204") == "https://192.168.4.1/generate_204");
+    // Captive-portal probes for foreign hosts and odd paths land on the UI root.
+    assert(redirect("connectivitycheck.gstatic.com", "/generate_204") == "https://192.168.4.1/");
+    assert(redirect("", "/") == "https://192.168.4.1/");
+    assert(redirect("evil.example", "/", "192.168.1.12", "0.0.0.0") == "https://192.168.1.12/");
+    assert(redirect("smartfitness.local", "//evil.example/") == "https://smartfitness.local/");
+    assert(redirect("smartfitness.local", "/a\r\nSet-Cookie: x") == "https://smartfitness.local/");
+    assert(redirect("smartfitness.local", "") == "https://smartfitness.local/");
+
+    assert(std::string(web::statusLine(202)) == "202 Accepted");
+    assert(std::string(web::statusLine(415)) == "415 Unsupported Media Type");
+    assert(std::string(web::statusLine(418)) == "500 Internal Server Error");
 }
 
 void testBodyReceipt() {
@@ -652,4 +677,5 @@ void runWebTests() {
     testWifiScan();
     testRequestProtection();
     testBodyReceipt();
+    testHttpsRedirect();
 }

@@ -1,12 +1,16 @@
 #pragma once
 
-// Wi-Fi + HTTP/WebSocket front end (firmware only).
+// Wi-Fi + HTTPS/WebSocket front end (firmware only).
 //  * Wi-Fi: SoftAP "SmartFitness-XXXX" (WPA2) with captive portal when no
 //    credentials are stored, station mode otherwise with AP fallback
 //    (WifiPolicy). mDNS "smartfitness.local".
-//  * ESPAsyncWebServer runs on the AsyncTCP task: handlers only read
-//    snapshots or enqueue requests in ApiExchange; the main loop executes
-//    them through BridgeController and publishes fresh snapshots via loop().
+//  * ESP-IDF esp_https_server on port 443 with the device's self-signed,
+//    never-expiring certificate (tls_cert.h) serves the UI, REST API and
+//    wss://.../ws. Port 80 only redirects to HTTPS (captive portal included).
+//  * Handlers run on the HTTPS server task and only read snapshots or
+//    enqueue requests in ApiExchange; the main loop executes them through
+//    BridgeController and publishes fresh snapshots via loop(). WebSocket
+//    broadcasts are queued onto the server task (httpd_queue_work).
 //  * Wi-Fi network scan (POST /api/wifi-scan): the main loop runs async scan
 //    passes for WifiScan::kDurationMs and publishes the merged networks.
 
@@ -24,6 +28,8 @@
 class WebPortal {
 public:
     static constexpr const char* kHostname = "smartfitness";
+    static constexpr std::uint16_t kHttpsPort = 443;
+    static constexpr std::uint16_t kHttpPort = 80;  // redirects to HTTPS
     static constexpr std::uint32_t kStatusIntervalMs = 250;  // WebSocket push <= 4 Hz
     static constexpr std::uint32_t kScanIntervalMs = 1000;
     static constexpr std::uint32_t kWifiScanRetryMs = 500;

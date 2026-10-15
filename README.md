@@ -39,8 +39,8 @@ passed both host tests and firmware build; the badge above tracks CI.
 | PlatformIO env | `esp32s3dev` (default) | `crowpanel128` |
 | Build flag | `-DSF_VARIANT_WEB` | `-DSF_VARIANT_HMI` |
 | Board | ESP32-S3 DevKitC-1 N16R8 | ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display (ESP32-S3R8, 8 MB PSRAM, 16 MB flash) |
-| User interface | Wi-Fi + web UI + REST/WebSocket API + Serial console | LVGL UI on the 240×240 round display (knob + touch) + Serial console |
-| Extra libraries | ArduinoJson, AsyncTCP, ESPAsyncWebServer | LVGL, LovyanGFX, Adafruit NeoPixel |
+| User interface | Wi-Fi + HTTPS web UI + REST/WebSocket API + Serial console | LVGL UI on the 240×240 round display (knob + touch) + Serial console |
+| Extra libraries | ArduinoJson (HTTPS server: ESP-IDF `esp_https_server` from the core) | LVGL, LovyanGFX, Adafruit NeoPixel |
 | Amazon Affiliate Link | Anzeige: https://link.amazon/B04sCBCRH | Anzeige: https://link.amazon/B0eHDSltG |
 
 Exactly one variant flag must be defined; `include/variant.h` stops the build with
@@ -214,8 +214,8 @@ flowchart TD
     NC["NimbleCentral: BLE callbacks + central worker"]
     FP["FTMS peripheral callbacks"]
   end
-  subgraph wifi["Wi-Fi / AsyncTCP task"]
-    HTTP["WebPortal HTTP / WebSocket handlers"]
+  subgraph wifi["Wi-Fi / HTTPS server task"]
+    HTTP["WebPortal HTTPS / WebSocket handlers"]
   end
   NC --> SQ["Bounded scan / event queues"]
   FP --> CQ["Bounded Control Point queue + atomic connection state"]
@@ -240,7 +240,7 @@ flowchart TD
   OUT --> FP
 ```
 
-The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent and LVGL runs on the main loop, pushing `Command`s into a bounded queue that the loop executes. Everything that runs on the Arduino `loop()` – the core, the adapters' protocol logic, the command executor – is single-threaded. BLE callbacks (NimBLE host task and the central worker task) and HTTP/WebSocket handlers (AsyncTCP task) only push into bounded, lock-protected queues; the loop drains them.
+The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent and LVGL runs on the main loop, pushing `Command`s into a bounded queue that the loop executes. Everything that runs on the Arduino `loop()` – the core, the adapters' protocol logic, the command executor – is single-threaded. BLE callbacks (NimBLE host task and the central worker task) and HTTPS/WebSocket handlers (`esp_https_server` task) only push into bounded, lock-protected queues; the loop drains them.
 
 - `smartfitness::BridgeCore` (`include/core/bridge/bridge_core.hpp`): one canonical core header shared by firmware and host tests. Tracks disconnected, connected/read-only, trainer, and control-ready states.
 - `BtDeviceAdapter`: equipment input interface. Implementations: `SimulatedDeviceAdapter`, `BleInputAdapter` (real BLE devices) and `InputSelector`, which forwards to the BLE input when a device is paired and BLE input is enabled, otherwise to the simulation.
@@ -249,7 +249,7 @@ The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent 
 - `AntOutput` / `FtmsOutput`: independent outputs. `AntOutput` is still a placeholder; `FtmsOutput` is a working BLE FTMS peripheral (see below).
 - FTMS codec (`include/core/ftms/ftms_codec.hpp`): pure C++ encoding/decoding of FTMS characteristics, used by both the output and the FTMS input.
 - `BridgeController` (`include/core/bridge_controller.h`): the variant-neutral command executor. The Serial console, the web API and the HMI all produce `Command` values (`include/core/bridge_commands.h`) and run them through `BridgeController::execute`; it also builds the status/scan/config view model (`include/core/bridge_view_model.h`).
-- Web variant: `web_json` (`include/variants/web/web_json.h`) renders the view model as JSON; `ApiExchange` (`include/variants/web/web_api.h`) validates API JSON and hands jobs to the loop; `WebPortal` (`include/variants/web/web_portal.h`, firmware only) owns Wi-Fi, DNS/captive portal, mDNS and the HTTP/WebSocket server; `WifiPolicy` (`include/variants/web/wifi_policy.h`) decides AP/STA/fallback.
+- Web variant: `web_json` (`include/variants/web/web_json.h`) renders the view model as JSON; `ApiExchange` (`include/variants/web/web_api.h`) validates API JSON and hands jobs to the loop; `WebPortal` (`include/variants/web/web_portal.h`, firmware only) owns Wi-Fi, DNS/captive portal, mDNS and the HTTPS/WebSocket server (plus the port-80 redirect); `tls_cert` (`include/variants/web/tls_cert.h`) creates and stores the self-signed certificate; `WifiPolicy` (`include/variants/web/wifi_policy.h`) decides AP/STA/fallback.
 - HMI variant: `hmi::Model` (pure C++, host-tested) turns the view model into screen content and UI actions into `Command`s; `HmiUi` builds the LVGL screens; `hmi_hal` drives display, touch, encoder, backlight and LED ring.
 - `ConfigStore` (`include/core/config_store.h`): configuration persisted through a `ConfigBackend` (NVS on the firmware, memory in host tests). See [Persistent configuration](#persistent-configuration).
 - `smartfitness::FtmsRoles` (`include/core/bridge/ftms_roles.hpp`): independent input/output role flags. `ftms.input` now means "use the paired BLE device as input (auto-connect)".
@@ -260,7 +260,9 @@ The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent 
    it opens the WPA2 SoftAP **`SmartFitness-XXXX`** (`XXXX` is the last two MAC
    bytes) with default password **`smartfitness`**.
 2. Join that network. Captive-portal DNS and OS probe redirects should open the
-   UI; if not, open **`http://192.168.4.1/`** (or the AP IP printed on Serial).
+   UI; if not, open **`https://192.168.4.1/`** (or the AP IP printed on Serial).
+   The browser warns about the self-signed certificate once; see
+   [HTTPS and the self-signed certificate](#https-and-the-self-signed-certificate).
 3. Open **Settings**, enter the home Wi-Fi SSID and password, and choose a new AP
    password (8–63 printable ASCII characters). Click **Save**, wait for the result,
    then **Restart**. Console equivalent:
@@ -272,17 +274,18 @@ The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent 
    ```
    Use the web UI for SSIDs containing spaces. `wifi <ssid>` sets an open network;
    `wifi-clear`, then `save` and `restart`, restores AP-only operation.
-4. On the home network, open **`http://smartfitness.local/`** (mDNS) or the station
+4. On the home network, open **`https://smartfitness.local/`** (mDNS) or the station
    IP. If STA fails to connect within **20 s** at boot or after link loss, the AP
    is added (AP+STA); STA keeps retrying. After STA has been connected for **2 min**
    and no AP clients remain, the fallback AP closes. Policy is checked once/second.
 
 **Security warning:** change the shared default password before normal use.
-The HTTP API has **no authentication or TLS**; anyone on the AP/home network can
+The web UI and API are encrypted with TLS (HTTPS, self-signed certificate) but have
+**no authentication**; anyone on the AP/home network can
 control, pair, erase settings, or restart the bridge. Do not port-forward it or
 use an untrusted network. POST requests require `Content-Type: application/json`,
-even with no body. A supplied `Origin` must be `http://smartfitness.local`, the
-current STA IP, or the SoftAP IP (optional `:80`); foreign/null origins are rejected.
+even with no body. A supplied `Origin` must be `https://smartfitness.local`, the
+current STA IP, or the SoftAP IP (optional `:443`); foreign/null and `http://` origins are rejected.
 No CORS access is enabled. This blocks browser CSRF, **not** clients already on
 your network; there is no API token. WebSocket upgrades also reject foreign origins.
 Passwords are never returned by API snapshots/results. Serial prints only the
@@ -292,6 +295,39 @@ AP passwords must be 8–63 printable ASCII characters. Invalid stored AP passwo
 fall back to the default while preserving other valid settings; a failed SoftAP
 start is logged and retried with the default. Change that default before normal use.
 Wi-Fi/AP edits (including factory reset) require a restart to change the running network.
+
+### HTTPS and the self-signed certificate
+
+- The web UI, REST API and WebSocket (`wss://<host>/ws`) are served only over
+  **HTTPS on port 443** (ESP-IDF `esp_https_server`, TLS 1.2). Port 80 only answers
+  with `302` redirects to the same path on HTTPS; captive-portal probes and foreign
+  hosts are sent to `https://<SoftAP IP>/`.
+- On first boot each bridge generates its own **ECDSA P-256** key and a
+  **self-signed** X.509 v3 certificate with its hardware RNG (takes about a second;
+  Serial shows `[Web] generating self-signed TLS certificate`). Subject/SAN:
+  `smartfitness.local`, SAN IP `192.168.4.1` (SoftAP); `CA:FALSE`, `serverAuth`.
+- The certificate **never expires**: it is valid from 2025-01-01 until
+  `9999-12-31 23:59:59 UTC`, the RFC 5280 value for "no well-defined expiration
+  date". The bridge has no real-time clock, so this also avoids clock-related errors.
+- Key and certificate are stored in NVS namespace `sftls`, separate from the
+  configuration: factory reset, configuration changes and firmware updates keep
+  them (and the browser exception). Only erasing the whole flash
+  (`pio run -t erase`) creates a new certificate. The private key is stored
+  unencrypted in flash (no flash encryption).
+- Browsers show a warning such as *"Your connection is not private"* because no
+  public CA signed the certificate. Check the certificate details and accept the
+  exception once per browser (*Advanced → Proceed*). The connection is still
+  encrypted; without verifying the certificate the browser cannot rule out an
+  attacker on the same network. Optionally import the certificate (download it via
+  the browser's certificate viewer) as trusted for `smartfitness.local`; Apple
+  devices reject trusted TLS certificates valid for more than 825 days, so there
+  the exception remains the way to go. A station IP is not in the SAN, so
+  `https://<station IP>/` always shows the warning.
+- Captive-portal mini browsers (Android/iOS sign-in pop-ups) may refuse the
+  self-signed certificate; open `https://192.168.4.1/` in the normal browser instead.
+- Each TLS session uses about 35 kB of internal RAM; the server keeps at most
+  **4** HTTPS connections (least-recently-used ones are closed first; WebSocket
+  listeners count as recently used on every broadcast) and 2 redirect connections.
 
 ## Pairing walkthrough
 
@@ -449,7 +485,9 @@ The single-page app (`src/variants/web/assets/index.html`, web variant only, pla
 
 ## REST / WebSocket API
 
-HTTP runs on port 80. POST bodies are JSON objects (max. **1024 bytes**, nesting
+The API runs on HTTPS port 443 (`https://smartfitness.local/api/...`, WebSocket
+`wss://smartfitness.local/ws`); port 80 only redirects. Self-signed certificate:
+use e.g. `curl --cacert bridge.pem` or `curl -k`. POST bodies are JSON objects (max. **1024 bytes**, nesting
 limit 2, unknown keys rejected); an empty body is treated as `{}`. All POSTs
 require `Content-Type: application/json` (an optional charset parameter is allowed)
 and a trusted Origin if supplied, including bodyless endpoints. Chunked transfer
@@ -761,7 +799,7 @@ Normalized units: speed in km/h, cadence in rpm, power in watts, heart rate in b
 | Serial | 96-character command; at most 64 input characters consumed/loop |
 | Configuration | One NVS blob ≤ 256 B; maximum valid v3 record 252 B |
 
-NimBLE host callbacks/central worker and AsyncTCP handlers hand off through
+NimBLE host callbacks/central worker and HTTPS server handlers hand off through
 bounded queues/locked caches; the bridge and codecs run cooperatively in the
 main loop (5 ms delay). Central connect/discovery work uses a worker task with
 a 6144-byte stack pinned to core 1. Queue overflow is not a delivery guarantee;
@@ -814,12 +852,13 @@ and `variant-guard` checks that `include/variant.h` rejects zero or two variant 
 They cover core gating/disconnects, FTMS codec/control flow, config round trips,
 v1 migration/CRC/validation/write avoidance, BLE registry/codecs/reconnect/stale
 handling, console/API validation, POST origin/content-type checks, fragmented-body
-validation/allocation-error decisions, AP-password fallback, lifecycle priority
+validation/allocation-error decisions, HTTP-to-HTTPS redirect targets, AP-password fallback, lifecycle priority
 and queue rejection, and Wi-Fi policy. They do not run the
-real NimBLE/AsyncTCP/Wi-Fi transports. There is no separate documentation linter.
+real NimBLE/HTTPS/Wi-Fi transports. There is no separate documentation linter.
 Hardware verification is still required for rapid A→B switching and cancellation
 during BLE connection/discovery, full-queue command handling on FreeRTOS,
-fragmented HTTP requests/heap exhaustion, slow/multiple WebSocket clients, and
+fragmented HTTP requests/heap exhaustion, TLS handshake time and internal-RAM use with
+BLE active, slow/multiple WebSocket clients, and
 SoftAP failure/fallback with simultaneous BLE/Wi-Fi activity. Host regressions
 verify the state machines and pure validation helpers, not radio/transport timing.
 
@@ -835,8 +874,7 @@ and `.pio/` are gitignored; edit the HTML, not the generated header.
 |---|---|
 | Arduino-ESP32 core | **2.0.17** compatibility baseline; supplied by the resolved `espressif32` platform, not directly pinned |
 | NimBLE-Arduino | **1.4.3**, pinned; 1.x APIs match core 2.0.17, NimBLE 2.x needs core 3.x |
-| ESPAsyncWebServer | **3.12.1**, pinned; async HTTP/WebSocket handling with bounded main-loop handoff |
-| AsyncTCP | **3.5.0**, pinned; networking backend for ESPAsyncWebServer |
+| ESP-IDF `esp_https_server` / mbedTLS | Part of core 2.0.17 (ESP-IDF 4.4, mbedTLS 2.28); HTTPS/WSS server and certificate generation |
 | ArduinoJson | **7.4.3**, pinned; web variant API JSON validation and rendering |
 | LVGL | **9.2.2**, pinned; HMI variant UI (also used by the host simulator) |
 | LovyanGFX | **1.2.7**, pinned; HMI variant GC9A01 display driver, builds on core 2.0.17 |

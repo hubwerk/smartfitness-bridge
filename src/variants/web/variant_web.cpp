@@ -1,4 +1,4 @@
-// Web variant hooks: Wi-Fi + captive portal + async web server (WebPortal)
+// Web variant hooks: Wi-Fi + captive portal + HTTPS web server (WebPortal)
 // with the REST/WebSocket API (ApiExchange) on top of the shared controller.
 #ifdef ARDUINO
 
@@ -23,7 +23,7 @@ void begin(BridgeController& controller, const BridgeConfig& config) {
     static WebPortal portal(controller, webApi);
     webPortal = &portal;
     webPortal->begin(config.wifiSsid, config.wifiPassword, config.apPassword);
-    Serial.println("[Web] http://smartfitness.local/ (or the address shown above)");
+    Serial.println("[Web] https://smartfitness.local/ (or the address shown above; self-signed certificate)");
 }
 
 void loop(BridgeController& controller) {
