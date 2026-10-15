@@ -7,9 +7,12 @@
 //  * ESPAsyncWebServer runs on the AsyncTCP task: handlers only read
 //    snapshots or enqueue requests in ApiExchange; the main loop executes
 //    them through BridgeController and publishes fresh snapshots via loop().
+//  * Wi-Fi network scan (POST /api/wifi-scan): the main loop runs async scan
+//    passes for WifiScan::kDurationMs and publishes the merged networks.
 
 #ifdef ARDUINO
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 
@@ -23,6 +26,7 @@ public:
     static constexpr const char* kHostname = "smartfitness";
     static constexpr std::uint32_t kStatusIntervalMs = 250;  // WebSocket push <= 4 Hz
     static constexpr std::uint32_t kScanIntervalMs = 1000;
+    static constexpr std::uint32_t kWifiScanRetryMs = 500;
 
     WebPortal(BridgeController& ui, ApiExchange& api);
     // Starts Wi-Fi and the server; credentials come from the configuration.
@@ -37,6 +41,8 @@ private:
     void applyMode(WifiMode mode);
     void publish(std::uint32_t now);
     NetworkStatus networkStatus() const;
+    void beginStation();
+    void updateWifiScan(std::uint32_t now);
 
     BridgeController& ui_;
     ApiExchange& api_;
@@ -53,6 +59,9 @@ private:
     std::uint32_t lastPolicyMs_ = 0;
     std::string lastScanJson_;
     std::string lastConfigJson_;
+    std::atomic<bool> wifiScanRequested_{false};
+    WifiScan wifiScan_;
+    std::uint32_t lastWifiScanAttemptMs_ = 0;
 };
 
 #endif  // ARDUINO

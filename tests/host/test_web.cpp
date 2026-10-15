@@ -539,6 +539,44 @@ void testWifiPolicy() {
     assert(std::string(wifiModeName(WifiMode::ApSta)) == "ap+sta");
 }
 
+void testWifiScan() {
+    WifiScan scan;
+    auto document = parse(web::wifiScanJson(scan));
+    assert(document["type"] == "wifi-scan");
+    assert(document["scanning"] == false);
+    assert(document["networks"].as<JsonArrayConst>().size() == 0);
+
+    assert(scan.start(1000));
+    assert(!scan.start(2000));  // already running
+    assert(scan.windowOpen(1000 + WifiScan::kDurationMs - 1));
+    assert(!scan.windowOpen(1000 + WifiScan::kDurationMs));
+    scan.add({"Home", -70, true});
+    scan.add({"Cafe", -50, false});
+    scan.add({"", -30, false});                     // hidden network
+    scan.add({std::string(33, 'x'), -30, false});   // invalid SSID length
+    scan.add({"Home", -80, false});                 // weaker duplicate ignored
+    scan.add({"Home", -40, true});                  // stronger duplicate replaces
+    document = parse(web::wifiScanJson(scan));
+    assert(document["scanning"] == true);
+    JsonArrayConst networks = document["networks"].as<JsonArrayConst>();
+    assert(networks.size() == 2);
+    assert(networks[0]["ssid"] == "Home" && networks[0]["rssi"] == -40 && networks[0]["secure"] == true);
+    assert(networks[1]["ssid"] == "Cafe" && networks[1]["secure"] == false);
+
+    for (int index = 0; index < 40; ++index) scan.add({"net" + std::to_string(index), -90 + index, true});
+    assert(scan.networks().size() == WifiScan::kMaxNetworks);
+    assert(scan.networks().front().ssid == "Home");
+    assert(scan.networks().back().rssi >= -90 + 40 - static_cast<int>(WifiScan::kMaxNetworks));
+    scan.finish();
+    assert(!scan.scanning() && !scan.windowOpen(1001));
+    assert(scan.start(50000) && scan.networks().empty());  // a new window clears old results
+
+    ApiExchange api;
+    assert(api.snapshot(ApiExchange::Snapshot::WifiScan) == "{}");
+    api.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(scan));
+    assert(parse(api.snapshot(ApiExchange::Snapshot::WifiScan))["type"] == "wifi-scan");
+}
+
 void testRequestProtection() {
     const auto policy = [](const std::string& type, const std::string& origin, bool present = true) {
         return web::postRequestStatus(type, present, origin, "192.168.1.12", "192.168.4.1");
@@ -611,6 +649,7 @@ void runWebTests() {
     testApiBleQueueRejections();
     testJsonViews();
     testWifiPolicy();
+    testWifiScan();
     testRequestProtection();
     testBodyReceipt();
 }

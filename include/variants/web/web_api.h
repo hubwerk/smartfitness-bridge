@@ -33,7 +33,7 @@ public:
     static constexpr std::size_t kQueueCapacity = 8;
     static constexpr std::size_t kResultCapacity = 16;
 
-    enum class Snapshot : std::uint8_t { Status, Scan, Config, Count };
+    enum class Snapshot : std::uint8_t { Status, Scan, Config, WifiScan, Count };
 
     struct Job {
         std::uint32_t id = 0;

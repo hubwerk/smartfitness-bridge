@@ -61,6 +61,11 @@ CONFIG = {
     "antRequiresHardware": True, "simulatedTrainer": True, "wifiSsid": "Training room",
     "wifiPasswordSet": True, "apPasswordDefault": True, "unsaved": False,
 }
+WIFI_SCAN = {
+    "type": "wifi-scan", "scanning": False,
+    "networks": [{"ssid": "Training room", "rssi": -45, "secure": True},
+                 {"ssid": "Guest", "rssi": -71, "secure": False}],
+}
 
 
 def failure_status():
@@ -125,7 +130,7 @@ def render(browser, output, name, width, height):
     context = browser.new_context(viewport={"width": width, "height": height},
                                   device_scale_factor=1, reduced_motion="reduce")
     page = context.new_page()
-    errors, external, commands, sockets, results = [], [], [], [], {}
+    errors, external, commands, sockets, results, wifi_scans = [], [], [], [], {}, []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("websocket", lambda ws: external.append(ws.url)
             if ws.url != "ws://bridge.test/ws" else None)
@@ -147,6 +152,10 @@ def render(browser, output, name, width, height):
         if url.path == "/":
             request_route.fulfill(body=ASSET.read_text(), content_type="text/html")
             return
+        if request.method == "POST" and url.path == "/api/wifi-scan":
+            wifi_scans.append(request.post_data_json)
+            request_route.fulfill(status=202, json={"scanning": True})
+            return
         if request.method == "POST":
             endpoint = url.path.removeprefix("/api/")
             commands.append((endpoint, request.post_data_json))
@@ -161,7 +170,8 @@ def render(browser, output, name, width, height):
                 page.evaluate(
                     "(result) => setTimeout(() => window.__fixtureResult(result), 50)", result)
             return
-        fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": CONFIG}
+        fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": CONFIG,
+                    "/api/wifi-scan/results": WIFI_SCAN}
         if url.path == "/api/result":
             request_route.fulfill(json=results[int(parse_qs(url.query)["id"][0])])
         elif url.path in fixtures:
@@ -313,6 +323,40 @@ def render(browser, output, name, width, height):
         "ftmsName": "Test treadmill", "ftmsOutput": False, "ftmsOutputProfile": "treadmill",
         "ant": False, "simulatedTrainer": False, "wifiSsid": "Training room", "save": True,
         "wifiPassword": "test-fixture-only"}), commands[-1]
+    # Wi-Fi scan: spinner while busy, then a listbox under the SSID field.
+    ssid, wifi_list, wifi_button = (page.locator("#c-wifiSsid"), page.locator("#wifi-list"),
+                                    page.locator("#btn-wifi-scan"))
+    expect(wifi_list).to_be_hidden()
+    wifi_button.click()
+    expect(wifi_button).to_have_attribute("aria-busy", "true")
+    expect(wifi_button.locator(".spin")).to_be_visible()
+    expect(wifi_list).to_be_visible()
+    expect(wifi_button).to_have_attribute("aria-busy", "false")
+    expect(wifi_button.locator(".spin")).to_be_hidden()
+    assert wifi_scans == [{}], wifi_scans
+    expect(ssid).to_have_attribute("aria-expanded", "true")
+    expect(wifi_list.get_by_role("option")).to_have_count(2)
+    expect(wifi_list.get_by_role("option").first).to_contain_text("-45 dBm · secured")
+    # Signal pictogram: same thresholds as hmi::signalLevel (-45 dBm -> 4, -71 dBm -> 2).
+    assert wifi_list.locator(".bars").evaluate_all(
+        "bars => bars.map(b => [b.dataset.level, b.querySelectorAll('i.on').length, "
+        "b.getAttribute('aria-hidden')])") == [["4", 4, "true"], ["2", 2, "true"]]
+    check_view(page, "set", width < 650)
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowDown")
+    expect(ssid).to_have_attribute("aria-activedescendant", "wifi-opt-1")
+    page.keyboard.press("Enter")
+    expect(ssid).to_have_value("Guest")
+    expect(wifi_list).to_be_hidden()
+    expect(page.locator("#c-wifiPassword")).to_be_focused()
+    ssid.click()
+    expect(wifi_list).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(wifi_list).to_be_hidden()
+    ssid.click()
+    wifi_list.get_by_role("option").first.click()
+    expect(ssid).to_have_value("Training room")
+    expect(wifi_list).to_be_hidden()
     for button, endpoint in [("btn-restart", "restart"), ("btn-reset", "factory-reset")]:
         page.once("dialog", lambda dialog: dialog.accept())
         command(page.locator(f"#{button}"), endpoint)
