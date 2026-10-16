@@ -24,6 +24,9 @@ section{display:none}section.active{display:block}section h2{margin:0 0 16px;fon
 .label{color:var(--muted);font-size:18px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
 .pill{display:inline-block;padding:3px 12px;border-radius:18px;background:var(--tan);color:#000;font-size:16px;margin:3px 4px 3px 0;overflow-wrap:anywhere}
 .pill.ok{background:var(--ok);color:#000}.pill.bad{background:var(--bad);color:#000}.pill.warn{background:var(--warn);color:#000}
+.service-pills{display:flex;flex-wrap:wrap;gap:4px;min-width:0}.service-pills .pill{margin:2px 0;text-transform:uppercase}.pill.sensor{background:var(--violet)}.pill.pending{background:var(--tan)}
+.service-options{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.service-options button{font:18px Antonio,"Arial Narrow",sans-serif;text-transform:uppercase;min-height:44px;border:0;border-radius:24px;padding:8px 16px;background:var(--tan);color:#000}.service-options button[aria-pressed="true"]{background:var(--gold)}.service-options button:disabled{opacity:.65}.service-options button.required{opacity:1}
+button.b.service-action{background:var(--muted)}.service-note{text-transform:uppercase;color:var(--light)}.service-note.bad{color:var(--bad)}[hidden]{display:none!important}
 button.b{background:var(--acc);color:#000;border:0;border-radius:22px;padding:8px 20px;min-height:44px;font:18px Antonio,"Arial Narrow",sans-serif;text-transform:uppercase;cursor:pointer;margin:2px}button.b.sec{background:var(--light)}button.b.danger{background:var(--bad)}
 button:disabled{opacity:.4;cursor:default}input,select{background:#000;color:var(--fg);border:2px solid var(--violet);border-radius:0;padding:8px 10px;font:18px Antonio,"Arial Narrow",sans-serif;min-height:44px;max-width:100%;min-width:0}
 input[type="checkbox"]{accent-color:var(--acc);width:24px;min-height:24px}input:focus,select:focus{border-color:var(--acc)}
@@ -74,6 +77,8 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 <section id="dev" role="tabpanel" aria-labelledby="tab-dev" tabindex="0" hidden>
  <h2>02 / Device registry</h2>
  <div class="card"><div class="label">Paired device</div><div id="paired">none</div>
+  <div class="label">Advertised services</div><div id="paired-advertised" class="service-pills"></div>
+  <div class="label">Subscribed characteristics</div><div id="paired-subscriptions" class="service-pills"></div>
   <div class="row"><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
  <div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
   <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
@@ -95,6 +100,12 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
   <div class="row"><label for="c-ftmsName">FTMS output name</label><input id="c-ftmsName" maxlength="20"></div>
   <div class="row"><label for="c-ftmsOutputProfile">Output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option><option value="step-climber">Step climber</option><option value="stair-climber">Stair climber</option></select></div>
   <p class="small">Every profile is sent with its native FTMS data characteristic or ANT+ FE-C equipment type. The dashboard shows the effective profile.</p>
+  <div class="label">BLE output services</div><div id="c-ftmsServices" class="service-options" role="group" aria-label="BLE output services"></div>
+  <div id="ftms-service-state" class="service-pills" aria-label="BLE service state"></div>
+  <p id="c-ftmsRestart" class="small service-note">Save + restart after changing BLE services; re-pair your client.</p>
+  <div id="ant-services" hidden><div class="label">ANT+ output channels</div><div id="c-antServices" class="service-options" role="group" aria-label="ANT+ output channels"></div>
+  <div id="ant-service-state" class="service-pills" aria-label="ANT+ channel state"></div>
+  <p id="c-antWarning" class="small service-note bad" role="status" hidden>FE-C + Power duplicates power. Pair only one power source in your app.</p></div>
   <div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div></div>
  <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
   <div class="row"><label for="c-wifiSsid">Network (SSID)</label><div class="combo"><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="wifi-list" autocomplete="off"><ul id="wifi-list" role="listbox" aria-label="Wi-Fi networks" hidden></ul></div><button class="b sec" id="btn-wifi-scan" aria-busy="false"><span class="spin" aria-hidden="true"></span>Scan</button></div>
@@ -102,7 +113,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
   <div class="row"><label for="c-apPassword">Access point password</label><input id="c-apPassword" type="password" maxlength="63" placeholder="unchanged"></div>
   <div class="row"><label for="c-https">HTTPS</label><input id="c-https" type="checkbox"></div>
   <p class="small">HTTPS uses a self-signed certificate. Off serves the web interface unencrypted over http://. After the restart this page opens the new address.</p></div>
- <div class="row"><button class="b" id="btn-save">Save</button><button class="b sec" id="btn-restart">Restart</button><button class="b danger" id="btn-reset">Factory reset</button></div>
+ <div class="row"><button class="b service-action" id="btn-save">Save</button><button class="b sec service-action" id="btn-restart">Restart</button><button class="b danger" id="btn-reset">Factory reset</button></div>
  <p class="small">Firmware <span id="fw"></span> · <span id="unsaved"></span></p>
 </section>
 </main>
@@ -111,8 +122,30 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 "use strict";
 const $=id=>document.getElementById(id);
 let status={},scan={devices:[],adapters:[]},pending={};
+let serviceMasks={ftms:0,ant:0},antAvailable=false,configuredFtmsServices=0;
+const outputServices={ftms:[["ftms","FTMS",1],["cps","CPS",2],["hr","HR",4],["csc","CSC",8],["rsc","RSC",16]],ant:[["fec","FE-C",1],["power","Power",2],["hr","HR",4],["speed-cadence","Speed / cadence",8],["sdm","Footpod",16]]};
+function outputEntries(kind){return kind==="ftms"?(status.ftmsOutput||{}).services||[]:(status.antOutput||{}).channels||[]}
+function outputEntry(kind,id){return outputEntries(kind).find(e=>e.id===id)}
+function serviceAvailable(kind,id){const entry=outputEntry(kind,id);if(kind==="ant"&&typeof entry?.available==="boolean")return entry.available;if(kind==="ant"){const bit=outputServices.ant.find(([name])=>name===id)[2];id=outputServices.ftms.find(([, ,mask])=>mask===bit)[0];kind="ftms"}return !!outputEntry(kind,id)?.available}
+function renderServiceControls(){
+ for(const kind of["ftms","ant"]){const mask=serviceMasks[kind],group=$("c-"+kind+"Services"),key=JSON.stringify([mask,outputServices[kind].map(([id])=>serviceAvailable(kind,id))]);
+  const out=kind==="ftms"?status.ftmsOutput||{}:status.antOutput||{};
+  fill($(kind+"-service-state"),[...outputEntries(kind).map(entry=>{const active=kind==="ftms"?entry.active:entry.open,failed=entry.enabled&&out.enabled&&!active&&kind==="ant"&&!!out.error;
+   return pill(entry.name+" · "+(active?"ACTIVE":failed?"FAILED":entry.enabled?"PENDING":"OFF"),active?"ok":failed?"bad":"pending")}),...(out.error?[pill(out.error,"bad")]:[]),...(out.channelLimit?[pill("channel capacity: "+out.channelLimit,"ok")]:[])]);
+  if(group.dataset.render!==key){const focused=group.contains(document.activeElement)?document.activeElement.dataset.service:null,buttons=[];
+  const auto=el("button","Auto");auto.type="button";auto.dataset.service="auto";auto.setAttribute("aria-pressed",String(mask===0));auto.onclick=()=>{serviceMasks[kind]=0;renderServiceControls()};buttons.push(auto);
+  for(const[id,name,bit]of outputServices[kind]){const available=serviceAvailable(kind,id),selected=!!((mask||1)&bit),required=kind==="ftms"&&bit===1;
+   const b=el("button",name+(available?"":" · NO DATA")+(required?" · REQUIRED":""));b.type="button";b.dataset.service=id;b.setAttribute("aria-pressed",String(selected));b.disabled=required||!available;if(required)b.className="required";
+   b.onclick=()=>{const current=serviceMasks[kind]||1,next=current^bit;if(!next){toast("select at least one ANT+ channel or choose Auto",false);return}serviceMasks[kind]=kind==="ftms"?next|1:next;renderServiceControls()};buttons.push(b)}
+  fill(group,buttons);group.dataset.render=key;if(focused)group.querySelector('[data-service="'+focused+'"]')?.focus()}}
+ $("ant-services").hidden=!antAvailable;
+ const antMask=serviceMasks.ant||1;$("c-antWarning").hidden=!antAvailable||(antMask&3)!==3;
+ $("c-ftmsRestart").textContent=(serviceMasks.ftms||1)!==(configuredFtmsServices||1)?"Save + restart to apply this BLE service selection; re-pair your client.":(status.ftmsOutput||{}).restartRequired?"Saved BLE service changes pending: restart and re-pair your client.":"Save + restart after changing BLE services; re-pair your client.";
+}
 function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined&&text!==null)e.textContent=String(text);if(cls)e.className=cls;return e}
 function pill(text,kind){return el("span",text,"pill"+(kind?" "+kind:""))}
+function uuidLabel(uuid){return /^0000[0-9a-f]{4}-0000-1000-8000-00805f9b34fb$/i.test(uuid)?uuid.slice(4,8):uuid}
+function fullUuid(uuid){const short=/^(?:0x)?([0-9a-f]{4})$/i.exec(uuid);return short?"0000"+short[1].toLowerCase()+"-0000-1000-8000-00805f9b34fb":uuid}
 function fill(node,items){node.replaceChildren(...items)}
 function toast(msg,ok){const t=$("toast");t.textContent=msg;t.className=ok===undefined?"":ok?"ok":"bad";t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",4000)}
 const tabs=Array.from(document.querySelectorAll('nav [role="tab"]'));
@@ -148,6 +181,9 @@ function renderStatus(s){
  else fill($("s-out"),[pill("off")]);
  const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
  const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
+ fill($("paired-advertised"),p&&(p.advertisedServices||[]).length?p.advertisedServices.map(uuid=>{const b=pill((p.advertisedServiceNames||{})[uuid]||uuidLabel(uuid),"sensor");b.title=fullUuid(uuid);return b}):[pill("none reported","pending")]);
+ fill($("paired-subscriptions"),p&&(p.subscriptions||[]).length?p.subscriptions.map(sub=>{const b=pill((sub.name||sub.service)+" · "+uuidLabel(sub.characteristic)+" · "+(sub.indicate?"INDICATE":"NOTIFY")+" · "+sub.state,sub.state==="ok"||sub.state==="subscribed"?"ok":sub.state==="failed"?"bad":"pending");b.title=fullUuid(sub.service)+" / "+fullUuid(sub.characteristic);return b}):[pill("none","pending")]);
+ renderServiceControls();
  $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
  $("unsaved").textContent=s.unsaved?"unsaved changes":"saved";$("fw").textContent=s.version||"";
  $("btn-scan").disabled=!i.bleAvailable;}
@@ -169,6 +205,7 @@ let cfgHttps=location.protocol==="https:";
 function renderConfig(c){
  $("c-ftmsName").value=c.ftmsName||"";$("c-simulatedTrainer").checked=!!c.simulatedTrainer;
  const fec=$("c-outputProtocol").querySelector('option[value="ant-fec"]');fec.disabled=!c.antAvailable;$("c-outputProtocol").value=c.outputProtocol||"ble-ftms";
+ fec.hidden=!c.antAvailable;antAvailable=!!c.antAvailable;configuredFtmsServices=c.ftmsOutputServices||0;serviceMasks={ftms:configuredFtmsServices,ant:c.antOutputServices||0};renderServiceControls();
  $("c-outputHint").textContent=c.antAvailable?"ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.":"ANT+ FE-C is not available on this hardware.";
  cfgHttps=c.https!==false;$("c-https").checked=cfgHttps;
  $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";
@@ -181,7 +218,8 @@ $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run(
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
 $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
  const r=await run("control",{control:$("ctl-kind").value,value:v},true);if(r){$("ctl-result").textContent=r.message;$("ctl-result").className="small "+(r.ok?"ok":"bad")}};
-$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,outputProtocol:$("c-outputProtocol").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
+$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,outputProtocol:$("c-outputProtocol").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ftmsOutputServices:serviceMasks.ftms,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
+if(antAvailable)b.antOutputServices=serviceMasks.ant;
  b.https=$("c-https").checked;
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
  const r=await run("config",b);if(r&&r.ok)loadConfig()};
@@ -212,7 +250,7 @@ $("btn-restart").onclick=async()=>{if(!confirm("Restart the bridge?"))return;con
  if(r&&r.ok&&cfgHttps!==(location.protocol==="https:"))setTimeout(()=>{location.href=(cfgHttps?"https://":"http://")+location.hostname+"/"},8000)};
 $("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?"))run("factory-reset").then(loadConfig)};
 function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m)};
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select,#set button"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m)};
  ws.onclose=()=>{$("conn").textContent="offline";$("conn").className="pill bad";setTimeout(connectWs,2000)}}
 fetch("/api/status").then(r=>r.json()).then(s=>{if(s.type)renderStatus(s)}).catch(()=>{});
 fetch("/api/scan/results").then(r=>r.json()).then(s=>{if(s.devices)renderScan(s)}).catch(()=>{});

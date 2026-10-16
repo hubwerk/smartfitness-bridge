@@ -18,6 +18,7 @@ public:
     bool autoRespond = true;
     bool failWrites = false;
     unsigned int begins = 0;
+    std::uint8_t channels = 8;
     std::vector<smartfitness::ant::Message> written;
     std::deque<std::uint8_t> incoming;
 
@@ -79,6 +80,10 @@ private:
         using namespace smartfitness::ant;
         switch (message.id) {
             case msg::kResetSystem: inject(msg::kStartup, {0x20}); break;
+            case 0x4D:
+                if (message.payload.size() >= 2 && message.payload[1] == 0x54)
+                    inject(0x54, {channels, 1, 0, 0, 0});
+                break;
             case msg::kSetNetworkKey:
             case msg::kAssignChannel:
             case msg::kChannelId:

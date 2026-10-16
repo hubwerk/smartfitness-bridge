@@ -6,6 +6,7 @@
 
 #ifdef ARDUINO
 #include <NimBLEDevice.h>
+#include <map>
 #endif
 
 using namespace smartfitness;
@@ -34,9 +35,43 @@ struct FtmsOutput::Transport : public NimBLEServerCallbacks, public NimBLECharac
         owner.clearClientAddress();
         owner.notifyClientDisconnected();
     }
+    void onDisconnect(NimBLEServer*, ble_gap_conn_desc* desc) override {
+        std::lock_guard<std::mutex> lock(subscriptionMutex);
+        subscriptions.erase(desc->conn_handle);
+    }
     void onWrite(NimBLECharacteristic* characteristic) override {
         const NimBLEAttValue value = characteristic->getValue();
+        if (characteristic == cscControl) {
+            std::lock_guard<std::mutex> lock(subscriptionMutex);
+            if (sensorWrites.size() < kQueueCapacity) {
+                PendingWrite write;
+                write.length = static_cast<std::uint8_t>(value.length() < write.data.size() ? value.length() : write.data.size());
+                write.truncated = value.length() > write.data.size();
+                for (std::size_t index = 0; index < write.length; ++index) write.data[index] = value.data()[index];
+                write.generation = owner.generation_.load();
+                sensorWrites.push_back(write);
+            }
+            return;
+        }
         owner.enqueueControlPoint(value.data(), value.length());
+    }
+    void onSubscribe(NimBLECharacteristic* characteristic, ble_gap_conn_desc* desc, std::uint16_t value) override {
+        std::uint16_t bit = 0;
+        for (std::size_t index = 0; index < machineData.size(); ++index)
+            if (characteristic == machineData[index]) bit = 1U << index;
+        for (std::size_t index = 0; index < sensorData.size(); ++index)
+            if (characteristic == sensorData[index]) bit = 1U << (kMachineProfileCount + index);
+        if (!bit) return;  // Control/status subscriptions are not data activity.
+        std::lock_guard<std::mutex> lock(subscriptionMutex);
+        auto& subscribed = subscriptions[desc->conn_handle];
+        if (value & 1) subscribed |= bit;
+        else subscribed &= ~bit;
+    }
+    bool subscribed(std::size_t index) const {
+        std::lock_guard<std::mutex> lock(subscriptionMutex);
+        for (const auto& peer : subscriptions)
+            if (peer.second & (1U << index)) return true;
+        return false;
     }
 
     FtmsOutput& owner;
@@ -47,6 +82,14 @@ struct FtmsOutput::Transport : public NimBLEServerCallbacks, public NimBLECharac
     NimBLECharacteristic* trainingStatus = nullptr;
     NimBLECharacteristic* controlPoint = nullptr;
     NimBLECharacteristic* machineStatus = nullptr;
+    // CPS, HR, CSC, RSC.
+    std::array<NimBLECharacteristic*, 4> sensorData{};
+    NimBLECharacteristic* cpsFeature = nullptr;
+    NimBLECharacteristic* cscFeature = nullptr;
+    NimBLECharacteristic* cscControl = nullptr;
+    mutable std::mutex subscriptionMutex;
+    std::map<std::uint16_t, std::uint16_t> subscriptions;
+    std::vector<PendingWrite> sensorWrites;
 };
 #else
 struct FtmsOutput::Transport {};
@@ -56,12 +99,25 @@ FtmsOutput::FtmsOutput() = default;
 
 FtmsOutput::~FtmsOutput() {
 #ifdef ARDUINO
-    if (transport_) NimBLEDevice::deinit(true);
+    // NimBLE is shared with the input central. Detach our callbacks rather
+    // than tearing down its stack (or letting GATT retain a dangling owner).
+    if (transport_) {
+        transportStopAdvertising();
+        transportDisconnectClients();
+        transport_->server->setCallbacks(nullptr, false);
+        for (auto* characteristic : transport_->machineData) characteristic->setCallbacks(nullptr);
+        for (auto* characteristic : transport_->sensorData)
+            if (characteristic) characteristic->setCallbacks(nullptr);
+        transport_->controlPoint->setCallbacks(nullptr);
+        if (transport_->cscControl) transport_->cscControl->setCallbacks(nullptr);
+    }
 #endif
 }
 
 void FtmsOutput::begin() {
     BridgeOutput::begin();
+    sensorEncoder_.reset();
+    profileDiscoveryStartedMs_ = now();
     begun_ = true;
     resetSession();
     refreshProfile();
@@ -74,10 +130,16 @@ void FtmsOutput::loop() {
     drainControlPoint();
     updateTrainingStatus();
     publishBikeData();
+    if (enabled()) sensorEncoder_.update(trainerState(), now());
+    transportNotifySensors();
 }
 
 void FtmsOutput::setEnabled(bool enabled) {
     BridgeOutput::setEnabled(enabled);
+    if (!enabled) {
+        sensorEncoder_.reset();
+        sensorDataSent_ = false;
+    }
     if (enabled || !begun_) return;
     transportDisconnectClients();
     stopAdvertising();
@@ -87,18 +149,23 @@ void FtmsOutput::setEnabled(bool enabled) {
 
 void FtmsOutput::publishTrainerState(const TrainerState& state) {
     const bool inputProfileChanged = trainerState().profile != state.profile;
+    const bool sourceSessionChanged = inputProfileChanged || trainerState().connected != state.connected;
     const bool lostTreadmill = profile_ == MachineProfile::Treadmill &&
         trainerState().connected &&
         (!state.connected || (trainerState().trainerDetected && !state.trainerDetected));
     BridgeOutput::publishTrainerState(state);
+    // Update even without a peripheral client and mark outages immediately.
+    // Keep cumulative counts monotonic for an already subscribed central, but
+    // never integrate a new source against the previous source's clock/rate.
+    if (sourceSessionChanged) sensorEncoder_.invalidate();
+    if (enabled()) sensorEncoder_.update(state, now());
     refreshProfile();
     if (lostTreadmill || inputProfileChanged) {
         generation_.fetch_add(1);
         resetSession();
     }
     auto feature = ftms::encodeFeature(state.capabilities, profile_);
-    if (feature == feature_) return;
-    feature_ = std::move(feature);
+    if (feature != feature_) feature_ = std::move(feature);
     transportSetFeature();
 }
 
@@ -114,10 +181,34 @@ void FtmsOutput::setProfileOverride(FtmsOutputProfile profile) {
 
 MachineProfile FtmsOutput::profile() const { return profile_; }
 
+void FtmsOutput::setServices(std::uint8_t rawMask) { configuredServices_ = rawMask; }
+
+std::uint8_t FtmsOutput::services() const {
+    const auto selected = topologyFrozen_ ? appliedServices_ : ble::effectiveServices(configuredServices_, profile_);
+    return ble::effectiveServices(selected, profile_);
+}
+
+bool FtmsOutput::restartRequired() const {
+    return topologyFrozen_ && appliedServices_ != ble::effectiveServices(configuredServices_, profile_);
+}
+
+bool FtmsOutput::serviceActive(std::uint8_t bit) const {
+    if (!enabled() || !connected_ || !(services() & bit) || (bit & (bit - 1))) return false;
+#ifdef ARDUINO
+    if (!transport_) return false;
+    if (bit == ble::kFtms) return transport_->subscribed(static_cast<std::size_t>(profile_));
+    for (std::size_t index = 0; index < 4; ++index)
+        if (bit == (2U << index)) return transport_->subscribed(kMachineProfileCount + index);
+#endif
+    return false;  // A host connection alone does not imply a CCCD subscription.
+}
+
 void FtmsOutput::refreshProfile() {
     const auto next = effectiveOutputProfile(profileOverride_, trainerState().profile);
     if (next == profile_) return;
     profile_ = next;
+    sensorEncoder_.reset();
+    sensorDataSent_ = false;
     feature_ = ftms::encodeFeature(trainerState().capabilities, profile_);
     transportSetFeature();
     generation_.fetch_add(1);
@@ -131,7 +222,9 @@ void FtmsOutput::refreshProfile() {
     connected_ = false;
     stopAdvertising();
     transportApplyProfile();
-    startAdvertising();
+    // Initial configuration applies profile and services separately. Only
+    // loop() may freeze the first GATT topology, after both have been applied.
+    if (topologyFrozen_) startAdvertising();
 }
 
 void FtmsOutput::setDeviceName(const std::string& name) {
@@ -219,6 +312,7 @@ void FtmsOutput::handleConnectionChanges() {
         seenGeneration_ = generation;
         granted_ = false;
         bikeDataSent_ = false;
+        sensorDataSent_ = false;
         trainingStatusSent_ = false;
         clearSessionData();
         // The stack stops advertising once a central connects.
@@ -322,6 +416,12 @@ void FtmsOutput::updateTrainingStatus() {
 
 void FtmsOutput::startAdvertising() {
     if (!begun_ || !enabled() || connected_ || advertising_ || profileDisconnectPending_) return;
+    // Auto starts as IndoorBike until the source is identified. Do not freeze
+    // away a saved treadmill RSC service before that source can reconnect.
+    // Read-only sources count too: trainerDetected is deliberately not used.
+    if (!topologyFrozen_ && (configuredServices_ & ble::kRsc) &&
+        profileOverride_ == FtmsOutputProfile::Auto && profile_ != MachineProfile::Treadmill &&
+        !trainerState().connected && now() - profileDiscoveryStartedMs_ < kProfileDiscoveryWaitMs) return;
     const std::uint32_t timestamp = now();
     if (advertiseFailed_ && timestamp - advertiseFailedMs_ < kAdvertiseRetryMs) return;
     advertising_ = transportBegin() && transportStartAdvertising();
@@ -338,6 +438,7 @@ void FtmsOutput::stopAdvertising() {
 void FtmsOutput::resetSession() {
     granted_ = false;
     bikeDataSent_ = false;
+    sensorDataSent_ = false;
     trainingStatusSent_ = false;
     clearSessionData();
     std::lock_guard<std::mutex> lock(mutex_);
@@ -349,6 +450,8 @@ void FtmsOutput::resetSession() {
 
 bool FtmsOutput::transportBegin() {
     if (transport_) return true;
+    appliedServices_ = ble::effectiveServices(configuredServices_, profile_);
+    topologyFrozen_ = true;
     auto transport = std::unique_ptr<Transport>(new Transport(*this));
     // The BLE input (central) may have initialised the shared stack already,
     // in which case init() ignores the name: set it explicitly.
@@ -364,6 +467,7 @@ bool FtmsOutput::transportBegin() {
     for (std::size_t index = 0; index < transport->machineData.size(); ++index) {
         const auto uuid = ftms::machineDataUuid(static_cast<MachineProfile>(index));
         transport->machineData[index] = service->createCharacteristic(NimBLEUUID(uuid), NIMBLE_PROPERTY::NOTIFY);
+        transport->machineData[index]->setCallbacks(transport.get());
     }
     transport->trainingStatus = service->createCharacteristic(
         NimBLEUUID(ftms::kTrainingStatusUuid), NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
@@ -389,17 +493,67 @@ bool FtmsOutput::transportBegin() {
     power->setValue(ftms::encodeSupportedPowerRange());
     service->start();
 
-    NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-    advertising->addServiceUUID(NimBLEUUID(ftms::kServiceUuid));
-    const auto serviceData = ftms::encodeAdvertisingServiceData(profile_);
-    advertising->setServiceData(NimBLEUUID(ftms::kServiceUuid), std::string(serviceData.begin(), serviceData.end()));
-    advertising->setScanResponse(true);
-    advertising->setName(name_);
+    auto addSensor = [&](std::size_t index, std::uint16_t serviceUuid, std::uint16_t dataUuid,
+                         std::uint16_t featureUuid, const ftms::Bytes& feature) {
+        auto* sensor = transport->server->createService(NimBLEUUID(serviceUuid));
+        auto* data = sensor->createCharacteristic(NimBLEUUID(dataUuid), NIMBLE_PROPERTY::NOTIFY);
+        data->setCallbacks(transport.get());
+        transport->sensorData[index] = data;
+        if (featureUuid) {
+            auto* characteristic = sensor->createCharacteristic(NimBLEUUID(featureUuid), NIMBLE_PROPERTY::READ);
+            characteristic->setValue(feature);
+            if (index == 0) transport->cpsFeature = characteristic;
+            if (index == 2) transport->cscFeature = characteristic;
+        }
+        if (index == 0 || index == 2) {
+            auto* location = sensor->createCharacteristic(
+                NimBLEUUID(static_cast<std::uint16_t>(0x2A5D)), NIMBLE_PROPERTY::READ);
+            location->setValue(ftms::Bytes{0});  // Other: virtual sensor has no physical location.
+        }
+        if (index == 2) {
+            transport->cscControl = sensor->createCharacteristic(
+                NimBLEUUID(static_cast<std::uint16_t>(0x2A55)), NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::INDICATE);
+            transport->cscControl->setCallbacks(transport.get());
+        }
+        sensor->start();
+    };
+    const auto& capabilities = trainerState().capabilities;
+    if (appliedServices_ & ble::kCps)
+        addSensor(0, 0x1818, 0x2A63, 0x2A65, sensorEncoder_.cyclingPowerFeature(capabilities, trainerState().profile));
+    if (appliedServices_ & ble::kHr) addSensor(1, 0x180D, 0x2A37, 0, {});
+    if (appliedServices_ & ble::kCsc)
+        addSensor(2, 0x1816, 0x2A5B, 0x2A5C, sensorEncoder_.cyclingSpeedCadenceFeature(capabilities, trainerState().profile));
+    if (appliedServices_ & ble::kRsc) addSensor(3, 0x1814, 0x2A53, 0x2A54, ble::SensorEncoder::runningFeature());
     transport_ = std::move(transport);
+    transportConfigureAdvertising();
     return true;
 }
 
-bool FtmsOutput::transportStartAdvertising() { return NimBLEDevice::getAdvertising()->start(); }
+bool FtmsOutput::transportStartAdvertising() {
+    transportConfigureAdvertising();
+    return NimBLEDevice::getAdvertising()->start();
+}
+
+void FtmsOutput::transportConfigureAdvertising() {
+    if (!transport_) return;
+    // Explicit legacy packets: flags (3) + five UUIDs (12) + FTMS data (7)
+    // fit in 22 bytes. The complete name (at most 22 bytes) is scan-response only.
+    NimBLEAdvertisementData primary;
+    primary.setFlags(0x06);
+    std::vector<NimBLEUUID> uuids{NimBLEUUID(ftms::kServiceUuid)};
+    const std::uint16_t sensorUuids[]{0x1818, 0x180D, 0x1816, 0x1814};
+    for (std::size_t index = 0; index < 4; ++index)
+        if (services() & (2U << index)) uuids.emplace_back(sensorUuids[index]);
+    primary.setCompleteServices16(uuids);
+    const auto serviceData = ftms::encodeAdvertisingServiceData(profile_);
+    primary.setServiceData(NimBLEUUID(ftms::kServiceUuid), std::string(serviceData.begin(), serviceData.end()));
+    NimBLEAdvertisementData scan;
+    scan.setName(name_);
+    auto* advertising = NimBLEDevice::getAdvertising();
+    advertising->setScanResponse(true);
+    advertising->setAdvertisementData(primary);
+    advertising->setScanResponseData(scan);
+}
 
 void FtmsOutput::transportStopAdvertising() {
     if (transport_) NimBLEDevice::getAdvertising()->stop();
@@ -413,22 +567,26 @@ void FtmsOutput::transportDisconnectClients() {
 void FtmsOutput::transportApplyName() {
     if (!transport_) return;
     NimBLEDevice::setDeviceName(name_);
-    NimBLEDevice::getAdvertising()->setName(name_);
-    if (!advertising_) return;
-    transportStopAdvertising();
+    const bool wasAdvertising = advertising_;
+    if (wasAdvertising) transportStopAdvertising();
+    transportConfigureAdvertising();
+    if (!wasAdvertising) return;
     advertising_ = false;
     startAdvertising();
 }
 
 void FtmsOutput::transportSetFeature() {
-    if (transport_) transport_->feature->setValue(feature_);
+    if (!transport_) return;
+    transport_->feature->setValue(feature_);
+    if (transport_->cpsFeature)
+        transport_->cpsFeature->setValue(sensorEncoder_.cyclingPowerFeature(trainerState().capabilities, trainerState().profile));
+    if (transport_->cscFeature)
+        transport_->cscFeature->setValue(sensorEncoder_.cyclingSpeedCadenceFeature(trainerState().capabilities, trainerState().profile));
 }
 
 void FtmsOutput::transportApplyProfile() {
     if (!transport_) return;
-    const auto data = ftms::encodeAdvertisingServiceData(profile_);
-    NimBLEDevice::getAdvertising()->setServiceData(NimBLEUUID(ftms::kServiceUuid),
-        std::string(data.begin(), data.end()));
+    transportConfigureAdvertising();
     transport_->trainingStatus->setValue(ftms::encodeTrainingStatus(trainingStatus_));
 }
 
@@ -457,10 +615,56 @@ void FtmsOutput::transportNotifyStatus() {
     transport_->machineStatus->notify();
 }
 
+void FtmsOutput::transportNotifySensors() {
+    if (!transport_) return;
+    std::vector<PendingWrite> writes;
+    {
+        std::lock_guard<std::mutex> lock(transport_->subscriptionMutex);
+        writes.swap(transport_->sensorWrites);
+    }
+    for (const auto& pending : writes) {
+        if (pending.length == 0 || !connected_ || pending.generation != generation_.load()) continue;
+        const auto& write = pending.data;
+        std::uint8_t result = 2;  // Opcode not supported.
+        if (write[0] == 1 && trainerState().profile == MachineProfile::IndoorBike &&
+            trainerState().capabilities.supports(Metric::Speed)) {
+            result = pending.length == 5 && !pending.truncated ? 1 : 3;
+            if (result == 1) {
+                std::uint32_t value = 0;
+                for (std::size_t index = 0; index < 4; ++index)
+                    value |= static_cast<std::uint32_t>(write[index + 1]) << (index * 8);
+                sensorEncoder_.setWheelRevolutions(value);
+            }
+        }
+        transport_->cscControl->indicate(ftms::Bytes{0x10, write[0], result});
+    }
+    if (!enabled() || !connected_) return;
+    const auto timestamp = now();
+    if (sensorDataSent_ && timestamp - lastSensorDataMs_ < kBikeDataMinIntervalMs) return;
+    lastSensorDataMs_ = timestamp;
+    sensorDataSent_ = true;
+    const auto& state = trainerState();
+    const std::array<ftms::Bytes, 4> records{
+        sensorEncoder_.cyclingPower(state), sensorEncoder_.heartRate(state),
+        sensorEncoder_.cyclingSpeedCadence(state), sensorEncoder_.runningSpeedCadence(state)};
+    for (std::size_t index = 0; index < records.size(); ++index) {
+        auto* characteristic = transport_->sensorData[index];
+        if (!characteristic || !(services() & (2U << index)) || records[index].empty()) continue;
+        characteristic->setValue(records[index]);
+        characteristic->notify();
+    }
+}
+
 #else
 
 // Host build: no radio. Mirror the stack's observable behaviour for tests.
-bool FtmsOutput::transportBegin() { return true; }
+bool FtmsOutput::transportBegin() {
+    if (!topologyFrozen_) {
+        appliedServices_ = ble::effectiveServices(configuredServices_, profile_);
+        topologyFrozen_ = true;
+    }
+    return true;
+}
 bool FtmsOutput::transportStartAdvertising() { return true; }
 void FtmsOutput::transportStopAdvertising() {}
 void FtmsOutput::transportDisconnectClients() {
@@ -474,5 +678,7 @@ void FtmsOutput::transportNotifyMachineData() {}
 void FtmsOutput::transportNotifyTrainingStatus() {}
 void FtmsOutput::transportIndicateResponse() {}
 void FtmsOutput::transportNotifyStatus() {}
+void FtmsOutput::transportNotifySensors() {}
+void FtmsOutput::transportConfigureAdvertising() {}
 
 #endif

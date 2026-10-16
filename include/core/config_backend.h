@@ -7,7 +7,7 @@
 // opaque blob; validation and versioning are handled by ConfigStore.
 class ConfigBackend {
 public:
-    static constexpr std::size_t kMaxRecordSize = 256;
+    static constexpr std::size_t kMaxRecordSize = 512;
 
     virtual ~ConfigBackend() = default;
     // Returns false when no record exists (or it cannot be read).

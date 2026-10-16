@@ -167,6 +167,48 @@ endorsement is implied.
 |---|---|---|
 | ![Scrollbar at top](hmi/21-devices-scroll-top.png) | ![Scrollbar at middle](hmi/22-devices-scroll-middle.png) | ![Scrollbar at bottom](hmi/23-devices-scroll-bottom.png) |
 
+| Input: advertised services | Subscribed notification | Failed subscription |
+|---|---|---|
+| ![Advertised services](hmi/24-input-services-adv.png) | ![Successful subscription](hmi/25-input-services-sub-ok.png) | ![Failed subscription](hmi/26-input-services-sub-fail.png) |
+
+| Pending subscription | Output services | Optional service without data |
+|---|---|---|
+| ![Pending subscription](hmi/27-input-services-sub-pending.png) | ![Output services](hmi/28-output-services.png) | ![No data service](hmi/29-output-services-no-data.png) |
+
+| BLE service change pending restart |
+|---|
+| ![BLE restart required](hmi/30-output-services-restart.png) |
+
+### Service diagnostics and settings
+
+**Devices → Input services** shows the paired device's advertised UUIDs (`ADV`,
+violet) and subscription attempts (`SUB`). Each subscription names its service,
+characteristic and mode (`NTF` notification / `IND` indication), with textual
+`OK` (light blue), `FAIL` (alert) or `PENDING` (tan) state. These are diagnostics,
+not controls. Every row is a focusable, wrapping pill so the knob can scroll
+through all entries without touch. Scan-device details also show advertised
+services. Unknown UUIDs retain a shortened identifier.
+
+**Settings → Output services** offers Auto and BLE FTMS/CPS/HR/CSC/RSC pills.
+FTMS is mandatory; the other four are independent selections. Each pill
+distinguishes on/off from active, available or no-data state. The shared
+controller validates each request; a rejected selection shows its reason in
+the command-result toast. Selected services are golden, off services tan, and
+enabled services without available data alert red; activity is a separate
+readout, not the selection colour. Unavailable off services remain readable by
+knob but cannot be enabled. Auto is mask `0`, meaning **baseline FTMS only**, not all
+services; explicit bits are FTMS `1`, CPS `2`, HR `4`, CSC `8`, RSC `16`.
+Changes use the shared `SetOutputServices` command with transport `ftms`.
+Save persists the selection. BLE service changes use a boot-only GATT topology;
+an explicit save-and-restart hint is always visible and the live
+`restartRequired` flag adds a definite warning.
+The CrowPanel has no ANT transport, so ANT+ is shown as unavailable rather than
+offering controls that cannot work. Dashboard and Devices show compact `OUT`
+summaries of enabled services; enablement alone does not imply live data.
+New service strings include English and German translations.
+See [HD-009](../hardware-decisions.md#hd-009-selectable-ble-services-and-ant-output-channels)
+for schema migration, boot-frozen GATT and ANT radio/channel decisions.
+
 ## Web gallery
 
 Desktop (1280×800):
@@ -228,7 +270,9 @@ bash scripts/update_hmi_docs.sh --check
 
 The script renders the actual LVGL sources and runs the knob-only walkthrough
 plus theme/font, curved-scrollbar visibility/position/resize/lifecycle/roller
-and round-safe focus-target assertions. A geometric layout check on every
+and round-safe focus-target assertions. Service screens additionally exercise
+live subscription/availability/mask/restart redraws, retained knob focus, and
+English/German layouts at every focus position. A geometric layout check on every
 screenshot (and on every dashboard metric of every machine profile at its
 widest value) fails if the focus ring is clipped, if drawn elements or text
 ink overlap each other or the LCARS arcs, if a roller row is cut, or if
@@ -239,15 +283,15 @@ It checks keyboard navigation, mobile overflow, result alerts and absence of
 external requests. To use the original entry point:
 
 ```sh
-make hmi-screenshots LVGL_DIR=.cache/lvgl SCREENSHOT_DIR=/tmp/hmi-screenshots
-python3 scripts/web_screenshots.py --output /tmp/web-screenshots
+make hmi-screenshots LVGL_DIR=.cache/lvgl SIM_BUILD=.cache/hmi-sim SCREENSHOT_DIR=.cache/hmi-screenshots
+python3 scripts/web_screenshots.py --output .cache/web-screenshots
 ```
 
 CI retains `host-tests`, both firmware builds and `hmi-simulator`, and adds
 `web-screenshots`. HMI pixel differences **fail** the committed-gallery check.
 Web differences **warn** because browser/OS rasterization can differ. Both jobs
 upload PNG artifacts for review. For separate artifact copies set
-`SCREENSHOT_DIR=/tmp/ui-artifacts` when running the update script.
+`SCREENSHOT_DIR=.cache/ui-artifacts` when running the update script.
 
 To regenerate fonts using the committed, licensed source:
 

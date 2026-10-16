@@ -2,9 +2,8 @@
 
 // Centralised HMI strings. English is the default; a second language only
 // needs a column in kTable (src/variants/hmi/hmi_strings.cpp). Missing
-// translations fall back to English. Note: the built-in LVGL Montserrat fonts
-// cover ASCII only, so German umlauts need a font with Latin-1 glyphs
-// (see lv_conf.h) before a German table is enabled.
+// translations fall back to English. Antonio includes Latin-1 glyphs for
+// German text; Montserrat is retained as the symbol fallback.
 
 #include <cstdint>
 
@@ -128,6 +127,19 @@ enum class Str : std::uint16_t {
     ConfirmResetText2,
     ConfirmRestartTitle,
     ConfirmRestartText,
+    InputServices,
+    OutputServices,
+    NoServices,
+    ServiceOk,
+    ServiceFail,
+    ServicePending,
+    ServiceAvailable,
+    ServiceNoData,
+    ServiceActive,
+    ServiceMandatory,
+    ServiceAuto,
+    BleRestartHint,
+    RestartRequired,
     Count
 };
 

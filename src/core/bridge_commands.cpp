@@ -1,5 +1,6 @@
 #include "bridge_commands.h"
 #include "config_store.h"
+#include "bridge/output_services.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -117,6 +118,27 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
         }
         command.type = CommandType::OutputProtocol;
         command.text = value;
+        return true;
+    }
+    if (key == "output-services") {
+        command.text = nextWord(value);
+        unsigned mask = 0;
+        bool parsed = value == "auto";
+        if (!parsed && !value.empty()) {
+            parsed = true;
+            for (const char digit : value) {
+                if (digit < '0' || digit > '9') { parsed = false; break; }
+                mask = mask * 10 + static_cast<unsigned>(digit - '0');
+                if (mask > kOutputServiceAll) { parsed = false; break; }
+            }
+        }
+        if ((command.text != "ftms" && command.text != "ant") || !parsed ||
+            !validOutputServices(static_cast<std::uint8_t>(mask), command.text == "ftms")) {
+            error = "usage: output-services ftms|ant auto|0..31 (FTMS requires bit 1)";
+            return false;
+        }
+        command.type = CommandType::SetOutputServices;
+        command.serviceMask = static_cast<std::uint8_t>(mask);
         return true;
     }
     if (key == "scan") {

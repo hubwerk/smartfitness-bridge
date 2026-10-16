@@ -31,6 +31,7 @@
 #include "protocols/treadmills.hpp"
 #include "protocols/yesoul_keiser.hpp"
 #include "scan_label.h"
+#include "service_names.h"
 
 using namespace smartfitness;
 using ble::Bytes;
@@ -683,6 +684,84 @@ struct Harness {
         adapter.loop();
     }
 };
+
+void testPairedServiceDiagnostics() {
+    Harness h;
+    assert(h.adapter.startScan());
+    const auto peer = address("aa:00:00:00:00:01");
+    h.central.advertise(peer, "Bike", {0x1826, 0x1818});
+    h.central.advertise(peer, "", {0x180d});
+    h.adapter.loop();
+    h.pair("aa:00:00:00:00:01", "ftms");
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.advertisedServices() ==
+           (std::vector<ble::Uuid>{ble::Uuid::from16(0x1826), ble::Uuid::from16(0x1818), ble::Uuid::from16(0x180d)}));
+    const auto& plan = h.central.connects.back().plan;
+    assert(h.adapter.subscriptions().size() == plan.subscriptionCount);
+    for (std::size_t index = 0; index < plan.subscriptionCount; ++index) {
+        const auto& subscription = h.adapter.subscriptions()[index];
+        assert(subscription.service == plan.subscriptions[index].service);
+        assert(subscription.characteristic == plan.subscriptions[index].characteristic);
+        assert(subscription.indicate == plan.subscriptions[index].indicate);
+        assert(subscription.state == "pending");
+    }
+    h.central.pushEvent(ble::CentralEventType::Connected, 0x11);
+    h.adapter.loop();
+    assert(h.adapter.isConnected());
+    for (std::size_t index = 0; index < plan.subscriptionCount; ++index)
+        assert(h.adapter.subscriptions()[index].state == ((0x11U & (1U << index)) ? "ok" : "failed"));
+    h.central.advertise(peer, "", {0x180f});
+    h.adapter.loop();
+    assert(h.adapter.advertisedServices().size() == 4);
+    assert(h.adapter.advertisedServices().back() == ble::Uuid::from16(0x180f));
+    h.adapter.disconnect();
+    assert(h.adapter.subscriptions().empty() && h.adapter.advertisedServices().empty());
+    // Applying unrelated configuration must not discard the latest paired advertisement.
+    PairedDevice reapplied = h.adapter.pairedDevice();
+    reapplied.advertisedServices.clear();
+    h.adapter.setPairedDevice(reapplied);
+    // A new scan clears scan results, but not the paired device's last advertisement.
+    assert(h.adapter.startScan());
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.advertisedServices().size() == 4);
+    assert(h.adapter.subscriptions()[0].state == "pending");
+    h.central.pushEvent(ble::CentralEventType::Connected, 1);
+    h.adapter.loop();
+    assert(h.adapter.subscriptions()[4].state == "failed");
+    h.central.pushEvent(ble::CentralEventType::Disconnected);
+    h.adapter.loop();
+    assert(h.adapter.subscriptions().empty() && h.adapter.advertisedServices().empty());
+    h.adapter.clearPairedDevice();
+    assert(h.adapter.pairedDevice().advertisedServices.empty());
+
+    // Boot reconnect can restore the persisted advertisement without a user scan.
+    PairedDevice saved;
+    saved.address = peer;
+    saved.valid = true;
+    saved.adapterId = "ftms";
+    saved.advertisedServices = {ble::Uuid::from16(0x1826)};
+    h.adapter.setPairedDevice(saved);
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.advertisedServices() == saved.advertisedServices);
+    h.central.pushEvent(ble::CentralEventType::Connected, 0);
+    h.adapter.loop();
+    assert(!h.adapter.isConnected());
+    assert(h.adapter.subscriptions().empty() && h.adapter.advertisedServices().empty());
+}
+
+void testServiceShortNames() {
+    assert(serviceShortName("1826") == "FTMS");
+    assert(serviceShortName("0x1818") == "CPS");
+    assert(serviceShortName("00001816-0000-1000-8000-00805F9B34FB") == "CSC");
+    assert(serviceShortName("180D") == "HR");
+    assert(serviceShortName("1814") == "RSC");
+    assert(serviceShortName("180f") == "BAT");
+    assert(serviceShortName("180a") == "DIS");
+    assert(serviceShortName("6E400001-B5A3-F393-E0A9-E50E24DCCA9E") == "NUS");
+    assert(serviceShortName("1234") == "1234");
+    assert(serviceShortName("0bf669f1-45f2-11e7-9598-0800200c9a66") == "0bf669f1\xe2\x80\xa6");
+    assert(serviceShortName("invalid") == "invalid");
+}
 
 void testAdapterProfiles() {
     Harness h;
@@ -1558,6 +1637,8 @@ void testScanLabelHelpers() {
 
 void runBleInputTests() {
     testBleTypes();
+    testPairedServiceDiagnostics();
+    testServiceShortNames();
     testBoundedQueue();
     testFtmsInputCodec();
     testSensorCodecs();

@@ -588,8 +588,22 @@ StatusView bikeStatus() {
     status.input.bleAvailable = true;
     status.input.profile = MachineProfile::IndoorBike;
     status.input.link = "ready";
-    status.input.paired = {true, "aa:00:00:00:00:21", false, "KICKR CORE", "ftms"};
-    status.ftmsOutput = {true, MachineProfile::IndoorBike, FtmsOutputProfile::Auto, "SmartFitness Bridge", true, true, true};
+    status.input.paired = {true, "aa:00:00:00:00:21", false, "KICKR CORE", "ftms", {}, {}};
+    status.input.paired.advertisedServices = {"1826", "1818", "180d"};
+    status.input.paired.subscriptions = {{"1826", "2ad2", "ok", false},
+                                        {"1826", "2ad9", "ok", true},
+                                        {"1818", "2a63", "failed", false},
+                                        {"180d", "2a37", "pending", false}};
+    status.ftmsOutput.enabled = true;
+    status.ftmsOutput.name = "SmartFitness Bridge";
+    status.ftmsOutput.advertising = true;
+    status.ftmsOutput.client = true;
+    status.ftmsOutput.control = true;
+    status.ftmsOutput.services = {{"ftms", "FTMS", true, true, true},
+                                  {"cps", "CPS", true, true, true},
+                                  {"hr", "HR", true, true, true},
+                                  {"csc", "CSC", false, true, false},
+                                  {"rsc", "RSC", false, false, false}};
     return status;
 }
 
@@ -608,8 +622,20 @@ StatusView treadmillStatus() {
     status.input.bleAvailable = true;
     status.input.profile = MachineProfile::Treadmill;
     status.input.link = "ready";
-    status.input.paired = {true, "aa:00:00:00:00:22", false, "WalkingPad", "walkingpad-r1"};
-    status.ftmsOutput = {true, MachineProfile::Treadmill, FtmsOutputProfile::Auto, "SmartFitness Bridge", true, false, false};
+    status.input.paired = {true, "aa:00:00:00:00:22", false, "WalkingPad", "walkingpad-r1", {}, {}};
+    status.input.paired.advertisedServices = {"1826", "180d"};
+    status.input.paired.subscriptions = {{"1826", "2acd", "ok", false},
+                                        {"1826", "2ad9", "failed", true},
+                                        {"180d", "2a37", "pending", false}};
+    status.ftmsOutput.enabled = true;
+    status.ftmsOutput.profile = MachineProfile::Treadmill;
+    status.ftmsOutput.name = "SmartFitness Bridge";
+    status.ftmsOutput.advertising = true;
+    status.ftmsOutput.services = {{"ftms", "FTMS", true, true, true},
+                                  {"cps", "CPS", false, false, false},
+                                  {"hr", "HR", true, true, true},
+                                  {"csc", "CSC", false, false, false},
+                                  {"rsc", "RSC", false, true, false}};
     return status;
 }
 
@@ -628,6 +654,7 @@ ScanView scanView() {
         view.adapter = adapter;
         view.label = label;
         view.relevant = relevant;
+        if (relevant) view.services = {"1826", "180d"};
         return view;
     };
     scan.devices = {device("aa:00:00:00:00:22", "WalkingPad", -58, "walkingpad-r1", "WalkingPad", true),
@@ -647,6 +674,7 @@ ConfigView configView() {
     config.ftmsOutputProfile = FtmsOutputProfile::Auto;
     config.antAvailable = false;
     config.unsaved = true;
+    config.ftmsOutputServices = 7;
     return config;
 }
 
@@ -715,7 +743,28 @@ void knobWalkthrough() {
     turn(1);  // Output: BLE FTMS -> Off (no ANT radio on the HMI)
     press();
     assert(lastCommand(CommandType::OutputProtocol) && g_commands.back().text == "off");
-    turn(7);
+    turn(2);  // Output -> profile -> output services
+    press();
+    assert(g_ui.current() == Screen::OutputServices);
+    press();  // Auto is an explicit zero mask, not all services
+    assert(lastCommand(CommandType::SetOutputServices) && g_commands.back().text == "ftms" &&
+           g_commands.back().serviceMask == 0);
+    turn(1);  // FTMS stays mandatory
+    const auto commandsBefore = g_commands.size();
+    press();
+    assert(g_commands.size() == commandsBefore);
+    turn(1);  // CPS enabled in fixture -> off, keeping FTMS + HR
+    press();
+    assert(lastCommand(CommandType::SetOutputServices) && g_commands.back().serviceMask == 5);
+    checkLayout("output-services-knob");
+    turn(2);  // CSC has no data on this treadmill: readable, but cannot be enabled.
+    const auto beforeUnavailable = g_commands.size();
+    press();
+    assert(g_commands.size() == beforeUnavailable);
+    checkLayout("output-services-unavailable");
+    hold();
+    assert(g_ui.current() == Screen::Settings);
+    turn(9);  // name -> factory reset (new services entry included)
     press();
     assert(g_ui.current() == Screen::Confirm);
     turn(1);
@@ -730,7 +779,17 @@ void knobWalkthrough() {
     turn(1);  // Dashboard -> Devices
     press();
     assert(g_ui.current() == Screen::Devices);
-    press();  // first button: stop scan (scan running)
+    press();  // first button: input service diagnostics
+    assert(g_ui.current() == Screen::InputServices);
+    turn(2);  // first subscription, then fail and pending
+    checkLayout("input-subscription-ok");
+    turn(1);
+    checkLayout("input-subscription-fail");
+    turn(1);
+    checkLayout("input-subscription-pending");
+    hold();
+    turn(1);  // input services -> stop scan
+    press();
     assert(lastCommand(CommandType::ScanStop));
     hold();
     hold();
@@ -755,7 +814,8 @@ void checkListEnd(lv_obj_t* list, lv_obj_t* arc, bool top) {
 }
 
 void checkListEnds() {
-    for (Screen screen : {Screen::Menu, Screen::Devices, Screen::Settings, Screen::FtmsName}) {
+    for (Screen screen : {Screen::Menu, Screen::Devices, Screen::Settings, Screen::FtmsName,
+                          Screen::InputServices, Screen::OutputServices}) {
         g_ui.navigate(screen);
         pump(400);
         lv_obj_t* list = currentList();
@@ -779,6 +839,88 @@ void checkListEnds() {
     g_ui.navigate(Screen::Dashboard);
     pump(100);
     std::printf("list scrollbar reaches both ends passed\n");
+}
+
+void checkServiceRefresh() {
+    auto status = bikeStatus();
+    g_ui.setStatus(status);
+    g_ui.navigate(Screen::InputServices);
+    pump(100);
+    turn(5);  // failed CPS notification
+    auto* focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    assert(std::string(lv_label_get_text(lv_obj_get_child(focused, 0))).find("FAIL") != std::string::npos);
+    lv_style_value_t subscriptionFill{};
+    assert(lv_obj_get_local_style_prop(focused, LV_STYLE_BG_COLOR, &subscriptionFill, LV_PART_MAIN) ==
+           LV_STYLE_RES_FOUND);
+    assert(lv_color_to_u32(subscriptionFill.color) == lv_color_to_u32(lv_color_hex(lcars::Alert)));
+    status.input.paired.subscriptions[2].state = "ok";
+    g_ui.setStatus(status);
+    pump(100);
+    focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    assert(std::string(lv_label_get_text(lv_obj_get_child(focused, 0))).find("OK") != std::string::npos);
+    assert(lv_color_to_u32(lv_obj_get_style_bg_color(focused, LV_PART_MAIN)) ==
+           lv_color_to_u32(lv_color_hex(lcars::Peach)));  // retained knob focus
+    status.input.paired.advertisedServices.push_back("180f");
+    g_ui.setStatus(status);
+    pump(100);
+    assert(lv_group_get_obj_count(lv_indev_get_group(g_knob)) == 9);
+
+    g_ui.navigate(Screen::OutputServices);
+    pump(100);
+    turn(5);
+    focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    assert(std::string(lv_label_get_text(lv_obj_get_child(focused, 0))).find("NO DATA") != std::string::npos);
+    status.ftmsOutput.services[4].available = true;
+    g_ui.setStatus(status);
+    pump(100);
+    focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    assert(std::string(lv_label_get_text(lv_obj_get_child(focused, 0))).find("AVAILABLE") != std::string::npos);
+    lv_style_value_t fill{};
+    assert(lv_obj_get_local_style_prop(focused, LV_STYLE_BG_COLOR, &fill, LV_PART_MAIN) == LV_STYLE_RES_FOUND);
+    assert(lv_color_to_u32(fill.color) == lv_color_to_u32(lv_color_hex(lcars::Tan)));
+    auto config = configView();
+    config.ftmsOutputServices = 31;
+    g_ui.setConfig(config);
+    pump(100);
+    focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    assert(std::string(lv_label_get_text(lv_obj_get_child(focused, 0))).find("ON") != std::string::npos);
+    assert(lv_obj_get_local_style_prop(focused, LV_STYLE_BG_COLOR, &fill, LV_PART_MAIN) == LV_STYLE_RES_FOUND);
+    assert(lv_color_to_u32(fill.color) == lv_color_to_u32(lv_color_hex(lcars::Golden)));
+    status.ftmsOutput.services[4].available = false;
+    g_ui.setStatus(status);
+    pump(100);
+    focused = lv_group_get_focused(lv_indev_get_group(g_knob));
+    assert(lv_obj_get_local_style_prop(focused, LV_STYLE_BG_COLOR, &fill, LV_PART_MAIN) == LV_STYLE_RES_FOUND);
+    assert(lv_color_to_u32(fill.color) == lv_color_to_u32(lv_color_hex(lcars::Alert)));
+    status.ftmsOutput.restartRequired = true;
+    g_ui.setStatus(status);
+    pump(100);
+    assert(std::string(lv_label_get_text(lv_obj_get_child(currentList(), 0))) == "SAVE + RESTART BLE");
+    for (const auto lang : {Language::English, Language::German}) {
+        setLanguage(lang);
+        // Leave and re-enter because language changes are not live firmware settings.
+        g_ui.navigate(Screen::Dashboard);
+        pump(50);
+        for (const auto screen : {Screen::InputServices, Screen::OutputServices}) {
+            g_ui.navigate(screen);
+            pump(100);
+            const auto count = lv_group_get_obj_count(lv_indev_get_group(g_knob));
+            for (std::uint32_t index = 0; index < count; ++index) {
+                checkLayout(lang == Language::English ? "services-en" : "services-de");
+                turn(1);
+            }
+        }
+    }
+    setLanguage(Language::English);
+    for (auto& service : status.ftmsOutput.services) service.enabled = true;
+    g_ui.setStatus(status);
+    g_ui.navigate(Screen::Dashboard);
+    pump(100);
+    checkLayout("dashboard-all-output-services");
+    g_ui.setConfig(configView());
+    g_ui.setStatus(treadmillStatus());
+    pump(100);
+    std::printf("live service diagnostics, availability and mask redraw passed\n");
 }
 
 }  // namespace
@@ -812,6 +954,7 @@ int main(int argc, char** argv) {
     checkScrollbar();
     knobWalkthrough();
     checkListEnds();
+    checkServiceRefresh();
 
     g_ui.setStatus(bikeStatus());
     pump(100);
@@ -824,7 +967,7 @@ int main(int argc, char** argv) {
     shot("03-menu");
     g_ui.navigate(Screen::Devices);
     shot("04-devices");
-    turn(6);  // first scan result (after six device actions)
+    turn(7);  // first scan result (input diagnostics plus six device actions)
     shot("05-devices-results");
     g_ui.openDevice(0);
     shot("06-device-detail");
@@ -886,6 +1029,26 @@ int main(int argc, char** argv) {
     shot("22-devices-scroll-middle", false);
     lv_obj_scroll_to_y(list, range, LV_ANIM_OFF);
     shot("23-devices-scroll-bottom", false);
+    g_ui.setStatus(bikeStatus());
+    g_ui.navigate(Screen::InputServices);
+    shot("24-input-services-adv");
+    turn(3);
+    shot("25-input-services-sub-ok");
+    turn(2);
+    shot("26-input-services-sub-fail");
+    turn(1);
+    shot("27-input-services-sub-pending");
+    g_ui.navigate(Screen::OutputServices);
+    shot("28-output-services");
+    turn(5);
+    shot("29-output-services-no-data");
+    auto restart = bikeStatus();
+    restart.ftmsOutput.restartRequired = true;
+    g_ui.setStatus(restart);
+    g_ui.navigate(Screen::Settings);
+    pump(50);
+    g_ui.navigate(Screen::OutputServices);
+    shot("30-output-services-restart");
     auto longScan = scanView();
     longScan.devices[0].name = "A VERY LONG FITNESS DEVICE NAME THAT MUST WRAP WITHOUT CLIPPING";
     g_ui.setScan(longScan);

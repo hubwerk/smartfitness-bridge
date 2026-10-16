@@ -5,6 +5,7 @@
 #include "ble_input_adapter.h"
 #include "protocols/registry.hpp"
 #include "scan_label.h"
+#include "bridge/output_services.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <optional>
@@ -54,6 +55,11 @@ const char* loadResultName(ConfigLoadResult result) {
 CommandResult ok(const std::string& message) { return {true, message}; }
 CommandResult fail(const std::string& message) { return {false, message}; }
 
+std::string pairedUuidString(const ble::Uuid& uuid) {
+    const auto text = uuid.toString();
+    return uuid.isShort() ? text.substr(2) : text;
+}
+
 PairedSourceDevice toSource(const ble::BleAddress& address) {
     PairedSourceDevice source;
     source.valid = true;
@@ -82,6 +88,8 @@ void BridgeController::applyConfig() {
     ftms_.setDeviceName(config.ftmsName);
     ftms_.setProfileOverride(config.ftmsOutputProfile);
     ant_.setProfileOverride(config.ftmsOutputProfile);
+    ftms_.setServices(config.ftmsOutputServices);
+    ant_.setServices(config.antOutputServices);
     // Exactly one output protocol is active; ANT+ FE-C needs an ANT radio.
     ftms_.setEnabled(config.outputProtocol == OutputProtocol::BleFtms);
     ant_.setEnabled(config.outputProtocol == OutputProtocol::AntFec && ant_.available());
@@ -94,6 +102,10 @@ void BridgeController::applyConfig() {
             device.address.type = config.pairedSource.addressType;
             device.adapterId = config.pairedAdapterId;
             device.name = config.pairedDeviceName;
+            for (const auto& service : config.pairedAdvertisedServices) {
+                ble::Uuid uuid;
+                if (ble::Uuid::parse(service, uuid)) device.advertisedServices.push_back(uuid);
+            }
             ble_->setPairedDevice(device);
         } else if (ble_->pairedDevice().valid) {
             ble_->clearPairedDevice();
@@ -176,7 +188,14 @@ CommandResult BridgeController::pair(const Command& command) {
     if (device.adapterId.empty())
         return fail(result ? "device type not detected; choose an adapter" : "device not in scan results; choose an adapter");
     if (!protocols::findProtocol(device.adapterId)) return fail("unknown adapter: " + device.adapterId);
-    if (!config_.pairSource(toSource(device.address), device.name, device.adapterId))
+    std::vector<std::string> advertisedServices;
+    if (result) {
+        for (const auto& uuid : result->services) {
+            if (advertisedServices.size() >= ble::kMaxAdvertisedServices) break;
+            advertisedServices.push_back(pairedUuidString(uuid));
+        }
+    }
+    if (!config_.pairSource(toSource(device.address), device.name, device.adapterId, advertisedServices))
         return fail("pairing not persisted (storage write failed)");
     applyConfig();
     if (!ble_->scanAndConnect()) return fail("paired, but connection request rejected: " + ble_->lastError());
@@ -193,6 +212,7 @@ CommandResult BridgeController::execute(const Command& command) {
                       "power W | speed km/h | incline % | resistance % | "
                       "output off/ble-ftms/ant-fec | ftms-input on/off | ftms-name <name> | "
                       "ftms-profile auto/bike/treadmill/cross-trainer/rower/step-climber/stair-climber | "
+                      "output-services ftms|ant auto|0..31 | "
                       "wifi <ssid> [password] | wifi-clear | ap-pass <password> | https on/off | "
                       "save | load | factory-reset | restart");
         case CommandType::Status: return ok(status());
@@ -299,6 +319,24 @@ CommandResult BridgeController::execute(const Command& command) {
             applyConfig();
             return ok(status());
         }
+        case CommandType::SetOutputServices: {
+            const bool ftms = command.text == "ftms";
+            if (!ftms && command.text != "ant") return fail("output services must select ftms or ant");
+            if (!ftms && !ant_.available()) return fail("ANT+ output is unavailable");
+            if (!validOutputServices(command.serviceMask, ftms))
+                return fail(ftms ? "FTMS services must be Auto or include bit 1; maximum mask is 31" :
+                                   "ANT services must be Auto or a mask from 1 to 31");
+            const auto profile = effectiveOutputProfile(config_.config().ftmsOutputProfile,
+                                                        bridge_.trainerState().profile);
+            auto& config = config_.config();
+            const auto previous = ftms ? config.ftmsOutputServices : config.antOutputServices;
+            const auto added = effectiveOutputServices(command.serviceMask) & ~effectiveOutputServices(previous);
+            if ((added & availableOutputServices(bridge_.trainerState(), profile, !ftms)) != added)
+                return fail("selected services require unavailable source metrics or a compatible output profile");
+            (ftms ? config.ftmsOutputServices : config.antOutputServices) = command.serviceMask;
+            applyConfig();
+            return ok(ftms && ftms_.restartRequired() ? "FTMS services selected; save and restart to apply" : status());
+        }
         case CommandType::Trainer:
         case CommandType::FtmsInput: {
             auto& config = config_.config();
@@ -382,6 +420,18 @@ StatusView BridgeController::statusView() const {
         input.paired.randomAddress = config.pairedSource.addressType != 0;
         input.paired.name = config.pairedDeviceName;
         input.paired.adapter = config.pairedAdapterId;
+        if (ble_) {
+            for (const auto& uuid : ble_->advertisedServices())
+                input.paired.advertisedServices.push_back(pairedUuidString(uuid));
+            for (const auto& subscription : ble_->subscriptions()) {
+                SubscriptionView item;
+                item.service = pairedUuidString(subscription.service);
+                item.characteristic = pairedUuidString(subscription.characteristic);
+                item.state = subscription.state;
+                item.indicate = subscription.indicate;
+                input.paired.subscriptions.push_back(std::move(item));
+            }
+        }
     }
     view.outputProtocol = config.outputProtocol;
     auto& ftms = view.ftmsOutput;
@@ -392,6 +442,7 @@ StatusView BridgeController::statusView() const {
     ftms.advertising = ftms_.advertising();
     ftms.client = ftms_.clientConnected();
     ftms.control = ftms_.controlGranted();
+    ftms.restartRequired = ftms_.restartRequired();
     auto& ant = view.antOutput;
     ant.enabled = ant_.enabled();
     ant.available = ant_.available();
@@ -403,6 +454,27 @@ StatusView BridgeController::statusView() const {
     ant.display = ant_.displaySeen();
     ant.control = ant_.controlActive();
     ant.hardware = ant_.hardware();
+    ant.error = AntOutput::errorName(ant_.error());
+    ant.channelLimit = ant_.channelLimit();
+    const auto available = availableOutputServices(state, ftms.profile);
+    const auto antAvailable = availableOutputServices(state, ant.profile, true);
+    for (std::uint8_t bit = 1; bit <= kOutputServiceRunningSpeedCadence; bit <<= 1) {
+        OutputServiceView service;
+        service.id = outputServiceId(bit);
+        service.name = outputServiceName(bit);
+        service.enabled = (effectiveOutputServices(config.ftmsOutputServices) & bit) != 0;
+        service.available = (available & bit) != 0;
+        service.active = ftms_.serviceActive(bit);
+        ftms.services.push_back(std::move(service));
+        AntChannelView channel;
+        channel.id = outputServiceId(bit, true);
+        channel.name = outputServiceName(bit, true);
+        channel.deviceType = antOutputDeviceType(bit);
+        channel.enabled = (effectiveOutputServices(config.antOutputServices) & bit) != 0;
+        channel.open = ant_.channelOpen(bit);
+        channel.available = (antAvailable & bit) != 0;
+        ant.channels.push_back(std::move(channel));
+    }
     view.unsaved = config_.hasUnsavedChanges();
     return view;
 }
@@ -457,6 +529,8 @@ ConfigView BridgeController::configView() const {
     view.apPasswordDefault = config.apPassword == BridgeConfig{}.apPassword;
     view.https = config.httpsEnabled;
     view.unsaved = config_.hasUnsavedChanges();
+    view.ftmsOutputServices = config.ftmsOutputServices;
+    view.antOutputServices = config.antOutputServices;
     return view;
 }
 

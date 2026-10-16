@@ -1,5 +1,6 @@
 #include "ble_input_adapter.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "protocols/registry.hpp"
@@ -72,8 +73,14 @@ void BleInputAdapter::setPairedDevice(const PairedDevice& device) {
         state_ = LinkState::Idle;
         maybeEmit(true);
     }
+    auto cachedServices = changed ? device.advertisedServices : paired_.advertisedServices;
     paired_ = device;
-    if (changed) protocol_.reset();
+    paired_.advertisedServices = std::move(cachedServices);
+    if (changed) {
+        protocol_.reset();
+        advertisedServices_.clear();
+        subscriptions_.clear();
+    }
 }
 
 void BleInputAdapter::clearPairedDevice() {
@@ -105,10 +112,19 @@ bool BleInputAdapter::startConnection() {
         return false;
     }
     protocol_->reset();
+    advertisedServices_ = paired_.advertisedServices;
+    subscriptions_.clear();
     if (const auto* result = findResult(paired_.address)) {
         ble::Advertisement advertisement;
         advertisement.address = result->address;
         advertisement.ftmsServiceData = result->ftmsServiceData;
+        for (const auto& service : result->services) {
+            if (advertisedServices_.size() < ble::kMaxAdvertisedServices &&
+                std::find(advertisedServices_.begin(), advertisedServices_.end(), service) == advertisedServices_.end())
+                advertisedServices_.push_back(service);
+        }
+        advertisement.services = advertisedServices_;
+        paired_.advertisedServices = advertisedServices_;
         protocol_->onAdvertisement(advertisement, now);
     }
     ++attempts_;
@@ -127,7 +143,12 @@ bool BleInputAdapter::startConnection() {
         return false;
     }
     ++session_;
-    if (!transport_.connect(session_, paired_.address, protocol_->plan())) {
+    const auto plan = protocol_->plan();
+    for (std::size_t index = 0; index < plan.subscriptionCount && index < ble::kMaxSubscriptions; ++index) {
+        const auto& subscription = plan.subscriptions[index];
+        subscriptions_.push_back({subscription.service, subscription.characteristic, subscription.indicate, "pending"});
+    }
+    if (!transport_.connect(session_, paired_.address, plan)) {
         scheduleReconnect("connect request rejected");
         return false;
     }
@@ -136,6 +157,8 @@ bool BleInputAdapter::startConnection() {
 }
 
 bool BleInputAdapter::closeLink() {
+    advertisedServices_.clear();
+    subscriptions_.clear();
     bool accepted = true;
     if (state_ == LinkState::Connecting || state_ == LinkState::Ready) {
         accepted = transport_.disconnect(session_);
@@ -239,6 +262,8 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
             break;
         case ble::CentralEventType::Connected:
             if (state_ != LinkState::Connecting) break;
+            for (std::size_t index = 0; index < subscriptions_.size(); ++index)
+                subscriptions_[index].state = (event.mask & (1U << index)) ? "ok" : "failed";
             if (protocol_->onConnected(event.mask, now)) {
                 state_ = LinkState::Ready;
                 stateSinceMs_ = now;
@@ -322,6 +347,16 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     if (isExcluded(report.address)) return;
     const std::uint32_t now = clock_();
     ble::Advertisement advertisement = ble::Advertisement::from(report);
+    if (paired_.valid && report.address == paired_.address) {
+        for (const auto& service : advertisement.services) {
+            auto& cached = paired_.advertisedServices;
+            if (cached.size() < ble::kMaxAdvertisedServices &&
+                std::find(cached.begin(), cached.end(), service) == cached.end())
+                cached.push_back(service);
+        }
+        if (state_ == LinkState::Listening || state_ == LinkState::Connecting || state_ == LinkState::Ready)
+            advertisedServices_ = paired_.advertisedServices;
+    }
     if (protocol_ && report.address == paired_.address &&
         (state_ == LinkState::Listening || state_ == LinkState::Connecting || state_ == LinkState::Ready))
         protocol_->onAdvertisement(advertisement, now);

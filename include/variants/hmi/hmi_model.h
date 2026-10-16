@@ -98,6 +98,14 @@ std::string ftmsLabel(const smartfitness::FtmsOutputView& ftms);
 // Active output for the dashboard: "APP LINK" / "Advertising" / "ANT+ link" /
 // "No ANT+ stick" / "Output off".
 std::string outputLabel(const smartfitness::StatusView& status);
+// Compact enabled/active service summary; detailed state lives on the service screens.
+std::string outputServicesLabel(const smartfitness::StatusView& status);
+// Core UUID aliases, with ASCII ellipsis supported by the panel font.
+std::string serviceUuidLabel(const std::string& uuid);
+std::string advertisedServicesLabel(const std::vector<std::string>& services);
+Str subscriptionStateLabel(const std::string& state);
+// Mask zero is Auto (baseline only); BLE FTMS remains mandatory.
+Command toggleOutputService(const std::string& transport, std::uint8_t mask, std::uint8_t bit);
 // "Power 180 W" / "No target".
 std::string targetLabel(const smartfitness::StatusView& status);
 // Two-line scan list entry: name (or address) / "ftms"; the signal strength is
@@ -113,8 +121,8 @@ std::string onOff(bool value);
 
 // ---- Settings -----------------------------------------------------------------
 
-// HMI-only preferences (stored in their own NVS namespace, so the shared v3
-// bridge configuration schema is unchanged).
+// HMI-only preferences (stored in their own NVS namespace, independently of
+// the shared bridge configuration schema).
 struct HmiSettings {
     std::uint8_t brightness = 80;        // percent, 10..100
     std::uint16_t screenTimeoutS = 120;  // 0: never

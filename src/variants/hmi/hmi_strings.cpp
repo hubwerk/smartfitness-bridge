@@ -10,8 +10,8 @@ struct Entry {
     const char* text[static_cast<std::size_t>(Language::Count)];  // English, German (nullptr: fallback)
 };
 
-// Keep in enum order (host tests verify it). German column intentionally
-// empty until translations are available; tr() falls back to English.
+// Keep in enum order (host tests verify it). Untranslated German entries
+// fall back to English.
 constexpr Entry kTable[] = {
     {Str::AppTitle, {"SmartFitness", nullptr}},
     {Str::Dashboard, {"Dashboard", nullptr}},
@@ -122,6 +122,19 @@ constexpr Entry kTable[] = {
     {Str::ConfirmResetText2, {"Really erase\neverything?", nullptr}},
     {Str::ConfirmRestartTitle, {"Restart?", nullptr}},
     {Str::ConfirmRestartText, {"Unsaved changes are lost.", nullptr}},
+    {Str::InputServices, {"Input services", "Eingangsdienste"}},
+    {Str::OutputServices, {"Output services", "Ausgangsdienste"}},
+    {Str::NoServices, {"None reported", "Keine gemeldet"}},
+    {Str::ServiceOk, {"OK", "OK"}},
+    {Str::ServiceFail, {"FAIL", "FEHLER"}},
+    {Str::ServicePending, {"PENDING", "AUSSTEHEND"}},
+    {Str::ServiceAvailable, {"available", "verfügbar"}},
+    {Str::ServiceNoData, {"no data", "keine Daten"}},
+    {Str::ServiceActive, {"active", "aktiv"}},
+    {Str::ServiceMandatory, {"required", "Pflicht"}},
+    {Str::ServiceAuto, {"Auto: baseline only", "Auto: nur Basis"}},
+    {Str::BleRestartHint, {"BLE: save + restart to apply", "BLE: speichern + neu starten"}},
+    {Str::RestartRequired, {"Save + restart BLE", "Speichern + BLE-Neustart"}},
 };
 
 static_assert(sizeof(kTable) / sizeof(kTable[0]) == static_cast<std::size_t>(Str::Count),

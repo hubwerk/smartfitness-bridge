@@ -16,6 +16,190 @@ using ftms::ResultCode;
 
 namespace {
 
+void testSensorEncoders() {
+    ble::SensorEncoder encoder;
+    TrainerState state;
+    state.connected = true;
+    state.setSample(Metric::Power, -5);
+    state.setSample(Metric::HeartRate, 140);
+    state.setSample(Metric::Speed, 36);
+    state.setSample(Metric::Cadence, 60);
+    // Samples alone are not a declaration of source capabilities.
+    assert(encoder.cyclingPower(state).empty());
+    assert(encoder.heartRate(state).empty());
+    assert(encoder.cyclingSpeedCadence(state).empty());
+    for (Metric metric : {Metric::Power, Metric::HeartRate, Metric::Speed, Metric::Cadence})
+        state.capabilities.setMetric(metric, true);
+    assert(encoder.cyclingPowerFeature(state.capabilities, state.profile) == (Bytes{8, 0, 0, 0}));
+    assert(encoder.cyclingSpeedCadenceFeature(state.capabilities, state.profile) == (Bytes{3, 0}));
+    encoder.update(state, 0);
+    encoder.update(state, 1000);
+    assert(encoder.cyclingPower(state) == (Bytes{0x20, 0, 0xFB, 0xFF, 1, 0, 0, 4}));
+    assert(encoder.cyclingSpeedCadence(state) == (Bytes{3, 4, 0, 0, 0, 0x5E, 3, 1, 0, 0, 4}));
+    auto resumed = encoder;
+    resumed.reset();  // Output disabled; the peripheral clients were disconnected.
+    resumed.update(state, 100000);
+    assert(resumed.cyclingPower(state) == (Bytes{0x20, 0, 0xFB, 0xFF, 0, 0, 0, 0}));
+    resumed.update(state, 101000);
+    assert(resumed.cyclingPower(state) == (Bytes{0x20, 0, 0xFB, 0xFF, 1, 0, 0, 0x94}));
+    resumed = encoder;
+    resumed.invalidate();  // New same-profile source while the central remains connected.
+    resumed.update(state, 100000);
+    assert(resumed.cyclingPower(state) == (Bytes{0x20, 0, 0xFB, 0xFF, 1, 0, 0, 4}));
+    resumed.update(state, 101000);
+    assert(resumed.cyclingPower(state) == (Bytes{0x20, 0, 0xFB, 0xFF, 2, 0, 0, 0x94}));
+    assert(encoder.heartRate(state) == (Bytes{0, 140}));
+    state.setSample(Metric::HeartRate, 300);
+    assert(encoder.heartRate(state) == (Bytes{1, 0x2C, 1}));
+    state.setSample(Metric::HeartRate, 1.0e10F);
+    assert(encoder.heartRate(state) == (Bytes{1, 255, 255}));
+    state.setSample(Metric::Speed, 0);
+    state.setSample(Metric::Cadence, 0);
+    encoder.update(state, 1000);
+    const auto stopped = encoder.cyclingSpeedCadence(state);
+    encoder.update(state, 5000);
+    assert(encoder.cyclingSpeedCadence(state) == stopped);  // Event timestamps freeze at rest.
+    state.setSample(Metric::Cadence, NAN);
+    state.setSample(Metric::HeartRate, INFINITY);
+    assert(encoder.cyclingPower(state) == (Bytes{0, 0, 0xFB, 0xFF}));
+    assert(encoder.heartRate(state).empty());
+    state.capabilities.setMetric(Metric::Speed, false);
+    assert(encoder.cyclingSpeedCadence(state).empty());
+    state.connected = false;
+    assert(encoder.cyclingPower(state).empty());
+
+    state.connected = true;
+    state.profile = MachineProfile::Treadmill;
+    state.capabilities.setMetric(Metric::Speed, true);
+    state.setSample(Metric::Speed, 36);
+    state.setSample(Metric::Cadence, 180);
+    assert(encoder.runningSpeedCadence(state) == (Bytes{0, 0, 10, 180}));
+    state.setSample(Metric::Speed, 1.0e10F);
+    state.setSample(Metric::Cadence, 1.0e10F);
+    assert(encoder.runningSpeedCadence(state) == (Bytes{0, 255, 255, 255}));
+    state.setSample(Metric::Speed, -1);
+    assert(encoder.runningSpeedCadence(state).empty());
+    state.setSample(Metric::Speed, 36);
+    state.setSample(Metric::Cadence, 180);
+    assert(encoder.runningFeature() == (Bytes{0, 0}));
+    assert(encoder.cyclingSpeedCadence(state).empty());  // Steps are not crank revolutions.
+    assert(encoder.cyclingPower(state) == (Bytes{0, 0, 0xFB, 0xFF}));
+    state.capabilities.setMetric(Metric::Cadence, false);
+    assert(encoder.runningSpeedCadence(state).empty());  // Mandatory RSC cadence cannot be invented.
+    state.profile = MachineProfile::Rower;
+    assert(encoder.runningSpeedCadence(state).empty());
+    assert(encoder.cyclingSpeedCadenceFeature(state.capabilities, state.profile) == (Bytes{0, 0}));
+}
+
+void testSyntheticRevolutions() {
+    ble::RevolutionCounter counter;
+    counter.update(0, 1, true);
+    counter.update(1500, 1, true);
+    assert(counter.revolutions() == 1 && counter.eventTime(1024) == 1024);
+    counter.update(2000, 0, true);
+    assert(counter.revolutions() == 2 && counter.eventTime(1024) == 2048);
+    counter.update(5000, 0, true);
+    assert(counter.revolutions() == 2 && counter.eventTime(1024) == 2048);
+    counter.update(6000, 1, false);
+    counter.update(100000, 1, true);
+    assert(counter.revolutions() == 2);  // No phantom revolutions across disconnect.
+    counter.update(101000, 1, true);
+    assert(counter.revolutions() == 3);
+    assert(counter.eventTime(1024) == static_cast<std::uint16_t>(101 * 1024));
+
+    ble::RevolutionCounter rollover;
+    rollover.setRevolutions(0xFFFFFFFF);
+    rollover.update(0xFFFFFF00, 1, true);
+    rollover.update(744, 1, true);  // uint32 millisecond rollover, exactly one second.
+    assert(rollover.revolutions() == 0);
+    const auto expectedTicks = ((std::uint64_t{0xFFFFFF00} + 1000) * 1024 / 1000) & 0xFFFF;
+    assert(rollover.eventTime(1024) == expectedTicks);
+    ble::RevolutionCounter crank;
+    crank.update(0, 1, true);
+    crank.update(65536000, 1, true);
+    assert(crank.revolutions() == 65536);
+    assert(static_cast<std::uint16_t>(crank.revolutions()) == 0);
+    assert(crank.eventTime(1024) == 0);
+}
+
+void testBleServiceSelection() {
+    FtmsOutput output;
+    assert(output.configuredServices() == 0 && output.services() == 1);
+    assert(!output.restartRequired() && !output.serviceActive(ble::kFtms));
+    output.setServices(0xFF);
+    assert(output.configuredServices() == 0xFF && output.services() == 15);
+    output.setProfileOverride(FtmsOutputProfile::Treadmill);
+    assert(output.services() == 31);
+    output.begin();
+    output.setEnabled(true);
+    output.loop();  // Freeze topology when the peripheral first advertises.
+    assert(output.services() == 31 && !output.restartRequired());
+    output.notifyClientConnected();
+    output.loop();
+    for (std::uint8_t bit : {ble::kFtms, ble::kCps, ble::kHr, ble::kCsc, ble::kRsc})
+        assert(!output.serviceActive(bit));  // A connection isn't a data subscription.
+    output.setServices(0);
+    assert(output.services() == 31 && output.configuredServices() == 0 && output.restartRequired());
+    output.setServices(31);
+    assert(!output.restartRequired());
+    output.setProfileOverride(FtmsOutputProfile::IndoorBike);
+    assert(output.services() == 15 && output.restartRequired());
+    output.setEnabled(false);
+    assert(!output.serviceActive(ble::kFtms));
+    assert(ble::effectiveServices(0, MachineProfile::Treadmill) == 1);
+    assert(ble::effectiveServices(2, MachineProfile::IndoorBike) == 3);
+    assert(ble::effectiveServices(16, MachineProfile::IndoorBike) == 1);
+
+    FtmsOutput rebooted;
+    rebooted.setServices(31);  // A persisted selection, before Auto discovers its source.
+    rebooted.begin();
+    rebooted.setEnabled(true);
+    rebooted.loop();
+    assert(!rebooted.advertising() && !rebooted.restartRequired());
+    TrainerState treadmill;
+    treadmill.connected = true;
+    treadmill.trainerDetected = false;  // Read-only sources must work too.
+    treadmill.profile = MachineProfile::Treadmill;
+    treadmill.capabilities.setMetric(Metric::Speed, true);
+    treadmill.capabilities.setMetric(Metric::Cadence, true);
+    treadmill.setSample(Metric::Speed, 5);
+    treadmill.setSample(Metric::Cadence, 90);
+    rebooted.publishTrainerState(treadmill);
+    rebooted.loop();
+    assert(rebooted.advertising() && rebooted.services() == 31 && !rebooted.restartRequired());
+
+    FtmsOutput readOnlyHeartRate;
+    readOnlyHeartRate.setServices(ble::kFtms | ble::kHr);
+    readOnlyHeartRate.begin();
+    readOnlyHeartRate.setEnabled(true);
+    readOnlyHeartRate.loop();
+    assert(readOnlyHeartRate.advertising());  // No trainer/control/source gate.
+
+    FtmsOutput configuredAfterBegin;
+    configuredAfterBegin.begin();
+    configuredAfterBegin.setProfileOverride(FtmsOutputProfile::Treadmill);
+    configuredAfterBegin.setServices(31);
+    configuredAfterBegin.loop();
+    assert(configuredAfterBegin.services() == 31 && !configuredAfterBegin.restartRequired());
+
+    std::uint32_t discoveryTime = 0;
+    FtmsOutput absentTreadmill;
+    absentTreadmill.setClock([&discoveryTime] { return discoveryTime; });
+    absentTreadmill.setServices(31);
+    absentTreadmill.begin();
+    absentTreadmill.loop();
+    assert(!absentTreadmill.advertising());
+    discoveryTime = FtmsOutput::kProfileDiscoveryWaitMs - 1;
+    absentTreadmill.loop();
+    assert(!absentTreadmill.advertising());
+    ++discoveryTime;
+    absentTreadmill.loop();
+    assert(absentTreadmill.advertising() && absentTreadmill.services() == 15);
+    absentTreadmill.publishTrainerState(treadmill);
+    absentTreadmill.loop();
+    assert(absentTreadmill.restartRequired());  // Late discovery uses the existing restart hint.
+}
+
 ftms::ControlPointCommand decode(const Bytes& bytes) {
     ftms::ControlPointCommand command;
     assert(ftms::decodeControlPoint(bytes.data(), bytes.size(), command));
@@ -899,6 +1083,9 @@ void testProfileControlsAndFeatures() {
 }  // namespace
 
 void runFtmsTests() {
+    testSensorEncoders();
+    testSyntheticRevolutions();
+    testBleServiceSelection();
     testAllProfileCodecs();
     testMoreDataSplitting();
     testNativeProfileOutput();

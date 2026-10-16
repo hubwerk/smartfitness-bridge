@@ -249,12 +249,17 @@ std::string HmiUi::signature() const {
     std::string sig;
     switch (screen_) {
         case Screen::Devices:
+        case Screen::InputServices:
             sig += std::to_string(scan_.scanning) + std::to_string(scan_.bleAvailable) +
                    std::to_string(static_cast<int>(status_.state)) + status_.input.link + status_.input.paired.address +
                    status_.input.paired.adapter + std::to_string(status_.input.bleSelected) +
                    std::to_string(config_.simulatedTrainer);
             for (const auto& device : scan_.devices)
                 sig += "|" + device.address + device.name + device.adapter + std::to_string(signalLevel(device.rssi));
+            for (const auto& service : status_.input.paired.advertisedServices) sig += "|ADV:" + service;
+            for (const auto& sub : status_.input.paired.subscriptions)
+                sig += "|SUB:" + sub.service + ":" + sub.characteristic + ":" + sub.state + std::to_string(sub.indicate);
+            sig += outputServicesLabel(status_);
             break;
         case Screen::Control:
             sig += std::to_string(static_cast<int>(status_.state)) + std::to_string(status_.canControl) +
@@ -262,10 +267,19 @@ std::string HmiUi::signature() const {
             for (const bool supported : status_.controls) sig += supported ? "1" : "0";
             break;
         case Screen::Settings:
+        case Screen::OutputServices:
             sig += config_.ftmsName + std::to_string(static_cast<int>(config_.outputProtocol)) +
                    std::to_string(static_cast<int>(config_.ftmsOutputProfile)) + std::to_string(config_.antAvailable) +
                    std::to_string(config_.unsaved) + std::to_string(settings_.brightness) +
-                   std::to_string(settings_.screenTimeoutS) + std::to_string(settings_.ledRing);
+                   std::to_string(settings_.screenTimeoutS) + std::to_string(settings_.ledRing) +
+                   std::to_string(config_.ftmsOutputServices) + ":" + std::to_string(config_.antOutputServices) +
+                   std::to_string(status_.ftmsOutput.restartRequired);
+            for (const auto& service : status_.ftmsOutput.services)
+                sig += "|" + service.id + ":" + service.name + std::to_string(service.enabled) +
+                       std::to_string(service.available) + std::to_string(service.active);
+            for (const auto& channel : status_.antOutput.channels)
+                sig += "|" + channel.id + ":" + channel.name + std::to_string(channel.deviceType) +
+                       std::to_string(channel.enabled) + std::to_string(channel.open);
             break;
         default:
             break;
@@ -321,6 +335,8 @@ void HmiUi::build(bool keepFocus) {
         case Screen::Adjust: buildAdjust(); break;
         case Screen::Confirm: buildConfirm(); break;
         case Screen::Settings: buildSettings(); break;
+        case Screen::InputServices: buildInputServices(); break;
+        case Screen::OutputServices: buildOutputServices(); break;
         case Screen::FtmsName: buildFtmsName(); break;
         case Screen::Keyboard: buildKeyboard(); break;
     }
@@ -503,9 +519,7 @@ void HmiUi::updateDashboard() {
     lv_obj_set_style_bg_color(dash_.state, lv_color_hex(lcars::LightBlue), 0);
     lv_obj_set_style_text_color(dash_.state, lv_color_black(), 0);
     lv_label_set_text(dash_.target, lcars::uppercase(targetLabel(status_)).c_str());
-    const std::string info = std::string(profileLabel(status_.input.profile)) + " | " +
-                             outputLabel(status_) +
-                             "\n" + (status_.input.bleSelected ? "BLE " + status_.input.link : "SIMULATION");
+    const std::string info = outputServicesLabel(status_) + "\n" + outputLabel(status_);
     lv_label_set_text(dash_.info, lcars::uppercase(info).c_str());
 }
 
@@ -533,6 +547,9 @@ void HmiUi::buildDevices() {
         if (!status_.input.paired.adapter.empty()) paired += " (" + status_.input.paired.adapter + ")";
     }
     addLabel(list, paired + "\n" + inputLabel(status_) + " - " + tr(stateLabel(status_.state)));
+    addLabel(list, outputServicesLabel(status_));
+    if (status_.input.paired.valid)
+        lcars::pill(addButton(list, tr(Str::InputServices), [this] { navigate(Screen::InputServices); }), lcars::Violet);
     if (!scan_.bleAvailable) addLabel(list, tr(Str::BleUnavailable));
 
     if (scan_.scanning) {
@@ -592,6 +609,10 @@ void HmiUi::buildDeviceDetail() {
     addLabel(list, std::string(tr(Str::Adapter)) + ": " +
                        (device_.adapter.empty() ? std::string(tr(Str::Unknown))
                                                 : device_.adapter + " (" + tr(Str::Detected) + ")"));
+    if (!device_.services.empty()) {
+        lv_obj_t* adv = addLabel(list, advertisedServicesLabel(device_.services));
+        lv_obj_set_style_text_color(adv, lv_color_hex(lcars::Violet), 0);
+    }
     if (!device_.adapter.empty()) {
         addButton(list, tr(Str::Pair), [this] {
             Command pair;
@@ -829,6 +850,7 @@ void HmiUi::buildSettings() {
     addButton(list, withValue(Str::FtmsProfile, ftmsProfileLabel(config_.ftmsOutputProfile)), [this] {
         submit(makeText(CommandType::FtmsProfile, ftmsOutputProfileName(nextFtmsProfile(config_.ftmsOutputProfile))));
     });
+    addButton(list, tr(Str::OutputServices), [this] { navigate(Screen::OutputServices); });
     addButton(list, withValue(Str::Brightness, percent(settings_.brightness)), [this] {
         HmiSettings next = settings_;
         next.brightness = nextBrightness(settings_.brightness);
@@ -849,6 +871,64 @@ void HmiUi::buildSettings() {
     lcars::pill(addButton(list, tr(Str::FactoryReset), [this] { openFactoryReset(); }), lcars::Alert);
     addButton(list, tr(Str::Restart), [this] { openRestart(); });
     addLabel(list, std::string(tr(Str::Firmware)) + " " + config_.version);
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildInputServices() {
+    makeScreen(tr(Str::InputServices));
+    lv_obj_t* list = makeList(root_);
+    const auto& paired = status_.input.paired;
+    // Read-only pills remain focusable, making every wrapped row reachable by knob.
+    if (paired.advertisedServices.empty()) addLabel(list, "ADV -");
+    for (const auto& uuid : paired.advertisedServices)
+        lcars::pill(addButton(list, "ADV " + serviceUuidLabel(uuid), [] {}), lcars::Violet);
+    if (paired.subscriptions.empty()) addLabel(list, "SUB -");
+    for (const auto& sub : paired.subscriptions) {
+        const Str state = subscriptionStateLabel(sub.state);
+        const auto color = state == Str::ServiceOk ? lcars::LightBlue :
+                           state == Str::ServiceFail ? lcars::Alert : lcars::Tan;
+        const std::string text = "SUB " + serviceUuidLabel(sub.service) + "\n" +
+                                 serviceUuidLabel(sub.characteristic) + " " +
+                                 (sub.indicate ? "IND " : "NTF ") + tr(state);
+        lcars::pill(addButton(list, text, [] {}), color);
+    }
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildOutputServices() {
+    makeScreen(tr(Str::OutputServices));
+    lv_obj_t* list = makeList(root_);
+    if (status_.ftmsOutput.restartRequired) addLabel(list, tr(Str::RestartRequired));
+    addLabel(list, tr(Str::BleRestartHint));
+    lcars::pill(addButton(list, std::string("BLE ") + tr(Str::ServiceAuto) + "\n" +
+                         onOff(config_.ftmsOutputServices == 0), [this] {
+        Command command = makeText(CommandType::SetOutputServices, "ftms");
+        command.serviceMask = 0;
+        submit(command);
+    }), config_.ftmsOutputServices == 0 ? lcars::Golden : lcars::Tan);
+    constexpr const char* ids[] = {"ftms", "cps", "hr", "csc", "rsc"};
+    constexpr const char* names[] = {"FTMS", "CPS", "HR", "CSC", "RSC"};
+    for (std::uint8_t index = 0; index < 5; ++index) {
+        const auto bit = static_cast<std::uint8_t>(1U << index);
+        const bool enabled = index == 0 || (config_.ftmsOutputServices & bit) != 0;
+        bool available = index == 0;
+        bool active = false;
+        for (const auto& service : status_.ftmsOutput.services) {
+            if (service.id == ids[index]) {
+                available = service.available;
+                active = service.active;
+            }
+        }
+        std::string text = std::string("BLE ") + names[index] + " " + onOff(enabled) + "\n";
+        text += tr(index == 0 ? Str::ServiceMandatory :
+                   active ? Str::ServiceActive : available ? Str::ServiceAvailable : Str::ServiceNoData);
+        lcars::pill(addButton(list, text, [this, bit, index, enabled, available] {
+            if (index != 0 && (enabled || available))
+                submit(toggleOutputService("ftms", config_.ftmsOutputServices, bit));
+        }), enabled ? (available ? lcars::Golden : lcars::Alert) : lcars::Tan);
+    }
+    // The CrowPanel has no ANT transport; no misleading editable ANT controls.
+    addLabel(list, tr(Str::AntUnavailable));
     addButton(list, tr(Str::Back), [this] { back(); });
 }
 

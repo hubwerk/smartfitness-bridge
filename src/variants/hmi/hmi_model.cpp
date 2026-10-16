@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "ftms_output.h"
+#include "service_names.h"
 
 using namespace smartfitness;
 
@@ -58,6 +59,19 @@ std::uint8_t checksum(const std::vector<std::uint8_t>& data, std::size_t length)
     std::uint8_t sum = 0x5A;
     for (std::size_t index = 0; index < length; ++index) sum = static_cast<std::uint8_t>((sum << 1 | sum >> 7) ^ data[index]);
     return sum;
+}
+
+std::string outputShortName(const std::string& id) {
+    if (id == "ftms") return "FTMS";
+    if (id == "fec") return "FE-C";
+    if (id == "cps") return "CPS";
+    if (id == "power") return "PWR";
+    if (id == "hr") return "HR";
+    if (id == "csc") return "CSC";
+    if (id == "speed-cadence") return "SC";
+    if (id == "rsc") return "RSC";
+    if (id == "sdm") return "SDM";
+    return "?";
 }
 
 }  // namespace
@@ -228,9 +242,51 @@ std::string outputLabel(const StatusView& status) {
             if (ant.display) return tr(Str::AntDisplay);
             return tr(Str::AntOpen);
         }
+
         case OutputProtocol::Off: break;
     }
     return tr(Str::OutputOff);
+}
+
+std::string outputServicesLabel(const StatusView& status) {
+    std::string text = "OUT";
+    if (status.outputProtocol == OutputProtocol::Off) return text + " -";
+    if (status.outputProtocol == OutputProtocol::AntFec) {
+        if (!status.antOutput.available) return text + " ANT+ -";
+        for (const auto& channel : status.antOutput.channels)
+            if (channel.enabled) text += " " + outputShortName(channel.id);
+    } else {
+        for (const auto& service : status.ftmsOutput.services)
+            if (service.enabled) text += " " + outputShortName(service.id);
+    }
+    return text == "OUT" ? text + " -" : text;
+}
+
+std::string serviceUuidLabel(const std::string& uuid) {
+    std::string text = serviceShortName(uuid);
+    const auto ellipsis = text.find("\xe2\x80\xa6");
+    if (ellipsis != std::string::npos) text.replace(ellipsis, 3, "...");
+    return text;
+}
+
+std::string advertisedServicesLabel(const std::vector<std::string>& services) {
+    std::string text = "ADV";
+    for (const auto& uuid : services) text += " " + serviceUuidLabel(uuid);
+    return services.empty() ? text + " -" : text;
+}
+
+Str subscriptionStateLabel(const std::string& state) {
+    if (state == "ok") return Str::ServiceOk;
+    if (state == "failed" || state == "fail") return Str::ServiceFail;
+    return Str::ServicePending;
+}
+
+Command toggleOutputService(const std::string& transport, std::uint8_t mask, std::uint8_t bit) {
+    Command command = makeText(CommandType::SetOutputServices, transport);
+    const std::uint8_t explicitMask = mask == 0 ? 1 : mask;
+    command.serviceMask = static_cast<std::uint8_t>((explicitMask ^ bit) & 31);
+    if (transport == "ftms") command.serviceMask |= 1;
+    return command;
 }
 
 std::string targetLabel(const StatusView& status) {
