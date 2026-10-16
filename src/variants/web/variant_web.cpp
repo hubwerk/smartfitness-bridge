@@ -1,6 +1,5 @@
-// Web variant hooks: Wi-Fi + captive portal + async web server (WebPortal)
-// with the REST/WebSocket API (ApiExchange) on top of the shared controller,
-// plus the ANT+ USB stick transport for the ANT+ FE-C output.
+// Web variant hooks: Wi-Fi + captive portal + HTTPS/HTTP web server (WebPortal)
+// with the REST/WebSocket API (ApiExchange) and ANT+ USB transport.
 #ifdef ARDUINO
 
 #include <Arduino.h>
@@ -28,8 +27,7 @@ smartfitness::ant::AntTransport* antTransport() { return &antUsb; }
 void begin(BridgeController& controller, const BridgeConfig& config) {
     static WebPortal portal(controller, webApi);
     webPortal = &portal;
-    webPortal->begin(config.wifiSsid, config.wifiPassword, config.apPassword);
-    Serial.println("[Web] http://smartfitness.local/ (or the address shown above)");
+    webPortal->begin(config.wifiSsid, config.wifiPassword, config.apPassword, config.httpsEnabled);
 }
 
 void loop(BridgeController& controller) {

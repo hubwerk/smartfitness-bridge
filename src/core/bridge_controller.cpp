@@ -193,7 +193,7 @@ CommandResult BridgeController::execute(const Command& command) {
                       "power W | speed km/h | incline % | resistance % | "
                       "output off/ble-ftms/ant-fec | ftms-input on/off | ftms-name <name> | "
                       "ftms-profile auto/bike/treadmill/cross-trainer/rower/step-climber/stair-climber | "
-                      "wifi <ssid> [password] | wifi-clear | ap-pass <password> | "
+                      "wifi <ssid> [password] | wifi-clear | ap-pass <password> | https on/off | "
                       "save | load | factory-reset | restart");
         case CommandType::Status: return ok(status());
         case CommandType::Scan:
@@ -323,6 +323,9 @@ CommandResult BridgeController::execute(const Command& command) {
                 return fail("access point password must be 8-63 printable ASCII characters");
             config_.config().apPassword = command.text;
             return ok("access point password set; save and restart to apply");
+        case CommandType::Https:
+            config_.config().httpsEnabled = command.flag;
+            return ok(std::string("https ") + (command.flag ? "on" : "off") + "; save and restart to apply");
         case CommandType::Restart:
             restartRequested_ = true;
             return ok("restarting");
@@ -452,6 +455,7 @@ ConfigView BridgeController::configView() const {
     view.wifiSsid = config.wifiSsid;
     view.wifiPasswordSet = !config.wifiPassword.empty();
     view.apPasswordDefault = config.apPassword == BridgeConfig{}.apPassword;
+    view.https = config.httpsEnabled;
     view.unsaved = config_.hasUnsavedChanges();
     return view;
 }

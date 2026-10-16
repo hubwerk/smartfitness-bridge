@@ -63,7 +63,7 @@ CONFIG = {
     "type": "config", "version": "1.0.0", "ftmsName": "SmartFitness", "outputProtocol": "ble-ftms",
     "ftmsOutputProfile": "auto", "ftmsInput": True, "antAvailable": True,
     "simulatedTrainer": True, "wifiSsid": "Training room",
-    "wifiPasswordSet": True, "apPasswordDefault": True, "unsaved": False,
+    "wifiPasswordSet": True, "apPasswordDefault": True, "https": True, "unsaved": False,
 }
 WIFI_SCAN = {
     "type": "wifi-scan", "scanning": False,
@@ -135,6 +135,7 @@ def render(browser, output, name, width, height):
                                   device_scale_factor=1, reduced_motion="reduce")
     page = context.new_page()
     errors, external, commands, sockets, results, wifi_scans = [], [], [], [], {}, []
+    config = dict(CONFIG)  # saved settings change what /api/config returns
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("websocket", lambda ws: external.append(ws.url)
             if ws.url != "ws://bridge.test/ws" else None)
@@ -163,6 +164,8 @@ def render(browser, output, name, width, height):
         if request.method == "POST":
             endpoint = url.path.removeprefix("/api/")
             commands.append((endpoint, request.post_data_json))
+            if endpoint == "config" and "https" in request.post_data_json:
+                config["https"] = request.post_data_json["https"]
             ident = len(commands)
             result = {"type": "result", "id": ident, "done": True,
                       "ok": endpoint != "control",
@@ -174,7 +177,7 @@ def render(browser, output, name, width, height):
                 page.evaluate(
                     "(result) => setTimeout(() => window.__fixtureResult(result), 50)", result)
             return
-        fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": CONFIG,
+        fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": config,
                     "/api/wifi-scan/results": WIFI_SCAN}
         if url.path == "/api/result":
             request_route.fulfill(json=results[int(parse_qs(url.query)["id"][0])])
@@ -277,7 +280,7 @@ def render(browser, output, name, width, height):
             expect(page.locator("#toast")).to_have_text("applied")
             assert commands[-1] == ("config", {
                 "ftmsName": "SmartFitness", "outputProtocol": "ble-ftms", "ftmsOutputProfile": "auto",
-                "simulatedTrainer": True, "wifiSsid": "Training room", "save": True})
+                "simulatedTrainer": True, "wifiSsid": "Training room", "https": True, "save": True})
             page.locator("#toast").evaluate("e => e.style.display = 'none'")
         # Remove interaction-only focus so screenshots have a stable resting state.
         page.evaluate("document.activeElement.blur()")
@@ -327,11 +330,15 @@ def render(browser, output, name, width, height):
     sockets[0].send(json.dumps(CONFIG))
     expect(page.locator("#c-ftmsName")).to_have_value("Test treadmill")
     page.locator("#c-wifiPassword").fill("test-fixture-only")
+    # This fixture page is served over http://, so HTTPS off keeps the restart on this origin.
+    expect(page.locator("#c-https")).to_be_checked()
+    page.locator("#c-https").uncheck()
     command(page.locator("#btn-save"), "config")
     assert commands[-1] == ("config", {
         "ftmsName": "Test treadmill", "outputProtocol": "ant-fec", "ftmsOutputProfile": "treadmill",
         "simulatedTrainer": False, "wifiSsid": "Training room", "save": True,
-        "wifiPassword": "test-fixture-only"}), commands[-1]
+        "wifiPassword": "test-fixture-only", "https": False}), commands[-1]
+    expect(page.locator("#c-https")).not_to_be_checked()
     # Wi-Fi scan: spinner while busy, then a listbox under the SSID field.
     ssid, wifi_list, wifi_button = (page.locator("#c-wifiSsid"), page.locator("#wifi-list"),
                                     page.locator("#btn-wifi-scan"))
@@ -345,7 +352,13 @@ def render(browser, output, name, width, height):
     assert wifi_scans == [{}], wifi_scans
     expect(ssid).to_have_attribute("aria-expanded", "true")
     expect(wifi_list.get_by_role("option")).to_have_count(2)
-    expect(wifi_list.get_by_role("option").first).to_contain_text("-45 dBm · secured")
+    expect(wifi_list.get_by_role("option").first).to_have_text("Training roomsecured")
+    expect(wifi_list.get_by_role("option").first).to_have_attribute(
+        "aria-label", "Training room, signal 4 of 4, secured")
+    expect(wifi_list).not_to_contain_text("dBm")
+    # SSID field is 1.5x its former intrinsic width (203px -> 305px), capped on narrow screens.
+    ssid_width = ssid.evaluate("i => [i.offsetWidth, Math.min(305, i.closest('.row').clientWidth)]")
+    assert ssid_width[0] == ssid_width[1], ssid_width
     # Signal pictogram: same thresholds as hmi::signalLevel (-45 dBm -> 4, -71 dBm -> 2).
     assert wifi_list.locator(".bars").evaluate_all(
         "bars => bars.map(b => [b.dataset.level, b.querySelectorAll('i.on').length, "

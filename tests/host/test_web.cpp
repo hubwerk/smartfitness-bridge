@@ -332,6 +332,11 @@ void testApiParsing() {
     assert(commands[3].type == CommandType::Wifi && commands[3].text2 == "secret-pass" && !commands[3].flag);
     assert(commands[4].type == CommandType::ApPassword);
     assert(commands[5].type == CommandType::Save);
+    assert(parseApiRequest("config", R"({"apPassword":"ap-password","https":false,"save":true})", commands, error));
+    assert(commands.size() == 3 && commands[1].type == CommandType::Https && !commands[1].flag);
+    assert(commands[2].type == CommandType::Save);
+    assert(parseApiRequest("config", R"({"https":true})", commands, error) && commands[0].flag);
+    assert(!parseApiRequest("config", R"({"https":"off"})", commands, error) && contains(error, "true or false"));
     assert(parseApiRequest("config", R"({"wifiSsid":"Home"})", commands, error) && commands[0].flag);  // keep password
     assert(parseApiRequest("config", R"({"wifiSsid":""})", commands, error) &&
            commands[0].type == CommandType::WifiClear);
@@ -497,6 +502,11 @@ void testJsonViews() {
     assert(document["apPasswordDefault"] == false && document["ftmsName"] == FtmsOutput::kDefaultName);
     assert(document["outputProtocol"] == "ble-ftms" && document["antAvailable"] == false);
     assert(document["unsaved"] == true);
+    assert(document["https"] == true);
+    rig.ui.handleCommand("https off");
+    assert(parse(rig.configJson())["https"] == false && !rig.config.config().httpsEnabled);
+    rig.ui.handleCommand("https on");
+    assert(parse(rig.configJson())["https"] == true);
 
     rig.ui.handleCommand("scan");
     rig.central.advertise(address("aa:00:00:00:00:41"), "ECH-SPORT-1", {});
@@ -590,21 +600,57 @@ void testRequestProtection() {
         return web::postRequestStatus(type, present, origin, "192.168.1.12", "192.168.4.1");
     };
     assert(policy("application/json", "", false) == 200);
-    for (const auto* origin : {"http://smartfitness.local", "http://smartfitness.local:80",
-                              "http://192.168.1.12", "http://192.168.4.1"})
+    for (const auto* origin : {"https://smartfitness.local", "https://smartfitness.local:443",
+                              "https://192.168.1.12", "https://192.168.4.1"})
         assert(policy(" Application/JSON; charset=utf-8", origin) == 200);
-    for (const auto* origin : {"", "null", "https://smartfitness.local", "http://smartfitness.local.evil",
-                              "http://smartfitness.local@evil", "http://smartfitness.local:8080",
-                              "http://smartfitness.local/", "http://192.168.1.13", "http://0.0.0.0"})
+    for (const auto* origin : {"", "null", "http://smartfitness.local", "http://smartfitness.local:80",
+                              "http://192.168.4.1", "https://smartfitness.local.evil",
+                              "https://smartfitness.local@evil", "https://smartfitness.local:8443",
+                              "https://smartfitness.local/", "https://192.168.1.13", "https://0.0.0.0"})
         assert(policy("application/json", origin) == 403);
     for (const auto* type : {"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data",
                             "application/jsonp"})
         assert(policy(type, "", false) == 415);
     assert(web::postRequestStatus("application/json", false, "", "", "", true) == 400);
 
+    // HTTPS switched off: only plain-HTTP origins are trusted.
+    const auto plain = [](const std::string& origin) {
+        return web::postRequestStatus("application/json", true, origin, "192.168.1.12", "192.168.4.1", false, false);
+    };
+    for (const auto* origin : {"http://smartfitness.local", "http://smartfitness.local:80", "http://192.168.1.12",
+                              "http://192.168.4.1"})
+        assert(plain(origin) == 200);
+    for (const auto* origin : {"https://smartfitness.local", "https://192.168.4.1", "http://smartfitness.local:443",
+                              "http://smartfitness.local:8080", "http://192.168.1.13", "null"})
+        assert(plain(origin) == 403);
+
     assert(!web::canBroadcast(0, true));
     assert(!web::canBroadcast(1, false));
     assert(web::canBroadcast(2, true));
+}
+
+void testHttpsRedirect() {
+    const auto redirect = [](const std::string& host, const std::string& uri, const std::string& sta = "192.168.1.12",
+                             const std::string& ap = "192.168.4.1") {
+        return web::httpsRedirect(host, uri, sta, ap);
+    };
+    assert(web::hostName("192.168.4.1:80") == "192.168.4.1");
+    assert(web::ownHost("smartfitness.local:80", "", "192.168.4.1"));
+    assert(!web::ownHost("0.0.0.0", "0.0.0.0", ""));
+    assert(redirect("smartfitness.local", "/") == "https://smartfitness.local/");
+    assert(redirect("192.168.1.12:80", "/api/status?x=1") == "https://192.168.1.12/api/status?x=1");
+    assert(redirect("192.168.4.1", "/generate_204") == "https://192.168.4.1/generate_204");
+    // Captive-portal probes for foreign hosts and odd paths land on the UI root.
+    assert(redirect("connectivitycheck.gstatic.com", "/generate_204") == "https://192.168.4.1/");
+    assert(redirect("", "/") == "https://192.168.4.1/");
+    assert(redirect("evil.example", "/", "192.168.1.12", "0.0.0.0") == "https://192.168.1.12/");
+    assert(redirect("smartfitness.local", "//evil.example/") == "https://smartfitness.local/");
+    assert(redirect("smartfitness.local", "/a\r\nSet-Cookie: x") == "https://smartfitness.local/");
+    assert(redirect("smartfitness.local", "") == "https://smartfitness.local/");
+
+    assert(std::string(web::statusLine(202)) == "202 Accepted");
+    assert(std::string(web::statusLine(415)) == "415 Unsupported Media Type");
+    assert(std::string(web::statusLine(418)) == "500 Internal Server Error");
 }
 
 void testBodyReceipt() {
@@ -660,4 +706,5 @@ void runWebTests() {
     testWifiScan();
     testRequestProtection();
     testBodyReceipt();
+    testHttpsRedirect();
 }

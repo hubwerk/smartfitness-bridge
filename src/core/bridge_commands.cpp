@@ -178,6 +178,7 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
     static const Toggle kToggles[] = {
         {"trainer", CommandType::Trainer},
         {"ftms-input", CommandType::FtmsInput},
+        {"https", CommandType::Https},
     };
     for (const auto& entry : kToggles) {
         if (key == entry.name) {

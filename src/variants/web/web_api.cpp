@@ -201,7 +201,7 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
     if (endpoint == "config") {
         if (!onlyKeys(object,
                       {"ftmsName", "ftmsOutputProfile", "outputProtocol", "ftmsInput", "simulatedTrainer",
-                       "wifiSsid", "wifiPassword", "apPassword", "save"},
+                       "wifiSsid", "wifiPassword", "apPassword", "https", "save"},
                       error))
             return false;
         std::string text;
@@ -278,6 +278,11 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
             Command command = simple(CommandType::ApPassword);
             command.text = text;
             commands.push_back(command);
+        }
+        {
+            Command command = simple(CommandType::Https);
+            if (!optionalBool(object, "https", command.flag, present, error)) return false;
+            if (present) commands.push_back(command);
         }
         bool save = false;
         if (!optionalBool(object, "save", save, present, error)) return false;

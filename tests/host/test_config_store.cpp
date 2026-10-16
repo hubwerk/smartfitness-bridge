@@ -30,6 +30,7 @@ BridgeConfig customConfig() {
     config.wifiPassword = "secret-pass";
     config.apPassword = "bridge-pass";
     config.ftmsOutputProfile = FtmsOutputProfile::Treadmill;
+    config.httpsEnabled = false;
     return config;
 }
 
@@ -72,12 +73,20 @@ std::vector<std::uint8_t> v3Record(bool ftmsOutput) {
     return withCrc(body);
 }
 
+std::vector<std::uint8_t> v4Record(bool ftmsOutput, bool httpsEnabled) {
+    auto body = v3Record(ftmsOutput);
+    body.resize(body.size() - 4);
+    body[2] = 4;
+    body.push_back(static_cast<std::uint8_t>(httpsEnabled));
+    return withCrc(body);
+}
+
 void testMigrationFromV3() {
     BridgeConfig decoded;
     assert(ConfigStore::deserialize(v3Record(true), decoded));
     assert(decoded.outputProtocol == OutputProtocol::BleFtms && !decoded.ftmsInput && decoded.simulatedTrainer);
     assert(decoded.ftmsName == "Garage Bike" && decoded.pairedAdapterId == "ftms" && decoded.wifiSsid == "Home");
-    assert(decoded.ftmsOutputProfile == FtmsOutputProfile::Rower && decoded.pairedSource.valid);
+    assert(decoded.ftmsOutputProfile == FtmsOutputProfile::Rower && decoded.pairedSource.valid && decoded.httpsEnabled);
     // The former ANT placeholder flag never selects ANT+ FE-C.
     assert(ConfigStore::deserialize(v3Record(false), decoded));
     assert(decoded.outputProtocol == OutputProtocol::Off);
@@ -88,10 +97,19 @@ void testMigrationFromV3() {
     assert(store.begin() == ConfigLoadResult::Loaded && !store.hasUnsavedChanges());
     store.config().outputProtocol = OutputProtocol::AntFec;
     assert(store.save() == ConfigSaveResult::Written);
-    assert(backend.record()[2] == 4 && backend.record()[3] == static_cast<std::uint8_t>(OutputProtocol::AntFec));
+    assert(backend.record()[2] == ConfigStore::kSchemaVersion &&
+           backend.record()[3] == static_cast<std::uint8_t>(OutputProtocol::AntFec));
     ConfigStore rebooted(backend);
     assert(rebooted.begin() == ConfigLoadResult::Loaded);
     assert(rebooted.config().outputProtocol == OutputProtocol::AntFec);
+}
+
+void testMigrationFromV4() {
+    BridgeConfig decoded;
+    assert(ConfigStore::deserialize(v4Record(true, false), decoded));
+    assert(decoded.outputProtocol == OutputProtocol::BleFtms && !decoded.httpsEnabled);
+    assert(ConfigStore::deserialize(v4Record(false, true), decoded));
+    assert(decoded.outputProtocol == OutputProtocol::Off && decoded.httpsEnabled);
 }
 
 void testMigrationFromV1() {
@@ -103,6 +121,7 @@ void testMigrationFromV1() {
     expected.wifiPassword.clear();
     expected.apPassword = BridgeConfig{}.apPassword;
     expected.ftmsOutputProfile = FtmsOutputProfile::Auto;
+    expected.httpsEnabled = true;
     assert(decoded == expected);
 
     MemoryConfigBackend backend;
@@ -156,7 +175,7 @@ void testV2Limits() {
 
 void testMigrationFromV2() {
     auto body = ConfigStore::serialize(customConfig());
-    body.resize(body.size() - 5);  // Remove v3 profile and CRC.
+    body.resize(body.size() - 6);  // Remove v3 profile, v4 HTTPS flag and CRC.
     body[2] = 2;
     // v2 header flags: antEnabled ftmsInput ftmsOutput simulatedTrainer.
     const std::vector<std::uint8_t> flags{1, body[4], 0, body[5]};
@@ -165,6 +184,7 @@ void testMigrationFromV2() {
     const auto legacy = withCrc(body);
     BridgeConfig expected = customConfig();
     expected.ftmsOutputProfile = FtmsOutputProfile::Auto;
+    expected.httpsEnabled = true;
     MemoryConfigBackend backend;
     backend.setRecord(legacy);
     ConfigStore store(backend);
@@ -263,6 +283,14 @@ void testNonFiniteScanDurations() {
     }
 }
 
+void testHttpsConsoleCommand() {
+    Command command;
+    std::string error;
+    assert(parseConsoleCommand("https off", command, error) && command.type == CommandType::Https && !command.flag);
+    assert(parseConsoleCommand("https on", command, error) && command.type == CommandType::Https && command.flag);
+    assert(!parseConsoleCommand("https maybe", command, error) && error == "expected on or off");
+}
+
 void testRoundTripAcrossInstances() {
     MemoryConfigBackend backend;
     {
@@ -353,8 +381,11 @@ void testCorruptAndOldVersionFallback() {
     longName.insert(longName.begin() + 7, 10, 'x');
     bad.push_back(withCrc(longName));
     auto badAddressType = body;
-    badAddressType[badAddressType.size() - 8] = 9;
+    badAddressType[badAddressType.size() - 9] = 9;
     bad.push_back(withCrc(badAddressType));
+    auto badHttps = body;
+    badHttps.back() = 2;
+    bad.push_back(withCrc(badHttps));
 
     for (const auto& record : bad) {
         assert(!ConfigStore::deserialize(record, decoded));
@@ -525,10 +556,12 @@ void runConfigStoreTests() {
     testMigrationFromV1();
     testMigrationFromV3();
     testMigrationFromV2();
+    testMigrationFromV4();
     testOutputProfilePersistence();
     testV2Limits();
     testApPasswordValidationAndFallback();
     testNonFiniteScanDurations();
+    testHttpsConsoleCommand();
     testUnpairPersistence();
     testFactoryReset();
     testFailedFactoryReset();
