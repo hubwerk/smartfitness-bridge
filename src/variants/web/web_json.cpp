@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "bridge_commands.h"
+#include "service_names.h"
 
 using namespace smartfitness;
 
@@ -82,6 +83,21 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
         paired["addressType"] = in.paired.randomAddress ? "random" : "public";
         paired["name"] = in.paired.name;
         paired["adapter"] = in.paired.adapter;
+        JsonArray advertised = paired["advertisedServices"].to<JsonArray>();
+        JsonObject advertisedNames = paired["advertisedServiceNames"].to<JsonObject>();
+        for (const auto& uuid : in.paired.advertisedServices) {
+            advertised.add(uuid);
+            advertisedNames[uuid] = serviceShortName(uuid);
+        }
+        JsonArray subscriptions = paired["subscriptions"].to<JsonArray>();
+        for (const auto& entry : in.paired.subscriptions) {
+            JsonObject subscription = subscriptions.add<JsonObject>();
+            subscription["service"] = entry.service;
+            subscription["characteristic"] = entry.characteristic;
+            subscription["name"] = serviceShortName(entry.service);
+            subscription["state"] = entry.state;
+            subscription["indicate"] = entry.indicate;
+        }
     } else {
         input["paired"] = nullptr;
     }
@@ -94,6 +110,16 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
     ftms["advertising"] = out.advertising;
     ftms["client"] = out.client;
     ftms["control"] = out.control;
+    ftms["restartRequired"] = out.restartRequired;
+    JsonArray services = ftms["services"].to<JsonArray>();
+    for (const auto& entry : out.services) {
+        JsonObject service = services.add<JsonObject>();
+        service["id"] = entry.id;
+        service["name"] = entry.name;
+        service["enabled"] = entry.enabled;
+        service["available"] = entry.available;
+        service["active"] = entry.active;
+    }
     const auto& antView = status.antOutput;
     JsonObject ant = document["antOutput"].to<JsonObject>();
     ant["enabled"] = antView.enabled;
@@ -106,6 +132,17 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
     ant["display"] = antView.display;
     ant["control"] = antView.control;
     ant["hardware"] = antView.hardware;
+    ant["error"] = antView.error;
+    ant["channelLimit"] = antView.channelLimit;
+    JsonArray channels = ant["channels"].to<JsonArray>();
+    for (const auto& entry : antView.channels) {
+        JsonObject channel = channels.add<JsonObject>();
+        channel["id"] = entry.id;
+        channel["name"] = entry.name;
+        channel["deviceType"] = entry.deviceType;
+        channel["enabled"] = entry.enabled;
+        channel["open"] = entry.open;
+    }
     document["outputProtocol"] = outputProtocolName(status.outputProtocol);
     document["unsaved"] = status.unsaved;
     JsonObject net = document["network"].to<JsonObject>();
@@ -156,6 +193,8 @@ std::string configJson(const ConfigView& config) {
     document["outputProtocol"] = outputProtocolName(config.outputProtocol);
     document["antAvailable"] = config.antAvailable;
     document["ftmsOutputProfile"] = ftmsOutputProfileName(config.ftmsOutputProfile);
+    document["ftmsOutputServices"] = config.ftmsOutputServices;
+    document["antOutputServices"] = config.antOutputServices;
     document["ftmsInput"] = config.ftmsInput;
     document["simulatedTrainer"] = config.simulatedTrainer;
     // Passwords are never returned, only whether they are set.

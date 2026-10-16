@@ -8,6 +8,7 @@
 #include "ant_output.h"
 #include "ble_input_adapter.h"
 #include "bridge/bridge_core.hpp"
+#include "bridge/output_services.hpp"
 #include "bridge_commands.h"
 #include "bridge_controller.h"
 #include "bridge_view_model.h"
@@ -83,7 +84,19 @@ void testDefaultViews() {
     assert(config.outputProtocol == OutputProtocol::BleFtms && !config.antAvailable && config.simulatedTrainer);
     assert(status.outputProtocol == OutputProtocol::BleFtms && !status.antOutput.enabled);
     assert(!status.antOutput.available && status.antOutput.link == "disabled");
+    assert(status.antOutput.error.empty() && status.antOutput.channelLimit == 0);
     assert(config.wifiSsid.empty() && !config.wifiPasswordSet && config.apPasswordDefault && !config.unsaved);
+    assert(config.ftmsOutputServices == 0 && config.antOutputServices == 0);
+    assert(status.ftmsOutput.services.size() == 5 && status.antOutput.channels.size() == 5);
+    assert(status.ftmsOutput.services[0].id == "ftms" && status.ftmsOutput.services[0].enabled &&
+           status.ftmsOutput.services[0].available);
+    for (std::size_t i = 1; i < 5; ++i) {
+        assert(!status.ftmsOutput.services[i].enabled && !status.ftmsOutput.services[i].available);
+        assert(!status.antOutput.channels[i].enabled && !status.antOutput.channels[i].open);
+    }
+    assert(status.antOutput.channels[0].id == "fec" && status.antOutput.channels[0].deviceType == 17);
+    assert(status.antOutput.channels[1].deviceType == 11 && status.antOutput.channels[2].deviceType == 120 &&
+           status.antOutput.channels[3].deviceType == 121 && status.antOutput.channels[4].deviceType == 124);
 
     const ScanView scan = rig.controller.scanView();
     assert(scan.bleAvailable && !scan.scanning && scan.devices.empty() && scan.dropped == 0);
@@ -213,6 +226,52 @@ void testScanSortingAndRelevance() {
     assert(view.devices[6].relevant == false);
 }
 
+void testPairedServiceAndSubscriptionViews() {
+    ControllerRig rig;
+    assert(rig.controller.execute(make(CommandType::Scan)).ok);
+    const auto source = address("aa:00:00:00:00:31");
+    rig.central.advertise(source, "Bike", {0x1826, 0x180D});
+    rig.core.loop();
+    Command pair = make(CommandType::Pair);
+    pair.address = source;
+    pair.adapterId = "ftms";
+    assert(rig.controller.execute(pair).ok);
+    auto paired = rig.controller.statusView().input.paired;
+    assert(paired.advertisedServices == std::vector<std::string>({"0x1826", "0x180d"}));
+    assert(!paired.subscriptions.empty());
+    assert(paired.subscriptions.size() == rig.ble.subscriptions().size());
+    bool sawIndication = false;
+    for (std::size_t i = 0; i < paired.subscriptions.size(); ++i) {
+        const auto& sourceSubscription = rig.ble.subscriptions()[i];
+        const auto& view = paired.subscriptions[i];
+        assert(view.service == sourceSubscription.service.toString());
+        assert(view.characteristic == sourceSubscription.characteristic.toString());
+        assert(view.state == "pending" && view.indicate == sourceSubscription.indicate);
+        sawIndication = sawIndication || view.indicate;
+    }
+    assert(sawIndication);
+    rig.central.pushEvent(ble::CentralEventType::Connected, 1);
+    rig.core.loop();
+    paired = rig.controller.statusView().input.paired;
+    assert(paired.subscriptions[0].state == "ok");
+    for (std::size_t i = 1; i < paired.subscriptions.size(); ++i)
+        assert(paired.subscriptions[i].state == "failed");
+    assert(rig.config.config().pairedAdvertisedServices == paired.advertisedServices);
+    assert(rig.controller.execute(make(CommandType::Disconnect)).ok);
+    assert(rig.controller.statusView().input.paired.advertisedServices.empty());
+    ControllerRig rebooted;
+    rebooted.backend.setRecord(rig.backend.record());
+    assert(rebooted.controller.execute(make(CommandType::Load)).ok);
+    assert(rebooted.ble.pairedDevice().advertisedServices ==
+           std::vector<ble::Uuid>({ble::Uuid::from16(0x1826), ble::Uuid::from16(0x180D)}));
+    assert(rebooted.controller.execute(make(CommandType::Connect)).ok);
+    assert(rebooted.controller.statusView().input.paired.advertisedServices ==
+           std::vector<std::string>({"0x1826", "0x180d"}));
+    assert(rig.controller.execute(make(CommandType::Unpair)).ok);
+    paired = rig.controller.statusView().input.paired;
+    assert(!paired.valid && paired.advertisedServices.empty() && paired.subscriptions.empty());
+}
+
 void testConfigViewTracksCommands() {
     ControllerRig rig;
     Command name = make(CommandType::FtmsName);
@@ -265,7 +324,7 @@ void testOutputProtocolSelection() {
     assert(rig.controller.execute(output).ok);
     assert(!rig.ftms.enabled() && rig.ant.enabled());
     rig.ant.setClock([&rig] { return rig.now; });
-    for (int index = 0; index < 4; ++index) rig.core.loop();
+    for (int index = 0; index < 16 && !rig.ant.channelOpen(); ++index) rig.core.loop();
     StatusView status = rig.controller.statusView();
     assert(status.outputProtocol == OutputProtocol::AntFec && status.antOutput.enabled && status.antOutput.available);
     assert(status.antOutput.link == "open" && status.antOutput.stick && status.antOutput.open);
@@ -313,6 +372,80 @@ void testAdapterViews() {
     assert(ftms && ifitModel);
 }
 
+void testOutputServicesCommands() {
+    ControllerRig rig(true);
+    Command services = make(CommandType::SetOutputServices);
+    services.text = "ftms";
+    services.serviceMask = 3;
+    assert(!rig.controller.execute(services).ok);  // No source power yet.
+    services.serviceMask = 2;
+    assert(!rig.controller.execute(services).ok);  // FTMS is mandatory.
+    services.text = "usb";
+    services.serviceMask = 0;
+    assert(!rig.controller.execute(services).ok);
+    services.text = "ant";
+    services.serviceMask = 32;
+    assert(!rig.controller.execute(services).ok);
+    services.serviceMask = 0;
+    assert(rig.controller.execute(services).ok);  // Auto works without source data.
+    assert(rig.controller.execute(make(CommandType::Simulate)).ok);
+    services.text = "ftms";
+    services.serviceMask = 15;
+    const auto selected = rig.controller.execute(services);
+    assert(selected.ok && selected.message.find("save and restart") != std::string::npos);
+    assert(rig.ftms.configuredServices() == 15);
+    assert(rig.controller.statusView().ftmsOutput.restartRequired);
+    services.text = "ant";
+    services.serviceMask = 6;  // Sensor-only ANT does not require FE-C.
+    assert(rig.controller.execute(services).ok);
+    assert(rig.ant.configuredServices() == 6 && rig.ant.services() == 6);
+    auto config = rig.controller.configView();
+    assert(config.ftmsOutputServices == 15 && config.antOutputServices == 6 && config.unsaved);
+    assert(rig.backend.writes() == 0);  // Same explicit-save convention as profiles.
+    const auto status = rig.controller.statusView();
+    assert(status.ftmsOutput.services[1].enabled && status.ftmsOutput.services[1].available);
+    assert(status.ftmsOutput.services[2].enabled && status.ftmsOutput.services[2].available);
+    assert(status.ftmsOutput.services[3].enabled && status.ftmsOutput.services[3].available);
+    assert(!status.ftmsOutput.services[4].available);
+    assert(!status.antOutput.channels[0].enabled && status.antOutput.channels[1].enabled &&
+           status.antOutput.channels[2].enabled);
+    assert(rig.controller.execute(make(CommandType::Save)).ok);
+    services.serviceMask = 0;
+    assert(rig.controller.execute(services).ok);
+    assert(rig.controller.execute(make(CommandType::Load)).ok);
+    assert(rig.ant.configuredServices() == 6 && rig.ftms.configuredServices() == 15);
+    services.text = "ftms";
+    services.serviceMask = 17;
+    assert(!rig.controller.execute(services).ok);  // Bike is not a running profile.
+    Command profile = make(CommandType::FtmsProfile);
+    profile.text = "treadmill";
+    assert(rig.controller.execute(profile).ok);
+    assert(rig.controller.execute(services).ok);
+    assert(rig.controller.statusView().ftmsOutput.services[4].available);
+    assert(rig.controller.execute(make(CommandType::FactoryReset)).ok);
+    assert(rig.ftms.configuredServices() == 0 && rig.ant.configuredServices() == 0);
+    assert(!rig.controller.execute(control(Control::Power, 100)).ok);  // Control gate unchanged.
+}
+
+void testServiceAvailabilityUsesCapabilitiesWithoutInventingSamples() {
+    TrainerState state;
+    assert(availableOutputServices(state) == 1);
+    state.capabilities.setMetric(Metric::Power, true);
+    state.capabilities.setMetric(Metric::HeartRate, true);
+    state.capabilities.setMetric(Metric::Cadence, true);
+    assert(availableOutputServices(state) == 15);
+    assert(!state.sample(Metric::Power).valid);
+    assert(availableOutputServices(state, MachineProfile::Treadmill) == 7);  // RSC needs speed, not cadence alone.
+    state.capabilities.setMetric(Metric::Speed, true);
+    assert(availableOutputServices(state, MachineProfile::Treadmill) == 23);
+    assert(availableOutputServices(state, MachineProfile::Rower) == 7);
+    assert(outputServicesAvailable(0, TrainerState{}, MachineProfile::IndoorBike));
+    assert(!outputServicesAvailable(2, TrainerState{}, MachineProfile::IndoorBike));
+    TrainerState sampled;
+    sampled.setSample(Metric::Speed, 0.0F);
+    assert(availableOutputServices(sampled) == 9);  // Real zero is still valid.
+}
+
 void testWithoutBleInput() {
     MemoryConfigBackend backend;
     SimulatedDeviceAdapter simulation;
@@ -339,8 +472,11 @@ void runControllerTests() {
     testSimulationTelemetryAndTargets();
     testScanAndPairViews();
     testScanSortingAndRelevance();
+    testPairedServiceAndSubscriptionViews();
     testConfigViewTracksCommands();
     testOutputProtocolSelection();
+    testOutputServicesCommands();
+    testServiceAvailabilityUsesCapabilitiesWithoutInventingSamples();
     testAdapterViews();
     testWithoutBleInput();
 }

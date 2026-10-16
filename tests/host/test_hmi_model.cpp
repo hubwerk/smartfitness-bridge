@@ -48,7 +48,10 @@ void testStrings() {
         assert(text && *text && std::string(text) != "?");
     }
     assert(std::string(tr(Str::Dashboard)) == "Dashboard");
-    setLanguage(Language::German);  // falls back to English until translated
+    assert(std::string(tr(Str::OutputServices)) == "Output services");
+    setLanguage(Language::German);  // untranslated entries still fall back to English
+    assert(std::string(tr(Str::OutputServices)) == "Ausgangsdienste");
+    assert(std::string(tr(Str::ServiceNoData)) == "keine Daten");
     assert(std::string(tr(Str::Dashboard)) == "Dashboard");
     setLanguage(Language::English);
     assert(language() == Language::English);
@@ -130,7 +133,7 @@ void testStatusTexts() {
     status.state = RuntimeState::ControlReady;
     assert(inputLabel(status) == "Simulation");
     status.input.bleSelected = true;
-    status.input.paired = {true, "aa:00:00:00:00:21", false, "KICKR", "ftms"};
+    status.input.paired = {true, "aa:00:00:00:00:21", false, "KICKR", "ftms", {}, {}};
     status.input.link = "ready";
     assert(inputLabel(status) == "KICKR (ftms) ready");
     assert(std::string(tr(stateLabel(RuntimeState::ControlReady))) == "Control ready");
@@ -197,6 +200,37 @@ void testStatusTexts() {
     assert(scanEntryLabel(device) == "WalkingPad\nwalkingpad-r1");
     assert(!scanEntryMuted(device));
     assert(onOff(true) == "on" && onOff(false) == "off");
+}
+
+void testServiceDisplays() {
+    assert(serviceUuidLabel("1826") == "FTMS");
+    assert(serviceUuidLabel("2ad2") == "2ad2");
+    assert(serviceUuidLabel("12345678-1234-5678-1234-123456789abc") == "12345678...");
+    assert(advertisedServicesLabel({}) == "ADV -");
+    assert(advertisedServicesLabel({"1826", "1818", "180d"}) == "ADV FTMS CPS HR");
+    assert(subscriptionStateLabel("ok") == Str::ServiceOk);
+    assert(subscriptionStateLabel("fail") == Str::ServiceFail);
+    assert(subscriptionStateLabel("pending") == Str::ServicePending);
+    assert(subscriptionStateLabel("unknown") == Str::ServicePending);
+    StatusView status;
+    assert(outputServicesLabel(status) == "OUT -");
+    status.ftmsOutput.services = {{"ftms", "FTMS", true, true, true},
+                                   {"cps", "CPS", true, true, false},
+                                   {"hr", "HR", false, true, false}};
+    assert(outputServicesLabel(status) == "OUT FTMS CPS");
+    status.outputProtocol = OutputProtocol::Off;
+    assert(outputServicesLabel(status) == "OUT -");
+    status.outputProtocol = OutputProtocol::AntFec;
+    assert(outputServicesLabel(status) == "OUT ANT+ -");
+    status.antOutput.available = true;
+    status.antOutput.channels = {{"fec", "FE-C", 17, true, true}, {"hr", "HR", 120, false, false}};
+    assert(outputServicesLabel(status) == "OUT FE-C");
+    auto command = toggleOutputService("ftms", 0, 2);
+    assert(command.type == CommandType::SetOutputServices && command.text == "ftms" && command.serviceMask == 3);
+    assert(toggleOutputService("ftms", 7, 2).serviceMask == 5);
+    assert(toggleOutputService("ftms", 1, 1).serviceMask == 1);
+    assert(toggleOutputService("ftms", 0, 16).serviceMask == 17);
+    assert(toggleOutputService("ant", 1, 4).serviceMask == 5);
 }
 
 void testSettings() {
@@ -306,14 +340,17 @@ void testHmiCommandsOnController() {
     queue.push(makeText(CommandType::FtmsName, ftmsNamePresets()[1]));
     queue.push(makeText(CommandType::FtmsProfile,
                         ftmsOutputProfileName(nextFtmsProfile(controller.configView().ftmsOutputProfile))));
+    queue.push(toggleOutputService("ftms", 0, 2));
     Command command;
     std::vector<CommandResult> results;
     while (queue.pop(command)) results.push_back(controller.execute(command));
-    assert(results.size() == 4);
+    assert(results.size() == 5);
     for (const auto& result : results) assert(result.ok);
     const StatusView status = controller.statusView();
     assert(status.hasTarget && status.target.control == Control::Power && status.target.value == 150.0F);
     assert(status.ftmsOutput.name == "SF Bike" && status.ftmsOutput.override == FtmsOutputProfile::IndoorBike);
+    assert(controller.configView().ftmsOutputServices == 3);
+    assert(status.ftmsOutput.services.size() == 5 && status.ftmsOutput.services[1].enabled);
 
     // A rejected command reports the core reason for the HMI toast.
     assert(controller.execute(makeCommand(CommandType::Disconnect)).ok);
@@ -331,6 +368,7 @@ void runHmiModelTests() {
     testMetrics();
     testTargetEditor();
     testStatusTexts();
+    testServiceDisplays();
     testSettings();
     testCommandsQueueAndConfirm();
     testLedAndRefresh();

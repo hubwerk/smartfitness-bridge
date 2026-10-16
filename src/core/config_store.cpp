@@ -1,24 +1,32 @@
 #include "config_store.h"
+#include "bridge/output_services.hpp"
+#include "ble/ble_types.hpp"
 #include "ftms_output.h"
 
 static_assert(ConfigStore::kMaxFtmsNameLength == FtmsOutput::kMaxNameLength,
               "persisted FTMS name limit must match the output");
 
 namespace {
-// Record layout (schema version 5):
+// Record layout (schema version 6):
 //   'S' 'F' version outputProtocol ftmsInput simulatedTrainer
 //   ftmsNameLength ftmsName[...] pairedNameLength pairedName[...]
 //   adapterIdLength adapterId[...] ssidLength ssid[...]
 //   wifiPasswordLength wifiPassword[...] apPasswordLength apPassword[...]
 //   sourceValid sourceAddressType sourceAddress[6] ftmsOutputProfile httpsEnabled
+//   ftmsOutputServices antOutputServices
+//   advertisedServiceCount (uuidLength uuidText[...])[...]
 //   crc32 (little endian)
 // Version 1 records lack the four v2 text fields; v1/v2 lack the profile byte.
 // v1-v4 start with four flags (antEnabled ftmsInput ftmsOutput simulatedTrainer)
 // instead of outputProtocol ftmsInput simulatedTrainer: ftmsOutput migrates to
 // BLE FTMS/Off, the former ANT placeholder flag is dropped. v1-v3 lack httpsEnabled.
-// Missing fields take their defaults on load. Worst case size is 252 bytes.
+// v1-v5 lack service masks. Missing fields take their defaults on load.
+// Worst case size is 489 bytes (six UUID strings, up to 38 characters each).
 constexpr std::uint8_t kMagic0 = 'S';
 constexpr std::uint8_t kMagic1 = 'F';
+constexpr std::size_t kMaxUuidTextLength = 38;
+static_assert(255 + smartfitness::ble::kMaxAdvertisedServices * (kMaxUuidTextLength + 1) <=
+              ConfigBackend::kMaxRecordSize, "configuration backend must fit the bounded UUID list");
 // Header (3) + booleans (4) + two empty name lengths (2) + paired source (8) + CRC (4).
 // (v1 minimum; v2 adds four length bytes and a non-empty AP password.)
 constexpr std::size_t kMinRecordSize = 21;
@@ -111,7 +119,7 @@ ConfigSaveResult ConfigStore::save() {
 }
 
 bool ConfigStore::pairSource(const PairedSourceDevice& source, const std::string& name,
-                             const std::string& adapterId) {
+                             const std::string& adapterId, const std::vector<std::string>& advertisedServices) {
     if (!source.valid || source.addressType > kMaxAddressType || !isValidAdapterId(adapterId) || adapterId.empty())
         return false;
     const std::string sanitized = sanitizeName(name);
@@ -119,11 +127,13 @@ bool ConfigStore::pairSource(const PairedSourceDevice& source, const std::string
     next.pairedSource = source;
     next.pairedDeviceName = sanitized;
     next.pairedAdapterId = adapterId;
+    next.pairedAdvertisedServices = advertisedServices;
     next.ftmsInput = true;
-    if (!persistPartial(next)) return false;
+    if (!isValid(next) || !persistPartial(next)) return false;
     config_.pairedSource = source;
     config_.pairedDeviceName = sanitized;
     config_.pairedAdapterId = adapterId;
+    config_.pairedAdvertisedServices = advertisedServices;
     config_.ftmsInput = true;
     return true;
 }
@@ -132,10 +142,12 @@ bool ConfigStore::unpair() {
     config_.pairedDeviceName.clear();
     config_.pairedSource = {};
     config_.pairedAdapterId.clear();
+    config_.pairedAdvertisedServices.clear();
     BridgeConfig next = saved_;
     next.pairedDeviceName.clear();
     next.pairedSource = {};
     next.pairedAdapterId.clear();
+    next.pairedAdvertisedServices.clear();
     return persistPartial(next);
 }
 
@@ -222,6 +234,13 @@ bool ConfigStore::isValidApPassword(const std::string& password) {
 }
 
 bool ConfigStore::isValid(const BridgeConfig& config) {
+    if (config.pairedAdvertisedServices.size() > smartfitness::ble::kMaxAdvertisedServices) return false;
+    for (const auto& service : config.pairedAdvertisedServices) {
+        smartfitness::ble::Uuid uuid;
+        if (service.size() > kMaxUuidTextLength || !smartfitness::ble::Uuid::parse(service, uuid)) return false;
+    }
+    if (!smartfitness::validOutputServices(config.ftmsOutputServices, true) ||
+        !smartfitness::validOutputServices(config.antOutputServices)) return false;
     if (static_cast<std::uint8_t>(config.outputProtocol) >= smartfitness::kOutputProtocolCount) return false;
     if (static_cast<std::uint8_t>(config.ftmsOutputProfile) >
         static_cast<std::uint8_t>(smartfitness::FtmsOutputProfile::StairClimber)) return false;
@@ -257,6 +276,10 @@ std::vector<std::uint8_t> ConfigStore::serialize(const BridgeConfig& config) {
     data.insert(data.end(), config.pairedSource.address.begin(), config.pairedSource.address.end());
     data.push_back(static_cast<std::uint8_t>(config.ftmsOutputProfile));
     data.push_back(static_cast<std::uint8_t>(config.httpsEnabled));
+    data.push_back(config.ftmsOutputServices);
+    data.push_back(config.antOutputServices);
+    data.push_back(static_cast<std::uint8_t>(config.pairedAdvertisedServices.size()));
+    for (const auto& service : config.pairedAdvertisedServices) appendText(service);
     const std::uint32_t crc = crc32(data.data(), data.size());
     for (int shift = 0; shift < 32; shift += 8) data.push_back(static_cast<std::uint8_t>(crc >> shift));
     return data;
@@ -277,7 +300,7 @@ bool ConfigStore::deserialize(const std::vector<std::uint8_t>& data, BridgeConfi
 
     BridgeConfig next;
     std::uint8_t sourceValid = 0;
-    if (version == kSchemaVersion) {
+    if (version >= 5) {
         std::uint8_t protocol = 0;
         if (!reader.readByte(protocol) || protocol >= smartfitness::kOutputProtocolCount ||
             !reader.readBool(next.ftmsInput) || !reader.readBool(next.simulatedTrainer))
@@ -312,6 +335,17 @@ bool ConfigStore::deserialize(const std::vector<std::uint8_t>& data, BridgeConfi
         next.ftmsOutputProfile = static_cast<smartfitness::FtmsOutputProfile>(profile);
     }
     if (version >= 4 && !reader.readBool(next.httpsEnabled)) return false;
+    if (version >= 6 &&
+        (!reader.readByte(next.ftmsOutputServices) || !reader.readByte(next.antOutputServices))) return false;
+    if (version >= 6) {
+        std::uint8_t count = 0;
+        if (!reader.readByte(count) || count > smartfitness::ble::kMaxAdvertisedServices) return false;
+        for (std::uint8_t index = 0; index < count; ++index) {
+            std::string service;
+            if (!reader.readText(service, kMaxUuidTextLength)) return false;
+            next.pairedAdvertisedServices.push_back(std::move(service));
+        }
+    }
     if (!reader.done()) return false;
     // Recover a legacy invalid AP passphrase without losing the paired source
     // or station credentials. The original record is retained until save().

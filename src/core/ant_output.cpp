@@ -14,7 +14,9 @@ using namespace smartfitness::ant;
 
 namespace {
 constexpr std::uint8_t kNetworkKey[8] = {SF_ANT_NETWORK_KEY};
-constexpr std::size_t kSteps = 6;
+constexpr std::size_t kSteps = 5;
+constexpr std::uint8_t kRequestMessage = 0x4D;
+constexpr std::uint8_t kCapabilities = 0x54;
 constexpr std::uint8_t kMaxRequestRepeats = 8;
 constexpr std::uint8_t kEventMessageId = 0x01;
 
@@ -22,9 +24,13 @@ bool reached(std::uint32_t now, std::uint32_t at) { return static_cast<std::int3
 }  // namespace
 
 void AntOutput::setTransport(AntTransport* transport) {
+    if (transport_ != transport) closeChannel();
     transport_ = transport;
     parser_.reset();
     link_ = Link::WaitingForStick;
+    openMask_ = 0;
+    retryPending_ = false;
+    error_ = Error::None;
 }
 
 void AntOutput::setDeviceNumber(std::uint16_t number) { deviceNumber_ = number ? number : 1; }
@@ -32,6 +38,41 @@ void AntOutput::setDeviceNumber(std::uint16_t number) { deviceNumber_ = number ?
 void AntOutput::setProfileOverride(FtmsOutputProfile profile) { profileOverride_ = profile; }
 
 MachineProfile AntOutput::profile() const { return effectiveOutputProfile(profileOverride_, trainerState().profile); }
+
+void AntOutput::setServices(std::uint8_t rawMask) {
+    if (configuredServices_ == rawMask) return;
+    closeChannel();
+    configuredServices_ = rawMask;
+    openMask_ = 0;
+    retryPending_ = false;
+    link_ = Link::WaitingForStick;
+}
+
+std::uint8_t AntOutput::services() const {
+    std::uint8_t mask = configuredServices_ == 0 ? kFec : configuredServices_ & 31;
+    if (profile() != MachineProfile::Treadmill) mask &= ~kStride;
+    return mask;
+}
+
+const char* AntOutput::errorName(Error error) {
+    switch (error) {
+        case Error::None: return "";
+        case Error::CapabilitiesUnavailable: return "capabilities-unavailable";
+        case Error::InsufficientChannels: return "insufficient-channels";
+        case Error::RadioFailure: return "radio-failure";
+    }
+    return "unknown";
+}
+
+void AntOutput::buildChannels() {
+    activeServices_ = services();
+    channelCount_ = 0;
+    const Channel available[] = {{kFec, 17, 8192}, {kBicyclePower, 11, 8182}, {kHeartRate, 120, 8070},
+                                 {kSpeedCadence, 121, 8086}, {kStride, 124, 8134}};
+    for (const auto& channel : available) {
+        if (activeServices_ & channel.bit) channels_[channelCount_++] = channel;
+    }
+}
 
 void AntOutput::setClock(Clock clock) { clock_ = std::move(clock); }
 
@@ -44,11 +85,14 @@ std::uint32_t AntOutput::now() const {
 void AntOutput::begin() {
     BridgeOutput::begin();
     encoder_.reset();
+    sensorEncoder_.reset();
     parser_.reset();
     link_ = Link::WaitingForStick;
     retryPending_ = false;
     pendingRepeats_ = 0;
     pendingAcknowledged_ = false;
+    openMask_ = 0;
+    error_ = Error::None;
 }
 
 void AntOutput::setEnabled(bool enabled) {
@@ -57,6 +101,7 @@ void AntOutput::setEnabled(bool enabled) {
     BridgeOutput::setEnabled(enabled);
     if (was != enabled) {
         encoder_.reset();
+        sensorEncoder_.reset();
         parser_.reset();
         link_ = Link::WaitingForStick;
         retryPending_ = false;
@@ -64,6 +109,7 @@ void AntOutput::setEnabled(bool enabled) {
         controlApplied_ = false;
         pendingRepeats_ = 0;
         pendingAcknowledged_ = false;
+        openMask_ = 0;
     }
 }
 
@@ -89,7 +135,7 @@ const char* AntOutput::linkName(Link link) {
 bool AntOutput::stickConnected() const { return transport_ && transport_->connected(); }
 
 bool AntOutput::displaySeen() const {
-    return channelOpen() && displaySeenValid_ && now() - displaySeenMs_ < kDisplaySeenMs;
+    return channelOpen(kFec) && displaySeenValid_ && now() - displaySeenMs_ < kDisplaySeenMs;
 }
 
 bool AntOutput::controlActive() const { return displaySeen() && controlApplied_; }
@@ -101,6 +147,8 @@ bool AntOutput::send(const Bytes& bytes) {
 }
 
 void AntOutput::fail() {
+    if (error_ == Error::None) error_ = Error::RadioFailure;
+    openMask_ = 0;
     retryPending_ = true;
     retryAtMs_ = now() + kRetryMs;
     link_ = Link::Resetting;
@@ -108,20 +156,41 @@ void AntOutput::fail() {
 
 void AntOutput::closeChannel() {
     if (!stickConnected()) return;
-    if (link_ == Link::Open) send(encodeMessage(msg::kCloseChannel, Bytes{kChannel}));
+    for (std::uint8_t channel = 0; channel < channelCount_; ++channel) {
+        if (openMask_ & channels_[channel].bit) send(encodeMessage(msg::kCloseChannel, Bytes{channel}));
+    }
     if (link_ == Link::Open || link_ == Link::Configuring) send(encodeMessage(msg::kResetSystem, Bytes{0x00}));
 }
 
 void AntOutput::startReset() {
     parser_.reset();
     retryPending_ = false;
+    awaitingCapabilities_ = false;
+    error_ = Error::None;
+    channelLimit_ = 0;
+    openMask_ = 0;
+    displaySeenValid_ = false;
+    controlApplied_ = false;
+    pendingRepeats_ = 0;
+    encoder_.reset();
+    sensorEncoder_.reset();
+    buildChannels();
     link_ = Link::Resetting;
     sentMs_ = now();
     if (!send(encodeMessage(msg::kResetSystem, Bytes{0x00}))) fail();
 }
 
+void AntOutput::requestCapabilities() {
+    awaitingCapabilities_ = true;
+    link_ = Link::Configuring;
+    sentMs_ = now();
+    if (!send(encodeMessage(kRequestMessage, Bytes{0, kCapabilities}))) fail();
+}
+
 void AntOutput::sendStep() {
     Bytes payload;
+    const std::uint8_t channel = configuringChannel_;
+    const auto& spec = channels_[channel];
     switch (step_) {
         case 0:
             awaiting_ = msg::kSetNetworkKey;
@@ -130,25 +199,25 @@ void AntOutput::sendStep() {
             break;
         case 1:
             awaiting_ = msg::kAssignChannel;
-            payload = {kChannel, fec::kChannelTypeMaster, kNetwork};
+            payload = {channel, fec::kChannelTypeMaster, kNetwork};
             break;
         case 2:
             awaiting_ = msg::kChannelId;
-            payload = {kChannel, static_cast<std::uint8_t>(deviceNumber_ & 0xFFU),
-                       static_cast<std::uint8_t>(deviceNumber_ >> 8), fec::kDeviceType, fec::kTransmissionType};
+            payload = {channel, static_cast<std::uint8_t>(deviceNumber_ & 0xFFU),
+                       static_cast<std::uint8_t>(deviceNumber_ >> 8), spec.deviceType, fec::kTransmissionType};
             break;
         case 3:
             awaiting_ = msg::kChannelPeriod;
-            payload = {kChannel, static_cast<std::uint8_t>(fec::kChannelPeriod & 0xFFU),
-                       static_cast<std::uint8_t>(fec::kChannelPeriod >> 8)};
+            payload = {channel, static_cast<std::uint8_t>(spec.period & 0xFFU),
+                       static_cast<std::uint8_t>(spec.period >> 8)};
             break;
         case 4:
             awaiting_ = msg::kChannelRfFrequency;
-            payload = {kChannel, fec::kRfFrequency};
+            payload = {channel, fec::kRfFrequency};
             break;
         default:
             awaiting_ = msg::kOpenChannel;
-            payload = {kChannel};
+            payload = {channel};
             break;
     }
     link_ = Link::Configuring;
@@ -159,6 +228,7 @@ void AntOutput::sendStep() {
 void AntOutput::loop() {
     if (!transport_) return;
     transport_->begin();
+    if (!enabled()) return;
     if (!transport_->connected()) {
         if (link_ != Link::WaitingForStick) {
             parser_.reset();
@@ -166,8 +236,15 @@ void AntOutput::loop() {
             displaySeenValid_ = false;
             controlApplied_ = false;
             link_ = Link::WaitingForStick;
+            openMask_ = 0;
         }
         return;
+    }
+    if (activeServices_ != services() && link_ != Link::WaitingForStick) {
+        closeChannel();
+        link_ = Link::WaitingForStick;
+        openMask_ = 0;
+        retryPending_ = false;
     }
     std::uint8_t buffer[64];
     for (int reads = 0; reads < 8; ++reads) {
@@ -180,6 +257,7 @@ void AntOutput::loop() {
     }
     const std::uint32_t timestamp = now();
     encoder_.update(trainerState(), profile(), timestamp);
+    sensorEncoder_.update(trainerState(), timestamp);
     if (retryPending_) {
         if (reached(timestamp, retryAtMs_)) startReset();
         return;
@@ -189,12 +267,14 @@ void AntOutput::loop() {
         case Link::Resetting:
             // Not every stick reports its startup: continue after the timeout.
             if (timestamp - sentMs_ >= kResetTimeoutMs) {
-                step_ = 0;
-                sendStep();
+                requestCapabilities();
             }
             break;
         case Link::Configuring:
-            if (timestamp - sentMs_ >= kResponseTimeoutMs) fail();
+            if (timestamp - sentMs_ >= kResponseTimeoutMs) {
+                if (awaitingCapabilities_) error_ = Error::CapabilitiesUnavailable;
+                fail();
+            }
             break;
         default: break;
     }
@@ -205,13 +285,39 @@ void AntOutput::handleMessage(const Message& message) {
         case msg::kStartup:
             // After our reset, or an unexpected stick reset: (re)configure.
             if (retryPending_) return;
+            openMask_ = 0;
+            displaySeenValid_ = false;
+            controlApplied_ = false;
+            pendingRepeats_ = 0;
+            channelLimit_ = 0;
+            error_ = Error::None;
+            encoder_.reset();
+            sensorEncoder_.reset();
+            buildChannels();
+            requestCapabilities();
+            break;
+        case kCapabilities:
+            if (!awaitingCapabilities_ || link_ != Link::Configuring || message.payload.size() < 4) return;
+            awaitingCapabilities_ = false;
+            channelLimit_ = message.payload[0];
+            if (channelLimit_ < channelCount_) {
+                error_ = Error::InsufficientChannels;
+                fail();
+                return;
+            }
+            if (channelCount_ == 0) {
+                link_ = Link::Open;
+                return;
+            }
+            configuringChannel_ = 0;
             step_ = 0;
             sendStep();
             break;
         case msg::kChannelEvent: handleChannelEvent(message); break;
         case msg::kBroadcastData:
         case msg::kAcknowledgedData:
-            if (link_ != Link::Open || message.payload.size() < 9 || message.payload[0] != kChannel) return;
+            if (message.payload.size() < 9 || message.payload[0] >= channelCount_ ||
+                channels_[message.payload[0]].bit != kFec || !channelOpen(kFec)) return;
             {
                 Page page;
                 for (std::size_t index = 0; index < page.size(); ++index) page[index] = message.payload[index + 1];
@@ -223,28 +329,36 @@ void AntOutput::handleMessage(const Message& message) {
 }
 
 void AntOutput::handleChannelEvent(const Message& message) {
-    if (message.payload.size() < 3 || message.payload[0] != kChannel) return;
+    if (message.payload.size() < 3) return;
+    const auto channel = message.payload[0];
     const std::uint8_t id = message.payload[1];
     const std::uint8_t result = message.payload[2];
     if (id == kEventMessageId) {
-        if (link_ != Link::Open) return;
+        if (channel >= channelCount_ || !channelOpen(channels_[channel].bit)) return;
         if (result == code::kEventTx || result == code::kTransferTxCompleted || result == code::kTransferTxFailed)
-            sendNextPage();
+            sendNextPage(channel);
         else if (result == code::kChannelClosed)
             fail();
         return;
     }
-    if (link_ != Link::Configuring || id != awaiting_) return;
+    if (link_ != Link::Configuring || awaitingCapabilities_ || id != awaiting_ ||
+        channel != (step_ == 0 ? kNetwork : configuringChannel_)) return;
     if (result != code::kResponseNoError) {
         fail();
         return;
     }
-    if (++step_ < kSteps) {
+    if (++step_ <= kSteps) {
         sendStep();
         return;
     }
-    link_ = Link::Open;
-    sendNextPage();
+    openMask_ |= channels_[configuringChannel_].bit;
+    sendNextPage(configuringChannel_);
+    if (++configuringChannel_ < channelCount_) {
+        step_ = 1;
+        sendStep();
+    } else {
+        link_ = Link::Open;
+    }
 }
 
 void AntOutput::handleDisplayPage(const Page& page) {
@@ -268,18 +382,29 @@ void AntOutput::handleDisplayPage(const Page& page) {
     encoder_.recordCommand(page[0], status, page);
 }
 
-void AntOutput::sendNextPage() {
+void AntOutput::sendNextPage(std::uint8_t channel) {
     encoder_.update(trainerState(), profile(), now());
+    sensorEncoder_.update(trainerState(), now());
     Page page{};
     bool requested = false;
-    while (pendingRepeats_ > 0 && !requested) {
+    const auto bit = channels_[channel].bit;
+    while (bit == kFec && pendingRepeats_ > 0 && !requested) {
         requested = encoder_.requested(pendingResponse_, deviceNumber_, page);
         if (!requested) pendingRepeats_ = 0;
         else --pendingRepeats_;
     }
-    if (!requested) page = encoder_.next(deviceNumber_);
+    if (!requested) {
+        switch (bit) {
+            case kFec: page = encoder_.next(deviceNumber_); break;
+            case kBicyclePower: page = sensorEncoder_.bicyclePower(); break;
+            case kHeartRate: page = sensorEncoder_.heartRate(); break;
+            case kSpeedCadence: page = sensorEncoder_.speedCadence(); break;
+            case kStride: page = sensorEncoder_.stride(); break;
+            default: return;
+        }
+    }
     const std::uint8_t response = requested && pendingAcknowledged_ ? msg::kAcknowledgedData : msg::kBroadcastData;
-    if (!send(encodeMessage(response, kChannel, page))) return;
+    if (!send(encodeMessage(response, channel, page))) return;
     lastPage_ = page;
     ++pagesSent_;
 }

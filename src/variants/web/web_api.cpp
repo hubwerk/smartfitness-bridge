@@ -200,7 +200,7 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
 
     if (endpoint == "config") {
         if (!onlyKeys(object,
-                      {"ftmsName", "ftmsOutputProfile", "outputProtocol", "ftmsInput", "simulatedTrainer",
+                      {"ftmsName", "ftmsOutputProfile", "outputProtocol", "ftmsOutputServices", "antOutputServices", "ftmsInput", "simulatedTrainer",
                        "wifiSsid", "wifiPassword", "apPassword", "https", "save"},
                       error))
             return false;
@@ -236,6 +236,22 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
             }
             Command command = simple(CommandType::OutputProtocol);
             command.text = text;
+            commands.push_back(command);
+        }
+        for (const char* transport : {"ftms", "ant"}) {
+            const std::string key = std::string(transport) + "OutputServices";
+            const JsonVariantConst mask = object[key];
+            if (mask.isUnbound()) continue;
+            if (!mask.is<unsigned>() || mask.as<unsigned>() > 31 ||
+                (std::strcmp(transport, "ftms") == 0 && mask.as<unsigned>() != 0 &&
+                 (mask.as<unsigned>() & 1U) == 0)) {
+                error = key + " must be an integer mask 0-31" +
+                        (std::strcmp(transport, "ftms") == 0 ? " including FTMS (bit 1), or 0 for auto" : "");
+                return false;
+            }
+            Command command = simple(CommandType::SetOutputServices);
+            command.text = transport;
+            command.serviceMask = static_cast<std::uint8_t>(mask.as<unsigned>());
             commands.push_back(command);
         }
         struct Toggle {

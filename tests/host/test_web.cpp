@@ -410,6 +410,27 @@ void testApiParsing() {
     assert(!parseApiRequest("control", R"({"control":"turbo","value":1})", commands, error));
     assert(!parseApiRequest("control", R"({"control":"power"})", commands, error));
 
+    assert(parseApiRequest("config", R"({"ftmsOutputServices":7,"antOutputServices":6,"save":true})",
+                           commands, error));
+    assert(commands.size() == 3);
+    assert(commands[0].type == CommandType::SetOutputServices && commands[0].text == "ftms" &&
+           commands[0].serviceMask == 7);
+    assert(commands[1].type == CommandType::SetOutputServices && commands[1].text == "ant" &&
+           commands[1].serviceMask == 6);
+    assert(commands[2].type == CommandType::Save);
+    for (unsigned mask = 0; mask <= 31; ++mask) {
+        const auto text = std::to_string(mask);
+        assert(parseApiRequest("config", "{\"antOutputServices\":" + text + "}", commands, error));
+        assert(commands.size() == 1 && commands[0].serviceMask == mask);
+        assert(parseApiRequest("config", "{\"ftmsOutputServices\":" + text + "}", commands, error) ==
+               (mask == 0 || (mask & 1U) != 0));
+    }
+    for (const auto* value : {"null", "true", "false", "\"7\"", "-1", "1.5", "32", "256", "{}", "[]"}) {
+        for (const auto* key : {"ftmsOutputServices", "antOutputServices"}) {
+            assert(!parseApiRequest("config", std::string("{\"") + key + "\":" + value + "}", commands, error));
+        }
+    }
+
     assert(parseApiRequest("config",
                            R"({"ftmsName":"Garage","outputProtocol":"ant-fec","ftmsInput":true,"wifiSsid":"Home",)"
                            R"("wifiPassword":"secret-pass","apPassword":"ap-password","save":true})",
@@ -501,6 +522,22 @@ void testApiExchange() {
     document = parse(api.result(saved).body);
     assert(document["ok"] == true && document["message"] == "ftms name: Garage; configuration saved");
 
+    const auto services = api.submit("config", R"({"ftmsOutputServices":7,"antOutputServices":6,"save":true})");
+    assert(services.status == 202 && rig.config.config().ftmsOutputServices == 0);
+    const auto servicesId = parse(services.body)["id"].as<std::uint32_t>();
+    api.process(rig.ui);
+    assert(parse(api.result(servicesId).body)["ok"] == true);
+    assert(rig.config.config().ftmsOutputServices == 7 && rig.config.config().antOutputServices == 6);
+    ConfigStore restored(rig.backend);
+    assert(restored.begin() == ConfigLoadResult::Loaded);
+    assert(restored.config().ftmsOutputServices == 7 && restored.config().antOutputServices == 6);
+    const auto previousWrites = rig.backend.writes();
+    const auto unavailable = api.submit("config", R"({"ftmsOutputServices":17,"save":true})");
+    assert(unavailable.status == 202);  // Valid syntax; bike data cannot supply running-speed output.
+    api.process(rig.ui);
+    assert(parse(api.result(parse(unavailable.body)["id"].as<std::uint32_t>()).body)["ok"] == false);
+    assert(rig.backend.writes() == previousWrites && rig.config.config().ftmsOutputServices == 7);
+
     // Bounded queue: overflow returns 503 and is counted; the loop drains at most maxJobs per call.
     for (std::size_t index = 0; index < ApiExchange::kQueueCapacity; ++index)
         assert(api.submit("save", "").status == 202);
@@ -590,6 +627,7 @@ void testJsonViews() {
     assert(document["wifiSsid"] == "Home" && document["wifiPasswordSet"] == true);
     assert(document["apPasswordDefault"] == false && document["ftmsName"] == FtmsOutput::kDefaultName);
     assert(document["outputProtocol"] == "ble-ftms" && document["antAvailable"] == false);
+    assert(document["ftmsOutputServices"] == 0 && document["antOutputServices"] == 0);
     assert(document["unsaved"] == true);
     assert(document["https"] == true);
     rig.ui.handleCommand("https off");
@@ -620,11 +658,44 @@ void testJsonViews() {
     assert(document["ftmsOutput"]["advertising"] == true && document["outputProtocol"] == "ble-ftms");
     assert(document["antOutput"]["enabled"] == false && document["antOutput"]["available"] == false);
     assert(document["antOutput"]["link"] == "disabled");
+    assert(document["ftmsOutput"]["services"].is<JsonArray>());
+    assert(document["antOutput"]["channels"].is<JsonArray>());
     assert(document["input"]["dropped"]["scans"] == 0);
     assert(document["input"]["dropped"]["events"] == 0);
     assert(document["input"]["dropped"]["notifications"] == 0);
     assert(document["input"]["dropped"]["commands"] == 0);
     assert(contains(rig.ui.status(), "dropped(scans=0,events=0,notifications=0,commands=0)"));
+
+    auto view = rig.ui.statusView();
+    view.ftmsOutput.restartRequired = true;
+    view.input.paired.valid = true;
+    view.input.paired.advertisedServices = {"00001826-0000-1000-8000-00805f9b34fb",
+                                          "12345678-1234-5678-9abc-def012345678"};
+    view.input.paired.subscriptions = {
+        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad2-0000-1000-8000-00805f9b34fb", "subscribed", false},
+        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad9-0000-1000-8000-00805f9b34fb", "pending", true},
+        {"0000180d-0000-1000-8000-00805f9b34fb", "00002a37-0000-1000-8000-00805f9b34fb", "failed", false}};
+    view.ftmsOutput.services = {{"ftms", "FTMS", true, true, true}, {"cps", "CPS", false, false, false}};
+    view.antOutput.channels = {{"fec", "FE-C", 17, true, true}, {"hr", "HR", 120, false, false}};
+    view.antOutput.error = "insufficient-channels";
+    view.antOutput.channelLimit = 1;
+    document = parse(web::statusJson(view, rig.network));
+    const auto paired = document["input"]["paired"];
+    assert(paired["advertisedServices"].size() == 2);
+    assert(paired["advertisedServices"][0] == "00001826-0000-1000-8000-00805f9b34fb");
+    assert(paired["advertisedServices"][1] == "12345678-1234-5678-9abc-def012345678");
+    assert(paired["advertisedServiceNames"]["00001826-0000-1000-8000-00805f9b34fb"] == "FTMS");
+    assert(paired["subscriptions"].size() == 3);
+    assert(paired["subscriptions"][0]["state"] == "subscribed");
+    assert(paired["subscriptions"][1]["state"] == "pending" && paired["subscriptions"][1]["indicate"] == true);
+    assert(paired["subscriptions"][2]["state"] == "failed");
+    assert(document["ftmsOutput"]["services"][0]["active"] == true);
+    assert(document["ftmsOutput"]["restartRequired"] == true);
+    assert(document["ftmsOutput"]["services"][1]["available"] == false);
+    assert(document["antOutput"]["channels"][0]["deviceType"] == 17);
+    assert(document["antOutput"]["channels"][1]["open"] == false);
+    assert(document["antOutput"]["error"] == "insufficient-channels");
+    assert(document["antOutput"]["channelLimit"] == 1);
 }
 
 void testWifiPolicy() {

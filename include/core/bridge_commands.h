@@ -37,6 +37,7 @@ enum class CommandType : std::uint8_t {
     ApPassword,
     Restart,
     Https,        // web interface over HTTPS (on) or plain HTTP (off); save + restart
+    SetOutputServices,  // text: ftms / ant; serviceMask: 0 (Auto) or service bits
 };
 
 struct Command {
@@ -50,6 +51,7 @@ struct Command {
     bool addressTypeGiven = false;
     std::string adapterId;  // empty: use the detected adapter
     std::uint32_t durationMs = 0;
+    std::uint8_t serviceMask = 0;
 };
 
 struct CommandResult {

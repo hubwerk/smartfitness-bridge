@@ -37,6 +37,10 @@ struct BridgeConfig {
     // Schema v5 (replaces the FTMS output and ANT flags; preserves HTTPS setting):
     smartfitness::OutputProtocol outputProtocol = smartfitness::OutputProtocol::BleFtms;
     bool httpsEnabled = true;  // web variant: HTTPS (self-signed) or plain HTTP web interface
+    // Schema v6: zero preserves the default FTMS / FE-C service selection.
+    std::uint8_t ftmsOutputServices = 0;
+    std::uint8_t antOutputServices = 0;
+    std::vector<std::string> pairedAdvertisedServices;
 
     bool operator==(const BridgeConfig& other) const {
         return pairedDeviceName == other.pairedDeviceName && ftmsInput == other.ftmsInput &&
@@ -45,7 +49,9 @@ struct BridgeConfig {
                pairedSource == other.pairedSource && pairedAdapterId == other.pairedAdapterId &&
                wifiSsid == other.wifiSsid && wifiPassword == other.wifiPassword &&
                apPassword == other.apPassword && ftmsOutputProfile == other.ftmsOutputProfile &&
-               httpsEnabled == other.httpsEnabled;
+               httpsEnabled == other.httpsEnabled && ftmsOutputServices == other.ftmsOutputServices &&
+               antOutputServices == other.antOutputServices &&
+               pairedAdvertisedServices == other.pairedAdvertisedServices;
     }
     bool operator!=(const BridgeConfig& other) const { return !(*this == other); }
 };
@@ -55,7 +61,7 @@ enum class ConfigSaveResult { Written, Unchanged, Invalid, Failed };
 
 class ConfigStore {
 public:
-    static constexpr std::uint8_t kSchemaVersion = 5;
+    static constexpr std::uint8_t kSchemaVersion = 6;
     static constexpr std::size_t kMaxFtmsNameLength = 20;
     static constexpr std::size_t kMaxPairedNameLength = 32;
     static constexpr std::size_t kMaxAdapterIdLength = 16;
@@ -77,7 +83,8 @@ public:
     ConfigSaveResult save();
     // Records the paired BLE source (address, adapter, name) and enables the
     // BLE input; persists only that change (other unsaved edits stay unsaved).
-    bool pairSource(const PairedSourceDevice& source, const std::string& name, const std::string& adapterId);
+    bool pairSource(const PairedSourceDevice& source, const std::string& name, const std::string& adapterId,
+                    const std::vector<std::string>& advertisedServices = {});
     // Clears the paired device and persists only that change.
     bool unpair();
     // Erases all stored configuration and restores defaults.

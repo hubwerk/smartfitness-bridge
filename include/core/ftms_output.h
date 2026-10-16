@@ -9,6 +9,7 @@
 #include <string>
 #include "bridge_output.h"
 #include "ftms/ftms_codec.hpp"
+#include "ftms/sensor_codec.hpp"
 
 // Bluetooth LE FTMS peripheral output. Protocol handling is portable C++;
 // the NimBLE GATT transport is only compiled for the firmware (ARDUINO).
@@ -36,6 +37,13 @@ public:
     const std::string& deviceName() const;
     void setProfileOverride(smartfitness::FtmsOutputProfile profile);
     smartfitness::MachineProfile profile() const;
+    // GATT topology is frozen on first advertising. A later selection is saved
+    // but needs a restart; the shared central/peripheral stack is never rebuilt.
+    void setServices(std::uint8_t rawMask);
+    std::uint8_t services() const;
+    std::uint8_t configuredServices() const { return configuredServices_; }
+    bool restartRequired() const;
+    bool serviceActive(std::uint8_t bit) const;
 
     // Safe to call from the BLE host task: events are queued and drained in loop().
     bool enqueueControlPoint(const std::uint8_t* data, std::size_t length);
@@ -100,6 +108,8 @@ private:
     void transportNotifyTrainingStatus();
     void transportIndicateResponse();
     void transportNotifyStatus();
+    void transportNotifySensors();
+    void transportConfigureAdvertising();
 
     std::unique_ptr<Transport> transport_;
     std::string name_ = kDefaultName;
@@ -110,6 +120,12 @@ private:
     bool granted_ = false;
     bool connected_ = false;
     bool profileDisconnectPending_ = false;
+    std::uint8_t configuredServices_ = 0;
+    std::uint8_t appliedServices_ = smartfitness::ble::kFtms;
+    bool topologyFrozen_ = false;
+    smartfitness::ble::SensorEncoder sensorEncoder_;
+    std::uint32_t lastSensorDataMs_ = 0;
+    bool sensorDataSent_ = false;
     smartfitness::FtmsOutputProfile profileOverride_ = smartfitness::FtmsOutputProfile::Auto;
     smartfitness::MachineProfile profile_ = smartfitness::MachineProfile::IndoorBike;
     std::uint32_t seenGeneration_ = 0;

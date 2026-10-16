@@ -223,8 +223,8 @@ WS2812 LEDs. The firmware must stay on Arduino core 2.0.x because NimBLE-Arduino
 ### Consequences
 - Touch mapping, LED count/order and GPIO 2 (external 5 V enable) remain
   unverified on a real board.
-- HD-008 supplies a Latin-1 font with umlauts; the German string table is still
-  untranslated and falls back to English.
+- HD-008 supplies a Latin-1 font with umlauts; service-screen strings have
+  German translations, while untranslated entries fall back to English.
 - Upgrading to LVGL 9.3+ or Arduino core 3.x requires re-checking LovyanGFX and
   NimBLE compatibility.
 
@@ -308,3 +308,11 @@ hardware measurements.
   firmware and simulator builds do not require the conversion toolchain.
 - Hardware verification remains mandatory, particularly for compact keyboard
   keys, contrast, touch targets and the new gauge's runtime allocation cost.
+- HMI service diagnostics and output settings reuse the same safe-area lists,
+  wrapping pills and curved scrollbar. Read-only ADV/SUB pills remain knob
+  focus targets so long diagnostics never require touch; status includes text
+  as well as violet/light-blue/alert/tan colours. The UI submits shared
+  `SetOutputServices` commands, keeps FTMS mandatory, treats Auto as baseline
+  only, and exposes BLE restart requirements. CrowPanel has no ANT transport
+  and displays that limitation explicitly. No new fonts or runtime libraries
+  are introduced.

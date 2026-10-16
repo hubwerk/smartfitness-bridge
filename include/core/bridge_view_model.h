@@ -32,12 +32,21 @@ struct DroppedCounters {
     std::uint32_t commands = 0;
 };
 
+struct SubscriptionView {
+    std::string service;
+    std::string characteristic;
+    std::string state;
+    bool indicate = false;
+};
+
 struct PairedView {
     bool valid = false;
     std::string address;  // "aa:bb:cc:dd:ee:ff"
     bool randomAddress = false;
     std::string name;
     std::string adapter;
+    std::vector<std::string> advertisedServices;
+    std::vector<SubscriptionView> subscriptions;
 };
 
 struct InputView {
@@ -57,6 +66,22 @@ struct InputView {
     PairedView paired;
 };
 
+struct OutputServiceView {
+    std::string id;
+    std::string name;
+    bool enabled = false;
+    bool available = false;
+    bool active = false;
+};
+
+struct AntChannelView {
+    std::string id;
+    std::string name;
+    std::uint8_t deviceType = 0;
+    bool enabled = false;
+    bool open = false;
+};
+
 struct FtmsOutputView {
     bool enabled = false;
     MachineProfile profile = MachineProfile::IndoorBike;
@@ -65,6 +90,8 @@ struct FtmsOutputView {
     bool advertising = false;
     bool client = false;
     bool control = false;
+    bool restartRequired = false;
+    std::vector<OutputServiceView> services;
 };
 
 struct AntOutputView {
@@ -78,6 +105,9 @@ struct AntOutputView {
     bool display = false;      // a display (app/head unit) talked recently
     bool control = false;      // the display controls the source
     std::string hardware;
+    std::string error;
+    std::uint8_t channelLimit = 0;
+    std::vector<AntChannelView> channels;
 };
 
 struct StatusView {
@@ -140,6 +170,8 @@ struct ConfigView {
     bool apPasswordDefault = true;
     bool https = true;  // web interface over HTTPS (applied after restart)
     bool unsaved = false;
+    std::uint8_t ftmsOutputServices = 0;
+    std::uint8_t antOutputServices = 0;
 };
 
 // All selectable input adapters (static registry data).

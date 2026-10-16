@@ -20,6 +20,14 @@ struct PairedDevice {
     std::string adapterId;
     std::string name;
     bool valid = false;
+    std::vector<smartfitness::ble::Uuid> advertisedServices;
+};
+
+struct BleSubscriptionStatus {
+    smartfitness::ble::Uuid service;
+    smartfitness::ble::Uuid characteristic;
+    bool indicate = false;
+    std::string state = "pending";
 };
 
 struct ScanResult {
@@ -75,6 +83,8 @@ public:
     void setPairedDevice(const PairedDevice& device);
     void clearPairedDevice();
     const PairedDevice& pairedDevice() const { return paired_; }
+    const std::vector<smartfitness::ble::Uuid>& advertisedServices() const { return advertisedServices_; }
+    const std::vector<BleSubscriptionStatus>& subscriptions() const { return subscriptions_; }
     // When enabled, begin() and link losses (re)connect automatically.
     void setAutoConnect(bool enabled) { autoConnect_ = enabled; }
     bool autoConnect() const { return autoConnect_; }
@@ -121,6 +131,8 @@ private:
     Clock clock_;
     Timing timing_;
     PairedDevice paired_;
+    std::vector<smartfitness::ble::Uuid> advertisedServices_;
+    std::vector<BleSubscriptionStatus> subscriptions_;
     bool autoConnect_ = false;
     std::unique_ptr<smartfitness::protocols::SourceProtocol> protocol_;
     LinkState state_ = LinkState::Idle;

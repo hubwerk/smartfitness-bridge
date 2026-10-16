@@ -25,7 +25,7 @@ qdomyos-zwift vendor ports, reconnect/backoff, stale-data handling, FTMS output,
 Wi-Fi setup and web UI, a shared console/API command layer, NVS configuration, and
 a selectable output protocol: BLE FTMS, ANT+ FE-C (web variant, ANT+ USB stick on
 the USB-OTG port; see [ANT+ FE-C output](#ant-fe-c-output-usb-stick)) or off.
-CPS/HRS output services and OTA are not implemented.
+OTA is not implemented.
 
 The CrowPanel HMI has been verified on real hardware: the display, rotary encoder
 (turning/direction), and knob button work. BLE equipment compatibility, app
@@ -50,7 +50,7 @@ Exactly one variant flag must be defined; `include/variant.h` stops the build wi
 simulation, `BridgeCore`, FTMS output, Serial console) and calls the variant hooks
 `variant::begin()` / `variant::loop()`. Both variants use the same `Command`s and the
 same `BridgeController`; the web variant renders its view model as JSON, the HMI
-variant renders it with LVGL. The stored configuration (schema v5, including
+variant renders it with LVGL. The stored configuration (schema v6, including
 Wi-Fi, output protocol and HTTPS fields) is identical; the HMI variant simply
 never starts Wi-Fi.
 
@@ -508,9 +508,9 @@ except pairing/unpairing, which persist their own changes immediately.
 ### Using the UI
 The single-page app (`src/variants/web/assets/index.html`, web variant only, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
 - **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and the active output (BLE FTMS client state, or ANT+ stick/channel/display state) (WebSocket, ≤ 4 Hz).
-- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
+- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. Advertised services and actual notify/indicate subscriptions are separate pills; subscription state is **SUBSCRIBED**, **PENDING** or **FAILED** (not inferred from advertisements). Hover a pill for full service/characteristic UUIDs. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
 - **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
-- **Settings:** output protocol (*BLE FTMS*, *ANT+ FE-C* – needs the ANT+ USB stick, disabled when the firmware has no ANT transport – or *Off*), FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version.
+- **Settings:** output protocol (*BLE FTMS*, *ANT+* – needs the ANT+ USB stick, hidden when the firmware has no ANT transport – or *Off*), BLE service and ANT+ channel pills, FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version. Selected services are golden, off/pending tan; **NO DATA** choices are disabled. **Auto** preserves the original FTMS/FE-C-only behavior. FTMS is mandatory for an explicit BLE selection; ANT+ may use sensor-only channels. **Save and restart** to apply a changed BLE GATT topology, then re-pair clients that cache services; Save alone persists the preference but does not rebuild an initialized server. Selecting both FE-C and Power warns about duplicate power sources.
 
 ## REST / WebSocket API
 
@@ -537,7 +537,7 @@ fixed order and stop at the first failure, **without rollback**.
 | POST | `/api/connect`, `/api/disconnect`, `/api/simulate` | `{}` | Connect paired device / disconnect / use the simulation |
 | POST | `/api/control` | `{"control":"power","value":200}` | `power`, `resistance`, `incline` or `speed` through the core gate |
 | GET | `/api/config` | – | Settings (passwords are never returned; `wifiPasswordSet` instead) |
-| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","outputProtocol":"ble-ftms","ftmsInput":true,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","https":true,"save":true}` | Any subset; order: profile, name, output protocol (`off`, `ble-ftms`, `ant-fec`), input, simulated trainer, Wi-Fi, AP password, HTTPS, save |
+| POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","outputProtocol":"ble-ftms","ftmsOutputServices":7,"antOutputServices":0,"ftmsInput":true,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","https":true,"save":true}` | Any subset; order: profile, name, output protocol (`off`, `ble-ftms`, `ant-fec`), BLE/ANT service masks, input, simulated trainer, Wi-Fi, AP password, HTTPS, save |
 | POST | `/api/factory-reset`, `/api/restart` | `{}` | Factory reset / reboot |
 | POST | `/api/wifi-scan` | `{}` | `202 {"scanning":true}`; scan Wi-Fi networks for 15 s (repeated passes merged by SSID, strongest signal first; a station still connecting pauses until the scan ends) |
 | GET | `/api/wifi-scan/results` | – | `{"type":"wifi-scan","scanning":…,"networks":[{"ssid","rssi","secure"}]}` (max. 32, hidden networks omitted) |
@@ -557,12 +557,53 @@ Toggles and `save`
 are booleans. `wifiSsid:""` clears SSID/password. `wifiPassword` requires
 `wifiSsid`; omit it to retain the old password, or use `""` for an open network.
 Omitted optional fields are ignored; null fields are ignored except
-`ftmsOutputProfile`, which must be a valid profile string when supplied.
+`ftmsOutputProfile`, which must be a valid profile string when supplied, and the
+service masks, which must be integers when supplied.
 `{}` or only `{"save":false}` is rejected
 as “no settings given”. See the schema table for string limits; the command layer
 requires a nonempty FTMS name (1–20), although the persisted schema permits empty.
 `/api/save` and `/api/load` are **not HTTP routes**, even though the shared parser
 recognizes those command names; use `{"save":true}` at `/api/config` or Serial.
+
+### Output service selection
+
+`ftmsOutputServices` and `antOutputServices` are integer bitmasks, persisted in
+schema **6**. Omit a field to leave its selection unchanged; `0` means **Auto**
+(the original FTMS-only / FE-C-only default), not Off. Use `outputProtocol:"off"`
+to stop output. Supported bits are:
+
+| Bit | BLE service | ANT+ channel / device type |
+|---|---|---|
+| `1` | Fitness Machine (FTMS, `1826`), mandatory in explicit BLE masks | Fitness Equipment (FE-C), `17` |
+| `2` | Cycling Power (CPS, `1818`) | Bicycle Power, `11` |
+| `4` | Heart Rate (HRS, `180d`) | Heart Rate, `120` |
+| `8` | Cycling Speed/Cadence (CSC, `1816`) | Bicycle Speed/Cadence, `121` |
+| `16` | Running Speed/Cadence (RSC, `1814`) | Stride Speed/Distance (SDM/footpod), `124` |
+
+Examples (POST `/api/config`, then poll `/api/result?id=…`):
+
+```json
+{"ftmsOutputServices":7,"save":true}
+```
+
+This selects FTMS + CPS + HR. A sensor-only ANT+ selection is allowed:
+
+```json
+{"outputProtocol":"ant-fec","antOutputServices":6,"save":true}
+```
+
+This selects Power + HR without FE-C. Only available metrics/profile combinations
+can be selected; missing data is never synthesized as zero. Power needs power,
+HR needs heart rate, CSC/ANT speed-cadence needs a bike with speed or cadence,
+and RSC/SDM needs a treadmill with speed or cadence. Capability information can
+make a service available before the first sample; encoding still requires valid
+samples. Unknown bits, negative/fractional masks, strings, booleans and null are
+rejected. An explicit BLE mask without bit `1` is rejected. A syntactically valid
+mask can still fail during queued execution (unavailable metrics or ANT hardware).
+Changing BLE service topology after GATT initialization requires a restart;
+save before restarting and re-pair clients that cache the GATT database.
+FE-C + Bicycle Power broadcasts duplicate power; pair only one power source in
+the receiving app. Extra sensor services/channels do not add control permissions.
 
 ### Response examples and result polling
 
@@ -621,10 +662,12 @@ or `null` when invalid. Example disconnected snapshot:
   "input":{"source":"simulation","profile":"bike","bleAvailable":true,"link":"idle","protocol":"","stale":false,
     "scanning":false,"error":"","reconnectAttempts":0,"nextAttemptMs":0,"autoConnect":false,"paired":null,
     "dropped":{"scans":0,"events":0,"notifications":0,"commands":0}},
-  "ftmsOutput":{"enabled":true,"profile":"bike","override":"auto","name":"SmartFitness Bridge","advertising":true,"client":false,"control":false},
+  "ftmsOutput":{"enabled":true,"profile":"bike","override":"auto","name":"SmartFitness Bridge","advertising":true,"client":false,"control":false,"restartRequired":false,
+    "services":[{"id":"ftms","name":"Fitness Machine (FTMS)","enabled":true,"available":true,"active":false}]},
   "outputProtocol":"ble-ftms",
   "antOutput":{"enabled":false,"available":true,"link":"disabled","stick":false,"open":false,"deviceNumber":4660,
-    "profile":"bike","display":false,"control":false,"hardware":""},
+    "profile":"bike","display":false,"control":false,"hardware":"","error":"","channelLimit":0,
+    "channels":[{"id":"fec","name":"Fitness Equipment (FE-C)","deviceType":17,"enabled":true,"open":false}]},
   "unsaved":false,
   "network":{"mode":"ap","ssid":"SmartFitness-XXXX","ip":"192.168.4.1","hostname":"smartfitness.local","stations":1}
 }
@@ -633,14 +676,44 @@ or `null` when invalid. Example disconnected snapshot:
 `version` is the build version (`0.3.0` by default); actual network/link values vary.
 `input.profile` is the active input machine type; `ftmsOutput.profile` is the
 effective output and `ftmsOutput.override` is the configured selection.
-`outputProtocol` is the selected output; `antOutput` describes the ANT+ FE-C
+`outputProtocol` is the selected output; `antOutput` describes the ANT+
 output (`available`: firmware has an ANT transport, `stick`: USB stick attached,
 `open`: FE-C channel open, `display`: a display sent a page within 5 s,
 `control`: a display's control page was applied, `hardware`: `USB vid:pid`).
 States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 `target` when set is `{"control":"power","value":200}`.
-`input.paired` when set is
-`{"address":"aa:bb:cc:dd:ee:ff","addressType":"random","name":"Bike","adapter":"ftms"}`.
+`ftmsOutput.services` reports each service's selected (`enabled`), metric/profile
+availability (`available`), and actual notification subscription (`active`) state.
+Configured services can differ from the boot-applied topology;
+`ftmsOutput.restartRequired:true` means save and restart to apply the selection.
+`antOutput.channels` reports each channel's selected and actual open states;
+top-level `antOutput.open` remains the FE-C channel state for backward compatibility,
+so it can be false while sensor-only channels are open. Service/channel arrays in
+the example are abbreviated; IDs are `ftms,cps,hr,csc,rsc` and
+`fec,power,hr,speed-cadence,sdm` respectively.
+`antOutput.channelLimit` is the stick's reported channel capacity (`0` until
+known). `error` is empty on success, or `capabilities-unavailable`,
+`insufficient-channels`, or `radio-failure`; unsupported capacity fails rather
+than silently omitting requested channels.
+`input.paired` when set includes the following additive metadata:
+
+```json
+{
+  "address":"aa:bb:cc:dd:ee:ff","addressType":"random","name":"Bike","adapter":"ftms",
+  "advertisedServices":["1826"],
+  "advertisedServiceNames":{"1826":"FTMS"},
+  "subscriptions":[{"service":"00001826-0000-1000-8000-00805f9b34fb",
+    "characteristic":"00002ad2-0000-1000-8000-00805f9b34fb",
+    "name":"FTMS","state":"subscribed","indicate":false}]
+}
+```
+
+`advertisedServices` records advertised UUIDs (not proof of a successful GATT
+subscription); `advertisedServiceNames` maps those UUID strings to short labels.
+`subscriptions` contains planned/attempted characteristics with
+`pending`, `subscribed` or `failed` state and the requested indication mode.
+Unknown services use a short UUID label; full UUID values are always retained.
+Empty arrays mean no reported advertisements/subscriptions, not a transport error.
 
 `GET /api/scan/results` (**200**); abbreviated to one device/adapter:
 
@@ -659,6 +732,7 @@ States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 {
   "type":"config","version":"0.3.0","ftmsName":"SmartFitness Bridge",
   "outputProtocol":"ble-ftms","antAvailable":true,"ftmsOutputProfile":"auto","ftmsInput":false,
+  "ftmsOutputServices":0,"antOutputServices":0,
   "simulatedTrainer":true,"wifiSsid":"","wifiPasswordSet":false,
   "apPasswordDefault":true,"https":true,"unsaved":false
 }
@@ -693,12 +767,12 @@ Settings changed on the console are edited in RAM; `status` ends with `unsaved=1
 
 On boot the stored configuration is loaded before the outputs are enabled, so `ftms-name`, the output-profile override, the output protocol, the FTMS input toggle, the simulated trainer flag and the pairing survive a reboot. A missing, corrupt or unknown-version record falls back to the defaults (the record is replaced on the next `save`).
 
-NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little endian:
+NVS layout: namespace `sfbridge`, one blob key `config` (max. 512 bytes), little endian:
 
 | Field | Size | Notes |
 |---|---|---|
 | magic | 2 | `'S' 'F'` |
-| schema version | 1 | `5`; decoder accepts `1`–`5` |
+| schema version | 1 | `6`; decoder accepts `1`–`6` |
 | `outputProtocol` | 1 | `0` off, `1` BLE FTMS (default), `2` ANT+ FE-C. v1–v4 stored four flags (`antEnabled`, `ftms.input`, `ftms.output`, `simulatedTrainer`) instead; `ftms.output` migrates to BLE FTMS/off, the former ANT placeholder flag is dropped |
 | `ftmsInput`, `simulatedTrainer` | 2 × 1 | Each `0` or `1`; defaults: `0`, `1` |
 | `ftmsName` | 1 + n | ≤ 20 printable ASCII bytes; default empty means `SmartFitness Bridge` |
@@ -712,20 +786,25 @@ NVS layout: namespace `sfbridge`, one blob key `config` (max. 256 bytes), little
 | paired source address | 6 | Address bytes in display order; invalid source requires type/address all zero |
 | `ftmsOutputProfile` (v3) | 1 | After source address, before CRC: `0` auto (default), `1` bike, `2` treadmill, `3` cross-trainer, `4` rower, `5` step-climber, `6` stair-climber |
 | `httpsEnabled` (v4) | 1 | After output profile, before CRC: `0` plain HTTP, `1` HTTPS (default) |
+| `ftmsOutputServices`, `antOutputServices` (v6) | 2 × 1 | After HTTPS, before CRC; service masks above, `0` Auto (default) |
+| paired advertised services (v6) | 1 + variable | Count (0–6), then length-prefixed UUID strings (≤38 bytes each); restored with the pairing |
 | CRC-32 | 4 | Little endian; over all preceding bytes, reflected polynomial `0xEDB88320`, initial/final XOR `0xffffffff` |
 
 Each text field is a one-byte length followed by exactly that many bytes (no NUL).
-The v5 record is **26 + all six text lengths** bytes: maximum **252 bytes**,
-below the backend's **256 B** limit. Decoder rejects bad CRC/magic/versions,
+The v6 record is **29 + all six text lengths + the length-prefixed UUID entries**
+bytes: maximum **489 bytes**, below the backend's **512 B** limit.
+Decoder rejects bad CRC/magic/versions,
 truncation, invalid booleans/text/source, oversize records, and trailing bytes.
 
-**v1/v2/v3/v4 → v5 migration:** v1 contains the same first two text fields and
+**v1/v2/v3/v4/v5 → v6 migration:** v1 contains the same first two text fields and
 paired-source tail, but omits adapter id, SSID, Wi-Fi password and AP password.
 Loading preserves legacy fields and fills missing fields with defaults. Both v1
 and v2 migrate to output profile `auto`. v1–v4 flags migrate as described in
 the table (`ftms.output` on → BLE FTMS, off → off; ANT+ FE-C is never selected
 by a migration). v1–v3 migrate with HTTPS on; v4 preserves its HTTPS value.
-Migration does not write during boot; the next `save` serializes v5 and replaces
+v1–v5 migrate with both service selections set to Auto (`0`).
+Their paired advertised-service lists default to empty until advertisements are observed.
+Migration does not write during boot; the next `save` serializes v6 and replaces
 the legacy blob. A legacy source with
 an empty adapter id is not auto-connected: scan and pair it again.
 
@@ -744,6 +823,25 @@ corruption, not tampering or encryption.
 
 ## FTMS output (Bluetooth LE)
 `FtmsOutput` is a NimBLE-Arduino GATT server (firmware only; the transport is compiled under `#ifdef ARDUINO`, so host tests need no BLE stack). It advertises the Fitness Machine Service UUID `0x1826`, FTMS service data (machine available, effective output type), and the configured name (`ftms-name`, default `SmartFitness Bridge`, max 20 ASCII characters).
+
+Optional sensor services share that server/connection:
+
+| Service | Measurement | Behavior |
+|---|---|---|
+| CPS `1818` | `2a63` notify | Valid instantaneous power; optional bicycle crank events from bike cadence |
+| HRS `180d` | `2a37` notify | Valid heart-rate BPM |
+| CSC `1816` | `2a5b` notify | Bicycle speed/cadence events; wheel conversion assumes **2.105 m** circumference; cumulative-wheel control point supported |
+| RSC `1814` | `2a53` notify | Treadmill speed and running cadence; no invented missing mandatory field |
+
+Crank data uses bike cadence, not rowing strokes or stair steps. Subscription
+state is tracked per characteristic/connection; connecting alone does not make a
+service `active`. Service UUIDs are advertised separately from the local name in
+the scan response to remain within legacy BLE advertisement limits. Select
+services before first advertising (or save and restart); no shared NimBLE stack
+teardown is used for a live topology change.
+With RSC selected and the output profile on Auto, initial advertising waits for
+the source connection so a saved treadmill selection is not frozen as a bike
+topology before source discovery; read-only treadmills are supported.
 
 The shared machine-profile names are
 `auto|bike|treadmill|cross-trainer|rower|step-climber|stair-climber`.
@@ -817,7 +915,7 @@ Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnec
   never invented from connection uptime. No energy fields are emitted.
 - Bike simulation parameters map only grade to incline; wind speed, rolling
   resistance and drag are not forwarded.
-- Only one client is served at a time (advertising stops while connected). No bonding/security, no Cycling Power or Heart Rate services.
+- Only one client is served at a time (advertising stops while connected). No bonding/security. Optional CPS, HRS, CSC and RSC sensor services use the same connection; see [output service selection](#output-service-selection). Their telemetry does not grant trainer control.
 - The Feature characteristic follows the connected device's capabilities; clients usually read it once on connection, so connect the source device before pairing the app.
 - Changing the name while a client is connected applies on the next advertising cycle.
 
@@ -843,10 +941,17 @@ variant runs normally with BLE FTMS.
 - The CrowPanel (HMI variant) has a single USB-C port and no USB host, so ANT+ FE-C
   cannot be selected there; its *Output* setting cycles BLE FTMS ↔ Off.
 
-**Channel:** ANT+ network key, RF 2457 MHz, channel period 8192 (4 Hz),
+**FE-C channel:** ANT+ network key, RF 2457 MHz, channel period 8192 (4 Hz),
 bidirectional master, device type 17, transmission type 5, device number derived
 from the MAC address. The stick is reset and the channel reconfigured after a
 replug, an error response or a channel-closed event (retry every 2 s).
+
+Optional Bicycle Power, Heart Rate, Bicycle Speed/Cadence and SDM channels run
+alongside or instead of FE-C, selected by `antOutputServices`. Each has its own
+device type and channel state in `antOutput.channels`; only FE-C accepts trainer
+control. Auto retains FE-C alone. All channel data comes from valid source
+metrics; sensor-only configurations must not be interpreted as FE-C control
+availability. Multi-channel stick/app interoperability is unverified on hardware.
 
 **Data pages** follow the active output profile (the same `ftms-profile`
 override as FTMS); every field the source sends is mapped when the FE-C page has

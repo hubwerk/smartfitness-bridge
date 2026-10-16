@@ -13,6 +13,8 @@ using namespace smartfitness::ant;
 
 namespace {
 
+using CapableRadio = FakeAntTransport;
+
 std::uint16_t u16(const Page& page, std::size_t index) {
     return static_cast<std::uint16_t>(page[index] | (page[index + 1] << 8));
 }
@@ -219,7 +221,7 @@ void testFecControlPages() {
 
 void testAntOutputLifecycle() {
     std::uint32_t now = 0;
-    FakeAntTransport radio;
+    CapableRadio radio;
     AntOutput ant;
     ant.setClock([&now] { return now; });
     assert(!ant.available() && ant.link() == AntOutput::Link::NoHardware);
@@ -233,14 +235,14 @@ void testAntOutputLifecycle() {
     ant.loop();
     for (int index = 0; index < 4; ++index) ant.loop();
     assert(ant.link() == AntOutput::Link::Open && ant.channelOpen());
-    const std::vector<std::uint8_t> sequence{msg::kResetSystem,   msg::kSetNetworkKey, msg::kAssignChannel,
+    const std::vector<std::uint8_t> sequence{msg::kResetSystem, 0x4D, msg::kSetNetworkKey, msg::kAssignChannel,
                                              msg::kChannelId,     msg::kChannelPeriod, msg::kChannelRfFrequency,
                                              msg::kOpenChannel};
     for (std::size_t index = 0; index < sequence.size(); ++index) assert(radio.written[index].id == sequence[index]);
-    const auto& channelId = radio.written[3].payload;
+    const auto& channelId = radio.written[4].payload;
     assert((channelId == Bytes{0, 0x34, 0x12, fec::kDeviceType, fec::kTransmissionType}));
-    assert(radio.written[2].payload[1] == fec::kChannelTypeMaster);
-    assert((radio.written[4].payload == Bytes{0, 0x00, 0x20}) && radio.written[5].payload[1] == 57);
+    assert(radio.written[3].payload[1] == fec::kChannelTypeMaster);
+    assert((radio.written[5].payload == Bytes{0, 0x00, 0x20}) && radio.written[6].payload[1] == 57);
     assert(ant.pagesSent() == 1 && radio.pages().back()[0] == 16);
 
     // Live data: every EVENT_TX sends the next page.
@@ -308,7 +310,7 @@ void testAntOutputLifecycle() {
 
 void testAntOutputTimeoutsAndErrors() {
     std::uint32_t now = 0;
-    FakeAntTransport radio;
+    CapableRadio radio;
     radio.autoRespond = false;
     AntOutput ant;
     ant.setClock([&now] { return now; });
@@ -320,16 +322,19 @@ void testAntOutputTimeoutsAndErrors() {
     // Sticks without a startup message continue after the reset timeout.
     now += AntOutput::kResetTimeoutMs;
     ant.loop();
-    assert(ant.link() == AntOutput::Link::Configuring && radio.written.back().id == msg::kSetNetworkKey);
+    assert(ant.link() == AntOutput::Link::Configuring && radio.written.back().id == 0x4D);
     // No response: retry with a fresh reset after the retry delay.
     now += AntOutput::kResponseTimeoutMs;
     ant.loop();
     assert(ant.link() == AntOutput::Link::Resetting);
+    assert(ant.error() == AntOutput::Error::CapabilitiesUnavailable);
     now += AntOutput::kRetryMs;
     ant.loop();
     assert(radio.count(msg::kResetSystem) == 2);
     // An error response also restarts the configuration.
     radio.inject(msg::kStartup, {0x20});
+    ant.loop();
+    radio.inject(0x54, {8, 1, 0, 0, 0});
     ant.loop();
     assert(radio.written.back().id == msg::kSetNetworkKey);
     radio.inject(msg::kChannelEvent, {0x00, msg::kSetNetworkKey, 0x28});
@@ -351,6 +356,157 @@ void testAntOutputTimeoutsAndErrors() {
     assert(!ant.channelOpen());
 }
 
+void testSensorEncoders() {
+    sensor::Encoder encoder;
+    TrainerState state = connectedState(MachineProfile::Treadmill);
+    encoder.update(state, 0);
+    assert(encoder.bicyclePower()[3] == 0xFF && u16(encoder.bicyclePower(), 6) == 0xFFFF);
+    assert(encoder.heartRate()[7] == 0);
+    assert(encoder.speedCadence() == Page{});
+    assert(encoder.stride()[7] == 0xFF);
+    state.setSample(Metric::Cadence, 120);
+    state.setSample(Metric::Speed, 7.578F);  // One 2.105 m wheel revolution/s.
+    state.setSample(Metric::HeartRate, 120);
+    state.setSample(Metric::Power, 250);
+    encoder.update(state, 0);
+    encoder.update(state, 1000);
+    const auto sc = encoder.speedCadence();
+    assert(u16(sc, 0) == 1024 && u16(sc, 2) == 2);
+    assert(u16(sc, 6) == 1 && std::abs(static_cast<int>(u16(sc, 4)) - 1024) <= 1);
+    const auto hr = encoder.heartRate();
+    assert(u16(hr, 4) == 1024 && hr[6] == 2 && hr[7] == 120);
+    const auto power = encoder.bicyclePower();
+    assert(power[0] == 16 && power[1] == 1 && power[2] == 0xFF && power[3] == 120);
+    assert(u16(power, 4) == 250 && u16(power, 6) == 250);
+    const auto stride = encoder.stride();
+    assert(stride[0] == 1 && stride[1] == 0 && stride[2] == 1 && stride[6] == 1);
+    assert((stride[4] & 15) == 2 && stride[5] == 27);
+    assert((stride == Page{1, 0, 1, 2, 0x12, 27, 1, 0xFF}));
+    encoder.update(state, 65000);
+    assert(u16(encoder.speedCadence(), 0) == 1024);
+    assert(encoder.heartRate()[6] == 130);
+    for (int i = 0; i < 262; ++i) encoder.bicyclePower();
+    assert(u16(encoder.bicyclePower(), 4) == static_cast<std::uint16_t>(264 * 250));
+    state.setSample(Metric::Cadence, 0);
+    state.setSample(Metric::Speed, 0);
+    state.setSample(Metric::HeartRate, 0);
+    encoder.update(state, 65000);
+    const auto stopped = encoder.speedCadence();
+    encoder.update(state, 66000);
+    assert(encoder.speedCadence() == stopped);
+    state.setSample(Metric::Power, NAN);
+    state.setSample(Metric::Cadence, INFINITY);
+    encoder.update(state, 66000);
+    assert(u16(encoder.bicyclePower(), 6) == 0xFFFF && encoder.bicyclePower()[3] == 0xFF);
+    encoder.update(TrainerState{}, 66000);
+    assert(encoder.heartRate()[7] == 0);
+    assert(u16(encoder.bicyclePower(), 6) == 0xFFFF);
+    encoder.reset();
+    state.setSample(Metric::Cadence, 120);
+    state.setSample(Metric::HeartRate, 120);
+    state.setSample(Metric::Speed, 7.578F);
+    encoder.update(state, 0);
+    encoder.update(state, 32768000);
+    assert(u16(encoder.speedCadence(), 2) == 0);  // 65536 crank revolutions.
+    assert(encoder.heartRate()[6] == 0 && encoder.stride()[6] == 0);
+    encoder.reset();
+    encoder.update(state, 0xFFFFFF00U);
+    encoder.update(state, 744);  // One second across the uint32 millisecond wrap.
+    const auto wrapSc = encoder.speedCadence();
+    assert(u16(wrapSc, 2) == 2);
+    assert(u16(wrapSc, 0) == static_cast<std::uint16_t>((std::uint64_t{0xFFFFFF00U} + 1000) * 1024 / 1000));
+    // Read-only sensor sources are connected but are not controllable trainers.
+    encoder.reset();
+    state.trainerDetected = false;
+    state.setSample(Metric::Power, 200);
+    encoder.update(state, 0);
+    encoder.update(state, 1000);
+    assert(encoder.heartRate()[7] == 120 && encoder.heartRate()[6] == 2);
+    assert(u16(encoder.bicyclePower(), 6) == 200);
+    assert(u16(encoder.speedCadence(), 2) == 2 && u16(encoder.speedCadence(), 6) == 1);
+    assert(encoder.stride()[2] == 1 && encoder.stride()[3] == 2);
+    encoder.reset();
+    for (int i = 0; i < 12; ++i)
+        assert((encoder.heartRate()[0] >> 7) == ((i / 4) & 1));
+    encoder.reset();
+    state.setSample(Metric::Speed, 9);  // 2.5 m/s, exactly representable.
+    encoder.update(state, 0);
+    encoder.update(state, 257250);
+    // Seconds and stride count wrap at 256; distance wraps at 256 metres.
+    // Byte 4 combines 1/16 m fractional distance and integer m/s.
+    assert((encoder.stride() == Page{1, 50, 1, 131, 0x22, 0x80, 1, 0xFF}));
+    encoder.update(TrainerState{}, 257250);
+    const auto disconnectedStride = encoder.stride();
+    assert((disconnectedStride[4] & 15) == 0 && disconnectedStride[5] == 0);
+    encoder.update(TrainerState{}, 258250);
+    assert(encoder.stride() == disconnectedStride);
+}
+
+void testSelectableChannels() {
+    CapableRadio radio;
+    AntOutput ant;
+    std::uint32_t now = 0;
+    ant.setTransport(&radio);
+    ant.setClock([&now] { return now; });
+    ant.setProfileOverride(FtmsOutputProfile::Treadmill);
+    ant.setServices(31);
+    ant.setDeviceNumber(123);
+    ant.begin();
+    for (int i = 0; i < 20; ++i) ant.loop();
+    assert(ant.services() == 31 && ant.configuredServices() == 31 && ant.channelLimit() == 8);
+    assert(ant.link() == AntOutput::Link::Open && radio.count(msg::kSetNetworkKey) == 1);
+    assert(radio.count(msg::kOpenChannel) == 5);
+    const std::uint8_t types[] = {17, 11, 120, 121, 124};
+    const std::uint16_t periods[] = {8192, 8182, 8070, 8086, 8134};
+    for (const auto& message : radio.written) {
+        if (message.id == msg::kChannelId) {
+            assert(message.payload[1] == 123 && message.payload[2] == 0);
+            assert(message.payload[3] == types[message.payload[0]]);
+        }
+        if (message.id == msg::kChannelPeriod) {
+            assert((message.payload[1] | (message.payload[2] << 8)) == periods[message.payload[0]]);
+        }
+    }
+    for (std::uint8_t channel = 0; channel < 5; ++channel) {
+        assert(ant.channelOpen(1 << channel));
+        const auto before = ant.pagesSent();
+        radio.inject(msg::kChannelEvent, {channel, 1, code::kEventTx});
+        ant.loop();
+        assert(ant.pagesSent() == before + 1 && radio.written.back().payload[0] == channel);
+    }
+    bool controlled = false;
+    ant.onControl([&controlled](const ControlRequest&) { controlled = true; return ControlResult::Applied; });
+    radio.inject(msg::kAcknowledgedData, {1, 49, 255, 255, 255, 255, 255, 240, 0});
+    ant.loop();
+    assert(!controlled && !ant.displaySeen());
+    ant.setServices(4);
+    for (int i = 0; i < 10; ++i) ant.loop();
+    assert(ant.channelOpen(4) && !ant.channelOpen(1) && radio.written.back().payload[0] == 0);
+    radio.injectPage(Page{49, 255, 255, 255, 255, 255, 240, 0});
+    ant.loop();
+    assert(!controlled && !ant.displaySeen());  // Channel zero is now HR, not FE-C.
+    ant.setServices(31);
+    radio.channels = 2;
+    for (int i = 0; i < 10; ++i) ant.loop();
+    assert(ant.error() == AntOutput::Error::InsufficientChannels && !ant.channelOpen());
+    assert(std::string(AntOutput::errorName(ant.error())) == "insufficient-channels");
+    now += AntOutput::kRetryMs;
+    radio.channels = 8;
+    for (int i = 0; i < 20; ++i) ant.loop();
+    assert(ant.channelOpen(16));
+    ant.setProfileOverride(FtmsOutputProfile::IndoorBike);
+    for (int i = 0; i < 20; ++i) ant.loop();
+    assert(ant.services() == 15 && !ant.channelOpen(16));
+    ant.setServices(0);
+    for (int i = 0; i < 10; ++i) ant.loop();
+    assert(ant.services() == 1 && ant.configuredServices() == 0 && ant.channelOpen(1));
+    ant.setEnabled(false);
+    const auto writes = radio.written.size();
+    radio.inject(msg::kStartup, {0x20});
+    ant.loop();
+    assert(radio.written.size() == writes && !ant.channelOpen());
+}
+
 }  // namespace
 
 void runAntTests() {
@@ -360,4 +516,6 @@ void runAntTests() {
     testFecControlPages();
     testAntOutputLifecycle();
     testAntOutputTimeoutsAndErrors();
+    testSensorEncoders();
+    testSelectableChannels();
 }

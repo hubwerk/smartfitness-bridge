@@ -112,6 +112,22 @@ void testMigrationFromV4() {
     assert(decoded.outputProtocol == OutputProtocol::Off && decoded.httpsEnabled);
 }
 
+void testMigrationFromV5() {
+    auto body = ConfigStore::serialize(customConfig());
+    body.resize(body.size() - 7);  // v6 masks, empty UUID list and CRC
+    body[2] = 5;
+    MemoryConfigBackend backend;
+    backend.setRecord(withCrc(body));
+    ConfigStore store(backend);
+    assert(store.begin() == ConfigLoadResult::Loaded);
+    assert(store.config() == customConfig());
+    assert(store.config().ftmsOutputServices == 0 && store.config().antOutputServices == 0);
+    assert(!store.hasUnsavedChanges() && backend.writes() == 0);
+    assert(store.save() == ConfigSaveResult::Written);
+    ConfigStore rebooted(backend);
+    assert(rebooted.begin() == ConfigLoadResult::Loaded && rebooted.config() == customConfig());
+}
+
 void testMigrationFromV1() {
     BridgeConfig decoded;
     assert(ConfigStore::deserialize(v1Record(), decoded));
@@ -153,10 +169,16 @@ void testV2Limits() {
     config.ftmsName = std::string(20, 'f');
     config.pairedDeviceName = std::string(32, 'n');
     config.pairedSource.valid = true;
+    config.pairedAdvertisedServices.assign(ble::kMaxAdvertisedServices, "0x0bf669f1-45f2-11e7-9598-0800200c9a66");
     const auto record = ConfigStore::serialize(config);
     assert(record.size() <= ConfigBackend::kMaxRecordSize);
     BridgeConfig decoded;
     assert(ConfigStore::deserialize(record, decoded) && decoded == config);
+    MemoryConfigBackend maximumBackend;
+    ConfigStore maximumStore(maximumBackend);
+    maximumStore.begin();
+    maximumStore.config() = config;
+    assert(maximumStore.save() == ConfigSaveResult::Written);
 
     assert(ConfigStore::isValidPassword("", true) && !ConfigStore::isValidPassword("", false));
     assert(!ConfigStore::isValidPassword("short", true));
@@ -175,7 +197,7 @@ void testV2Limits() {
 
 void testMigrationFromV2() {
     auto body = ConfigStore::serialize(customConfig());
-    body.resize(body.size() - 6);  // Remove v3 profile, v4 HTTPS flag and CRC.
+    body.resize(body.size() - 9);  // Remove v3 profile, v4 HTTPS, v6 masks/list and CRC.
     body[2] = 2;
     // v2 header flags: antEnabled ftmsInput ftmsOutput simulatedTrainer.
     const std::vector<std::uint8_t> flags{1, body[4], 0, body[5]};
@@ -221,6 +243,50 @@ void testOutputProfilePersistence() {
     assert(store.save() == ConfigSaveResult::Invalid);
     BridgeConfig decoded;
     assert(!ConfigStore::deserialize(ConfigStore::serialize(store.config()), decoded));
+}
+
+void testOutputServicePersistence() {
+    assert(BridgeConfig{}.ftmsOutputServices == 0 && BridgeConfig{}.antOutputServices == 0);
+    for (unsigned mask = 0; mask <= 255; ++mask) {
+        for (const bool ftms : {false, true}) {
+            BridgeConfig config = customConfig();
+            (ftms ? config.ftmsOutputServices : config.antOutputServices) = static_cast<std::uint8_t>(mask);
+            const bool valid = mask <= 31 && (!ftms || mask == 0 || (mask & 1) != 0);
+            assert(ConfigStore::isValid(config) == valid);
+            BridgeConfig decoded;
+            assert(ConfigStore::deserialize(ConfigStore::serialize(config), decoded) == valid);
+            if (valid) assert(decoded == config);
+        }
+    }
+    MemoryConfigBackend backend;
+    ConfigStore store(backend);
+    store.begin();
+    store.config().ftmsOutputServices = 15;
+    store.config().antOutputServices = 6;  // Sensor-only ANT selection is valid.
+    assert(store.hasUnsavedChanges());
+    assert(store.save() == ConfigSaveResult::Written);
+    store.config().ftmsOutputServices = 0;
+    store.config().antOutputServices = 0;
+    assert(store.load() == ConfigLoadResult::Loaded);
+    assert(store.config().ftmsOutputServices == 15 && store.config().antOutputServices == 6);
+    store.config().ftmsOutputServices = 2;
+    assert(store.save() == ConfigSaveResult::Invalid);
+    assert(store.factoryReset());
+    assert(store.config().ftmsOutputServices == 0 && store.config().antOutputServices == 0);
+}
+
+void testOutputServicesConsoleCommand() {
+    Command command;
+    std::string error;
+    assert(parseConsoleCommand("output-services ftms auto", command, error));
+    assert(command.type == CommandType::SetOutputServices && command.text == "ftms" && command.serviceMask == 0);
+    assert(parseConsoleCommand("output-services ftms 31", command, error) && command.serviceMask == 31);
+    assert(parseConsoleCommand("output-services ant 2", command, error) && command.text == "ant" &&
+           command.serviceMask == 2);
+    for (const char* value : {"ftms 2", "ant 32", "ant 256", "ant -1", "ant 1.5", "ant nan",
+                              "ant 1 extra", "usb 1", "ftms", "ant "}) {
+        assert(!parseConsoleCommand(std::string("output-services ") + value, command, error));
+    }
 }
 
 void testApPasswordValidationAndFallback() {
@@ -381,11 +447,14 @@ void testCorruptAndOldVersionFallback() {
     longName.insert(longName.begin() + 7, 10, 'x');
     bad.push_back(withCrc(longName));
     auto badAddressType = body;
-    badAddressType[badAddressType.size() - 9] = 9;
+    badAddressType[badAddressType.size() - 12] = 9;
     bad.push_back(withCrc(badAddressType));
     auto badHttps = body;
-    badHttps.back() = 2;
+    badHttps[badHttps.size() - 4] = 2;
     bad.push_back(withCrc(badHttps));
+    auto badServiceCount = body;
+    badServiceCount.back() = static_cast<std::uint8_t>(ble::kMaxAdvertisedServices + 1);
+    bad.push_back(withCrc(badServiceCount));
 
     for (const auto& record : bad) {
         assert(!ConfigStore::deserialize(record, decoded));
@@ -444,6 +513,42 @@ void testUnpairPersistence() {
     assert(rebooted.config().ftmsOutputProfile == FtmsOutputProfile::Treadmill);
     assert(store.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
     assert(rebooted.config().ftmsName == "Garage Bike");
+}
+
+void testPairedAdvertisedServicePersistence() {
+    MemoryConfigBackend backend;
+    ConfigStore store(backend);
+    store.begin();
+    store.config() = customConfig();
+    assert(store.save() == ConfigSaveResult::Written);
+    store.config().ftmsOutputServices = 15;  // Pairing preserves unrelated unsaved edits.
+    const auto source = store.config().pairedSource;
+    const std::vector<std::string> services{"0x1826", "0bf669f1-45f2-11e7-9598-0800200c9a66"};
+    assert(store.pairSource(source, "Bike", "ftms", services));
+    assert(store.config().pairedAdvertisedServices == services && store.hasUnsavedChanges());
+    ConfigStore rebooted(backend);
+    assert(rebooted.begin() == ConfigLoadResult::Loaded);
+    assert(rebooted.config().pairedAdvertisedServices == services && rebooted.config().ftmsOutputServices == 0);
+    assert(store.unpair());
+    assert(store.config().pairedAdvertisedServices.empty() && store.config().ftmsOutputServices == 15);
+    assert(rebooted.load() == ConfigLoadResult::Loaded && rebooted.config().pairedAdvertisedServices.empty());
+
+    assert(!store.pairSource(source, "Bike", "ftms", {"not-a-uuid"}));
+    assert(!store.pairSource(source, "Bike", "ftms",
+                             std::vector<std::string>(ble::kMaxAdvertisedServices + 1, "0x1826")));
+    store.config().pairedAdvertisedServices = {"invalid"};
+    assert(store.save() == ConfigSaveResult::Invalid);
+    BridgeConfig decoded;
+    assert(!ConfigStore::deserialize(ConfigStore::serialize(store.config()), decoded));
+    store.config().pairedAdvertisedServices = services;
+    auto record = ConfigStore::serialize(store.config());
+    record.resize(record.size() - 5);  // Truncate the final UUID and replace the CRC.
+    assert(!ConfigStore::deserialize(withCrc(record), decoded));
+
+    backend.failWrites = true;
+    store.config().pairedAdvertisedServices.clear();
+    assert(!store.pairSource(source, "Bike", "ftms", services));
+    assert(store.config().pairedAdvertisedServices.empty());  // Failed pairing does not mutate RAM.
 }
 
 void testFailedFactoryReset() {
@@ -557,12 +662,16 @@ void runConfigStoreTests() {
     testMigrationFromV3();
     testMigrationFromV2();
     testMigrationFromV4();
+    testMigrationFromV5();
     testOutputProfilePersistence();
+    testOutputServicePersistence();
+    testOutputServicesConsoleCommand();
     testV2Limits();
     testApPasswordValidationAndFallback();
     testNonFiniteScanDurations();
     testHttpsConsoleCommand();
     testUnpairPersistence();
+    testPairedAdvertisedServicePersistence();
     testFactoryReset();
     testFailedFactoryReset();
     testConsolePersistence();
