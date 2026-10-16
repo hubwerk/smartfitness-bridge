@@ -140,6 +140,23 @@ enum class Str : std::uint16_t {
     ServiceAuto,
     BleRestartHint,
     RestartRequired,
+    AntStatus,
+    AntLink,
+    AntHardware,
+    AntDeviceNumber,
+    AntChannels,
+    AntDisplayStatus,
+    AntControlStatus,
+    AntNoModule,
+    AntWaiting,
+    AntBroadcasting,
+    AntClosed,
+    AntDetected,
+    AntDuplicatePower,
+    AntSelectChannel,
+    AntPower,
+    AntSpeedCadence,
+    AntFootpod,
     Count
 };
 

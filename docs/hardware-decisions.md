@@ -2,7 +2,8 @@
 
 ## HD-001: ANT+ is not possible with the built-in ESP32-S3 radio
 
-**Status:** Accepted; USB stick transport implemented (web variant), not verified on hardware
+**Status:** Accepted; USB stick (web default) and UART transports implemented;
+ANT hardware operation remains unverified
 
 ### Context
 The original goal includes ANT+ FE-C output. The ESP32-S3 radio supports Wi-Fi and Bluetooth LE 5 only.
@@ -12,24 +13,81 @@ the radio cannot be reprogrammed to speak ANT.
 
 ### Decision
 1. **The output protocol is selectable:** BLE FTMS (default), ANT+ FE-C or off
-   (`OutputProtocol`, config schema v5). Only one output is active at a time.
-2. **ANT+ FE-C uses a USB ANT+ stick on the ESP32-S3 USB-OTG port (USB host mode)** speaking the
+   (`OutputProtocol`, current config schema v6). Only one output is active at a time.
+   Existing selectable FE-C and sensor channels are retained; UART/HMI support
+   does not change the configuration schema.
+2. **Web builds default to a USB ANT+ stick on the ESP32-S3 USB-OTG port (USB host mode)** speaking the
    ANT serial protocol. Integration basis: COOSPO ANT+ USB stick (Dynastream ANTUSB2/ANTUSB-m
    class, USB `0fcf:1008` / `0fcf:1009`, one vendor interface with bulk IN/OUT endpoints).
-3. Alternatives, if the USB route fails:
-   - nRF52832/nRF52840 with ANT SoftDevice as co-processor via UART/SPI (own firmware required)
-   - Ready-made ANT module (nRF24AP2 / D52) via UART (availability may be limited)
+3. **Either variant uses UART1 when both `SF_ANT_UART_TX` and
+   `SF_ANT_UART_RX` are defined.** UART is the recommended CrowPanel ANT path;
+   without these flags HMI has no ANT transport. GPIO assignments remain
+   **unverified schematic placeholders**, not safe numeric pin recommendations.
+   Use an external D52/nRF24AP2 ANT serial/network processor, or an nRF52 with a
+   compatible ANT SoftDevice **and ANT network-processor firmware** exposing
+   the ANT serial protocol. A generic BLE module/SoftDevice alone is insufficient.
+   Garmin/Dynastream licensing and ANT+ adopter terms apply to the stack,
+   firmware and ANT+ network/profile use.
+
+### UART wiring and power — hardware unverified
+
+- Cross ESP32 `SF_ANT_UART_TX` → module RX and module TX →
+  ESP32 `SF_ANT_UART_RX`; connect common GND. Use **3.3 V logic**; never
+  connect raw 5 V to ESP32 GPIOs.
+- Supply the module per its datasheet. If using CrowPanel `OUT_5V`, its GPIO2
+  gate must be set **HIGH before transport begin**.
+  **TODO(verify):** OUT_5V routing, enable polarity, connector and load limits
+  on the actual board schematic. Use a suitable regulator or suitable 3.3 V
+  supply as the module requires; bare modules are **not** assumed 5 V tolerant.
+- UART1 defaults to **57600 baud**; `SF_ANT_UART_BAUD` also supports
+  **50000, 38400, 19200 and 4800**. Match the module's configured baud.
+- Optional `SF_ANT_UART_RTS` configures the **host UART CTS input** from the
+  module's **active-low nRTS output**: hardware CTS flow control pauses host TX
+  while module nRTS is HIGH; LOW permits TX.
+  Never connect a host output to that module output. Without this input,
+  satisfy the module's datasheet serial timing/flow-control requirements.
+- Deassert the module's **SUSPEND** signal per its datasheet for UART use.
+  SUSPEND and nRTS are different signals and are not interchangeable.
+- Optional `SF_ANT_UART_RESET` is a **host active-low output**; verify the
+  module reset polarity, voltage and pull requirements.
+- Verify all selected GPIOs against the board revision's schematic, connector
+  routing and peripheral conflicts. The commented
+  [PlatformIO example](../README.md#uart-ant-module-crowpanel-recommended-path-hardware-unverified)
+  intentionally uses `<verified TX GPIO>` / `<verified RX GPIO>` placeholders
+  with `TODO(verify)` rather than asserting numeric pins are safe.
+
+### CrowPanel USB host is not recommended — verify on schematic
+
+The CrowPanel USB electrical design has **not** been verified for hosting an ANT
+stick; an OTG adapter alone does not establish suitability. Before any redesign:
+
+- **TODO(verify on schematic):** connector routing to native S3 **GPIO19/20**
+  versus a USB-UART bridge.
+- **TODO(verify on schematic):** provision of **VBUS 5 V output**, switching,
+  current limiting and power budget; do not assume a power-input port can source.
+- **TODO(verify on schematic):** USB-C **CC sink termination** and changes
+  required for a compliant host/source role.
+- **TODO(verify on schematic):** possible **backfeed with an external supply**
+  and other USB power sources; determine required isolation.
+- **TODO(verify on schematic):** potential **loss of USB flashing/console**
+  when native USB is repurposed and the remaining recovery/programming path.
 
 ### Consequences
-- `AntOutput` (core, host-tested) implements the ANT channel and the FE-C pages behind
+- `AntOutput` (core, host-tested) implements FE-C and selectable sensor channels behind
   `smartfitness::ant::AntTransport`; `AntUsbTransport` (web variant) implements it with the
   ESP-IDF USB Host Library (two tasks on core 0, non-blocking buffers to the main loop).
-  A UART module can be added as another transport.
+  The shared UART transport uses UART1 and is selected by the TX/RX build flags
+  on either variant; web retains USB by default.
 - **Wiring/power (DevKitC-1):** stick on the port labelled **USB** via an OTG adapter; bridge the
   **USB-OTG** solder jumper so the 5 V rail feeds VBUS; power, flash and use the Serial console
   through the **UART** port (`ARDUINO_USB_CDC_ON_BOOT=0` for the web variant).
-- The CrowPanel (HMI variant) has one USB-C port and no USB host: ANT+ FE-C is unavailable there.
-- Garmin/Zwift interoperability, stick hot-plugging and BLE/Wi-Fi/USB coexistence need hardware tests.
+- HMI exposes the existing full multi-channel selection and per-channel status
+  when its ANT transport is configured, through shared commands/snapshots.
+  Without a configured transport it shows **ANT unavailable**. Transport
+  configuration does not prove a module is connected or responding.
+- Garmin/Zwift interoperability, USB hot-plugging, UART reset/nRTS/startup and
+  BLE/Wi-Fi/radio coexistence need hardware tests. No schematic verification or
+  working ANT hardware is claimed.
 
 ## HD-002: Garmin watches (e.g. fenix 6 Pro) and Bluetooth FTMS
 
@@ -313,8 +371,9 @@ hardware measurements.
   focus targets so long diagnostics never require touch; status includes text
   as well as violet/light-blue/alert/tan colours. The UI submits shared
   `SetOutputServices` commands, keeps FTMS mandatory, treats Auto as baseline
-  only, and exposes BLE restart requirements. CrowPanel has no ANT transport
-  and displays that limitation explicitly. No new fonts or runtime libraries
+  only, and exposes BLE restart requirements. CrowPanel displays ANT unavailability
+  when no transport is configured; UART builds expose the full ANT controls/status.
+  No new fonts or runtime libraries
   are introduced.
 
 ## HD-009: Selectable BLE services and ANT+ output channels
@@ -368,8 +427,10 @@ NimBLE stack, so rebuilding the server must not tear down the central connection
   dropping selected channels. Only FE-C accepts controls, through the existing
   core control/safety gate; standalone sensor channels are telemetry-only.
 - Keep transport/configuration logic in the shared core and radio adapters.
-  Web and HMI consume snapshots and submit shared commands. CrowPanel HMI has
-  no ANT radio transport: show **ANT unavailable**, not editable ANT controls.
+  Web and HMI consume snapshots and submit shared commands. CrowPanel HMI shows
+  **ANT unavailable** without a configured transport; with UART configured it
+  exposes the existing full multi-channel selection and status. This adds no
+  configuration-schema change.
   Both interfaces distinguish selected, available and active services and explain
   BLE save/restart requirements.
 

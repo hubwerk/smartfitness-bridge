@@ -7,12 +7,14 @@
 #include <Arduino.h>
 
 #include "bridge_controller.h"
+#include "board_crowpanel128.h"
 #include "config_store.h"
 #include "hmi_hal.h"
 #include "hmi_model.h"
 #include "hmi_ui.h"
 #include "lcars_theme.h"
 #include "lvgl.h"
+#include "platform/ant_uart_serial.h"
 #include "variant.h"
 
 namespace {
@@ -45,8 +47,17 @@ namespace variant {
 
 const char* name() { return "hmi"; }
 
-// The CrowPanel's only USB-C port is the S3's USB-Serial/JTAG: no ANT radio.
-smartfitness::ant::AntTransport* antTransport() { return nullptr; }
+smartfitness::ant::AntTransport* antTransport() {
+#if defined(SF_ANT_UART_TX) && defined(SF_ANT_UART_RX)
+    // main starts ANT before hal.begin(); power the external module first.
+    pinMode(board::kExt5vEnable, OUTPUT);
+    digitalWrite(board::kExt5vEnable, HIGH);
+    return &antUartTransport();
+#else
+    // The CrowPanel's USB-C port is USB-Serial/JTAG, not an ANT USB host.
+    return nullptr;
+#endif
+}
 
 void begin(BridgeController& controller, const BridgeConfig& config) {
     (void)config;  // Wi-Fi fields stay in the shared schema; the HMI never starts Wi-Fi.

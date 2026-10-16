@@ -639,6 +639,25 @@ StatusView treadmillStatus() {
     return status;
 }
 
+StatusView antStatus() {
+    auto status = bikeStatus();
+    status.outputProtocol = OutputProtocol::AntFec;
+    status.antOutput.enabled = true;
+    status.antOutput.available = true;
+    status.antOutput.link = "open";
+    status.antOutput.stick = true;
+    status.antOutput.open = true;
+    status.antOutput.hardware = "nRF52840 UART";
+    status.antOutput.deviceNumber = 12345;
+    status.antOutput.channelLimit = 8;
+    status.antOutput.display = true;
+    status.antOutput.control = true;
+    status.antOutput.channels = {{"fec", "FE-C", 17, true, true, true},
+                                 {"hr", "Heart rate", 120, true, true, true},
+                                 {"power", "Bike power", 11, false, false, true}};
+    return status;
+}
+
 ScanView scanView() {
     ScanView scan;
     scan.scanning = true;
@@ -740,7 +759,7 @@ void knobWalkthrough() {
     turn(3);
     press();
     assert(g_ui.current() == Screen::Settings);
-    turn(1);  // Output: BLE FTMS -> Off (no ANT radio on the HMI)
+    turn(1);  // Output: BLE FTMS -> Off (fixture has no ANT transport)
     press();
     assert(lastCommand(CommandType::OutputProtocol) && g_commands.back().text == "off");
     turn(2);  // Output -> profile -> output services
@@ -923,6 +942,169 @@ void checkServiceRefresh() {
     std::printf("live service diagnostics, availability and mask redraw passed\n");
 }
 
+std::string readoutText(std::uint32_t index) {
+    return lv_label_get_text(lv_obj_get_child(lv_obj_get_child(currentList(), index), 0));
+}
+
+void checkAntUi() {
+    auto status = antStatus();
+    auto config = configView();
+    // The live transport, not the independently refreshed config, determines
+    // whether ANT+ is offered (including while no physical module is detected).
+    config.antAvailable = false;
+    for (const auto protocol : {OutputProtocol::BleFtms, OutputProtocol::AntFec, OutputProtocol::Off}) {
+        config.outputProtocol = protocol;
+        g_ui.setStatus(status);
+        g_ui.setConfig(config);
+        g_ui.navigate(Screen::Dashboard);
+        pump(50);
+        g_ui.navigate(Screen::Settings);
+        pump(100);
+        turn(1);
+        press();
+        assert(lastCommand(CommandType::OutputProtocol));
+        assert(g_commands.back().text == outputProtocolName(nextOutputProtocol(protocol, true)));
+    }
+    status.antOutput.available = false;
+    config.antAvailable = true;
+    config.outputProtocol = OutputProtocol::BleFtms;
+    g_ui.setConfig(config);
+    g_ui.setStatus(status);
+    pump(100);
+    press();  // retained Output focus: BLE -> Off, despite stale config availability
+    assert(g_commands.back().text == "off");
+    status = antStatus();
+    g_ui.setStatus(status);
+    pump(100);
+    turn(3);  // Output -> profile -> output services -> ANT status
+    press();
+    assert(g_ui.current() == Screen::AntStatus);
+    assert(readoutText(0) == "BROADCASTING\nMODULE DETECTED");
+    auto* header = lv_obj_get_child(lv_screen_active(), 0);
+    assert(lv_color_to_u32(lv_obj_get_style_bg_color(header, LV_PART_MAIN)) ==
+           lv_color_to_u32(lv_color_hex(lcars::Orange)));
+    status.antOutput.stick = false;
+    status.antOutput.open = false;
+    status.antOutput.link = "wait-stick";
+    status.antOutput.hardware.clear();
+    g_ui.setStatus(status);
+    pump(100);
+    assert(readoutText(0) == "NO ANT+ MODULE");
+    assert(readoutText(1) == "LINK: WAIT-STICK");
+    assert(lv_color_to_u32(lv_obj_get_style_bg_color(lv_obj_get_child(currentList(), 0), LV_PART_MAIN)) ==
+           lv_color_to_u32(lv_color_hex(lcars::Alert)));
+    header = lv_obj_get_child(lv_screen_active(), 0);
+    assert(lv_color_to_u32(lv_obj_get_style_bg_color(header, LV_PART_MAIN)) ==
+           lv_color_to_u32(lv_color_hex(lcars::Alert)));
+    status.antOutput.stick = true;
+    g_ui.setStatus(status);
+    pump(100);
+    assert(readoutText(0) == "WAITING FOR ANT+\nMODULE DETECTED");
+    status.antOutput.enabled = false;
+    g_ui.setStatus(status);
+    pump(100);
+    assert(readoutText(0) == "OUTPUT OFF\nMODULE DETECTED");
+    status = antStatus();
+    status.antOutput.hardware = "nRF51422 UART";
+    status.antOutput.deviceNumber = 42;
+    status.antOutput.channelLimit = 4;
+    status.antOutput.channels[1].open = false;
+    status.antOutput.channels[2].available = false;
+    status.antOutput.display = false;
+    status.antOutput.control = false;
+    g_ui.setStatus(status);
+    pump(100);
+    assert(readoutText(2) == "HARDWARE: NRF51422 UART");
+    assert(readoutText(3) == "DEVICE NUMBER: 42");
+    assert(readoutText(4) == "CHANNELS: 1/4");
+    assert(readoutText(7).find("NO DATA") != std::string::npos);
+    assert(readoutText(8) == "DISPLAY: OFF");
+    assert(readoutText(9) == "CONTROL: OFF");
+    for (const auto lang : {Language::English, Language::German}) {
+        setLanguage(lang);
+        g_ui.navigate(Screen::Dashboard);
+        pump(50);
+        g_ui.navigate(Screen::AntStatus);
+        pump(100);
+        const auto count = lv_group_get_obj_count(lv_indev_get_group(g_knob));
+        for (std::uint32_t index = 0; index < count; ++index) {
+            checkLayout("ant-diagnostics");
+            turn(1);
+        }
+    }
+    setLanguage(Language::English);
+    status = antStatus();
+    config.antOutputServices = 3;
+    g_ui.setStatus(status);
+    g_ui.setConfig(config);
+    g_ui.navigate(Screen::OutputServices);
+    pump(100);
+    turn(6);  // BLE Auto + five BLE services -> ANT Auto
+    press();
+    assert(lastCommand(CommandType::SetOutputServices) && g_commands.back().text == "ant" &&
+           g_commands.back().serviceMask == 0);
+    turn(1);  // FE-C can be disabled while Power remains selected
+    press();
+    assert(g_commands.back().serviceMask == 2);
+    config.antOutputServices = 2;
+    g_ui.setConfig(config);
+    pump(100);
+    press();
+    assert(g_commands.back().serviceMask == 3);
+    config.antOutputServices = 3;
+    g_ui.setConfig(config);
+    pump(100);
+    assert(readoutText(13) == lcars::uppercase(tr(Str::AntDuplicatePower)));
+    turn(1);  // Power -> off
+    press();
+    assert(g_commands.back().serviceMask == 1);
+    config.antOutputServices = 1;
+    g_ui.setConfig(config);
+    pump(100);
+    assert(lv_group_get_obj_count(lv_indev_get_group(g_knob)) == 14);  // warning removed live
+    turn(-1);  // last selected channel must not silently become Auto
+    auto commandsBefore = g_commands.size();
+    press();
+    assert(g_commands.size() == commandsBefore);
+    pump(2600);  // clear the selection warning toast before geometry checks
+    config.antOutputServices = 0;
+    g_ui.setConfig(config);
+    pump(100);
+    turn(2);  // HR: Auto baseline FE-C -> FE-C + HR
+    press();
+    assert(g_commands.back().serviceMask == 5);
+    turn(1);  // unavailable speed/cadence: readable, not selectable
+    commandsBefore = g_commands.size();
+    press();
+    assert(g_commands.size() == commandsBefore);
+    status.antOutput.channels.push_back({"speed-cadence", "Speed / cadence", 121, false, false, true});
+    g_ui.setStatus(status);
+    pump(100);
+    press();
+    assert(g_commands.back().serviceMask == 9);
+    for (const auto lang : {Language::English, Language::German}) {
+        setLanguage(lang);
+        config.antOutputServices = 3;
+        g_ui.setConfig(config);
+        g_ui.navigate(Screen::Dashboard);
+        pump(50);
+        g_ui.navigate(Screen::OutputServices);
+        pump(100);
+        const auto count = lv_group_get_obj_count(lv_indev_get_group(g_knob));
+        for (std::uint32_t index = 0; index < count; ++index) {
+            checkLayout("ant-services");
+            turn(1);
+        }
+    }
+    setLanguage(Language::English);
+    g_ui.setStatus(treadmillStatus());
+    g_ui.setConfig(configView());
+    g_ui.navigate(Screen::Dashboard);
+    pump(100);
+    g_commands.clear();
+    std::printf("ANT output cycling, no-module alert, live status redraw and EN/DE layout passed\n");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -955,6 +1137,7 @@ int main(int argc, char** argv) {
     knobWalkthrough();
     checkListEnds();
     checkServiceRefresh();
+    checkAntUi();
 
     g_ui.setStatus(bikeStatus());
     pump(100);
@@ -1049,6 +1232,37 @@ int main(int argc, char** argv) {
     pump(50);
     g_ui.navigate(Screen::OutputServices);
     shot("30-output-services-restart");
+    auto ant = antStatus();
+    g_ui.setStatus(ant);
+    g_ui.navigate(Screen::AntStatus);
+    shot("31-ant-detected");
+    turn(4);
+    shot("32-ant-channels");
+    ant.antOutput.stick = false;
+    ant.antOutput.open = false;
+    ant.antOutput.link = "wait-stick";
+    ant.antOutput.hardware.clear();
+    for (auto& channel : ant.antOutput.channels) channel.open = false;
+    ant.antOutput.display = false;
+    ant.antOutput.control = false;
+    g_ui.setStatus(ant);
+    g_ui.navigate(Screen::Settings);
+    pump(50);
+    g_ui.navigate(Screen::AntStatus);
+    shot("33-ant-no-module");
+    ant = antStatus();
+    auto antConfig = configView();
+    antConfig.antOutputServices = 3;
+    g_ui.setStatus(ant);
+    g_ui.setConfig(antConfig);
+    g_ui.navigate(Screen::OutputServices);
+    pump(100);
+    turn(6);
+    shot("34-ant-services");
+    turn(6);
+    shot("35-ant-duplicate-power");
+    g_ui.setConfig(configView());
+    g_ui.setStatus(bikeStatus());
     auto longScan = scanView();
     longScan.devices[0].name = "A VERY LONG FITNESS DEVICE NAME THAT MUST WRAP WITHOUT CLIPPING";
     g_ui.setScan(longScan);

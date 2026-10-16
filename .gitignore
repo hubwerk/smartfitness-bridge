@@ -2,3 +2,4 @@
 include/generated/
 screenshots/
 .cache/
+build/
