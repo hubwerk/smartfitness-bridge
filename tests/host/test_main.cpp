@@ -13,6 +13,24 @@ void runIfitBowflexTests();
 void runTrainersRowerTests();
 void runTreadmillTests();
 void runSportstechTests();
+void runFitshowTests();
+void runFitshowRegistryTests();
+void runToorxTests();
+void runToorxRegistryTests();
+void runDomyosExtTests();
+void runDomyosExtRegistryTests();
+void runEchelonExtTests();
+void runEchelonExtRegistryTests();
+void runNautilusTests();
+void runNautilusRegistryTests();
+void runSportsplusTests();
+void runSportsplusRegistryTests();
+void runVendorTreadmillsTests();
+void runVendorTreadmillsRegistryTests();
+void runVendorBikesTests();
+void runVendorBikesRegistryTests();
+void runVendorCardioTests();
+void runVendorCardioRegistryTests();
 #ifdef SF_TEST_WEB
 void runWebTests();
 #endif
@@ -30,6 +48,24 @@ int main() {
     runTrainersRowerTests();
     runTreadmillTests();
     runSportstechTests();
+    runFitshowTests();
+    runToorxTests();
+    runDomyosExtTests();
+    runEchelonExtTests();
+    runNautilusTests();
+    runSportsplusTests();
+    runVendorTreadmillsTests();
+    runVendorBikesTests();
+    runVendorCardioTests();
+    runFitshowRegistryTests();
+    runToorxRegistryTests();
+    runDomyosExtRegistryTests();
+    runEchelonExtRegistryTests();
+    runNautilusRegistryTests();
+    runSportsplusRegistryTests();
+    runVendorTreadmillsRegistryTests();
+    runVendorBikesRegistryTests();
+    runVendorCardioRegistryTests();
 #ifdef SF_TEST_WEB
     runWebTests();
 #endif

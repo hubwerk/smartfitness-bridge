@@ -4,13 +4,22 @@
 
 #include "ftms/ftms_codec.hpp"
 #include "protocols/domyos.hpp"
+#include "protocols/domyos_ext.hpp"
 #include "protocols/echelon.hpp"
+#include "protocols/echelon_ext.hpp"
+#include "protocols/fitshow.hpp"
 #include "protocols/ftms_source.hpp"
 #include "protocols/ifit_bowflex.hpp"
+#include "protocols/nautilus.hpp"
 #include "protocols/sensor_sources.hpp"
+#include "protocols/sportsplus.hpp"
 #include "protocols/sportstech.hpp"
+#include "protocols/toorx.hpp"
 #include "protocols/trainers_rower.hpp"
 #include "protocols/treadmills.hpp"
+#include "protocols/vendor_bikes.hpp"
+#include "protocols/vendor_cardio.hpp"
+#include "protocols/vendor_treadmills.hpp"
 #include "protocols/yesoul_keiser.hpp"
 
 namespace smartfitness {
@@ -36,8 +45,9 @@ bool matchesSchwinn(const ble::Advertisement& advertisement) {
 
 bool matchesEchelon(const ble::Advertisement& advertisement) {
     const std::string name = upper(advertisement.name);
-    // ECH-ROW / ECH-STRIDE / ECH-SC are rower, stride and stair climber
-    // protocols that are not ported; FTMS-capable models use the FTMS adapter.
+    // ECH-ROW / ECH-STRIDE / ECH-SC are not the bike protocol; rower, stride
+    // and stair climber names are claimed by echelon_ext at a higher priority.
+    // FTMS-capable models use the FTMS adapter.
     return startsWith(advertisement.name, "ECH") && !startsWith(name, "ECH-ROW") &&
            !startsWith(name, "ECH-STRIDE") && !startsWith(name, "ECH-SC") && !hasFtms(advertisement);
 }
@@ -106,18 +116,44 @@ const ProtocolInfo kProtocols[] = {
     {"hrs", "Heart rate monitor", 20, matchesHrs, make<HeartRateSource>, false, false, MachineProfile::IndoorBike},
 };
 
+std::size_t baseCount() { return sizeof(kProtocols) / sizeof(kProtocols[0]); }
+const ProtocolInfo& baseAt(std::size_t index) { return kProtocols[index]; }
+
+// Registration order is the persisted pairing/detection tie order: append only.
+struct Family {
+    std::size_t (*count)();
+    const ProtocolInfo& (*at)(std::size_t);
+};
+const Family kFamilies[] = {
+    {baseCount, baseAt},
+    {ifit_bowflex::descriptorCount, ifit_bowflex::descriptorAt},
+    {treadmills::descriptorCount, treadmills::descriptorAt},
+    {fitshow::descriptorCount, fitshow::descriptorAt},
+    {toorx::descriptorCount, toorx::descriptorAt},
+    {domyos_ext::descriptorCount, domyos_ext::descriptorAt},
+    {echelon_ext::descriptorCount, echelon_ext::descriptorAt},
+    {nautilus::descriptorCount, nautilus::descriptorAt},
+    {sportsplus::descriptorCount, sportsplus::descriptorAt},
+    {vendor_treadmills::descriptorCount, vendor_treadmills::descriptorAt},
+    {vendor_bikes::descriptorCount, vendor_bikes::descriptorAt},
+    {vendor_cardio::descriptorCount, vendor_cardio::descriptorAt},
+};
+
 }  // namespace
 
 std::size_t protocolCount() {
-    return sizeof(kProtocols) / sizeof(kProtocols[0]) + ifit_bowflex::descriptorCount() + treadmills::descriptorCount();
+    std::size_t total = 0;
+    for (const auto& family : kFamilies) total += family.count();
+    return total;
 }
 const ProtocolInfo& protocolAt(std::size_t index) {
     if (index >= protocolCount()) index = 0;
-    const std::size_t baseCount = sizeof(kProtocols) / sizeof(kProtocols[0]);
-    if (index < baseCount) return kProtocols[index];
-    index -= baseCount;
-    if (index < ifit_bowflex::descriptorCount()) return ifit_bowflex::descriptorAt(index);
-    return treadmills::descriptorAt(index - ifit_bowflex::descriptorCount());
+    for (const auto& family : kFamilies) {
+        const std::size_t count = family.count();
+        if (index < count) return family.at(index);
+        index -= count;
+    }
+    return kProtocols[0];
 }
 
 const ProtocolInfo* findProtocol(const std::string& id) {

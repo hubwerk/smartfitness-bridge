@@ -398,7 +398,7 @@ std::string detected(const ble::Advertisement& advertisement) {
 void testRegistry() {
     assert(detected(advert("ECH-SPORT-1")) == "echelon");
     assert(detected(advert("ECH-SPORT-1", {0x1826})) == "ftms");
-    assert(detected(advert("ECH-ROW-1")).empty());
+    assert(detected(advert("ECH-ROW-1")) == "echelon-rower");
     assert(detected(advert("IC Bike", {0x1826})) == "schwinn-ic4");
     assert(detected(advert("C7-0123456789AB", {0x1826})) == "schwinn-ic4");
     assert(detected(advert("C7-0123456789ABCD", {0x1826})) == "ftms");  // 17 characters
@@ -426,8 +426,8 @@ void testRegistry() {
     assert(detected(advert("DR", {0x1818})) == "elite-dr");
     assert(detected(advert("MISURO B+", {0x1818})) == "elite-misuro");
     assert(detected(advert("PM5 123 ROW")) == "concept2-pm5");
-    assert(detected(advert("KICKR RUN")).empty());
-    assert(detected(advert("PM5 123 SKI")).empty());
+    assert(detected(advert("KICKR RUN")) == "kickr-run");
+    assert(detected(advert("PM5 123 SKI")) == "concept2-skierg");
     assert(detected(advert("Peloton Bike")).empty());
     assert(detected(advert("DFC")).empty());
     for (const char* name : {"I_EB123", "I_TL123", "I_EL123", "I_FS123", "I_VE123",
@@ -492,6 +492,51 @@ void testProtocolProfiles() {
              "wp2-c6-s0", "wp2-c6-s2c2", "wp2-c6-s1c1",
              "wp2-c7-s0", "wp2-c7-s2c2", "wp2-c7-s1c1"})
         expected.emplace(id, MachineProfile::Treadmill);
+    // Ported vendor families (fitshow, toorx, domyos_ext, echelon_ext, nautilus,
+    // sportsplus, vendor_treadmills, vendor_bikes, vendor_cardio).
+    for (const char* id : {
+             "fitshow-tm", "fitshow-noblepro", "fitshow-tm-mi", "fitshow-anyrun", "trx-tm",
+             "trx-tm-irun", "trx-tm-reebok", "trx-tm-adidas", "trx-tm-dknrun", "trx-tm-30",
+             "trx-tm-jtx", "trx-tm-dkn", "trx-tm-flow", "trx-tm-fr30", "domyos-tm",
+             "echelon-stride", "echelon-stride4", "nautilus-tm", "nautilus-t628", "nautilus-tm-688a",
+             "bowflex-tm", "pafers-treadmill", "pafers-iboxster", "true-tm", "assault-tm",
+             "wdway-tm", "technogym-myrun", "lifespan-tm", "octane-zr7", "octane-zr8",
+             "zipro-tm", "esanglinker", "eslinker-costa", "sperax-tm", "focus-tm",
+             "deerrun-pitpat", "activio-tm", "activio-v460", "activio-zt2500", "activio-umay",
+             "kickr-run", "lifefitness-tm", "shuaa5-tm"})
+        expected.emplace(id, MachineProfile::Treadmill);
+    for (const char* id : {
+             "snode-bike", "fitplus-bike", "fitplus-etappe", "fitplus-merach", "fitplus-h9110",
+             "fitplus-sx600", "trx-bike-tc", "trx-bike-tun", "trx-bike-fhw", "trx-bike-vfit",
+             "trx-bike-irun", "trx-bike-adc1", "trx-bike-chy", "trx-bike-icon", "trx-bike-casall",
+             "trx-bike-reebok", "trx-bike-dkn", "trx-bike-fal", "trx-bike-hertz", "trx-bike-enerfit",
+             "trx-bike-hammer", "trx-bike-jll", "trx-bike-fytter", "trx-bike-asviva", "trx-bike-hop",
+             "trx-bike-srx500", "trx-bike-taurua", "nautilus-bike", "nautilus-b616-mi", "sportstech-bike",
+             "sportsplus-bike", "sportsplus-ht", "carefit-bike", "sp-ht-9600ie", "pafers-bike",
+             "flywheel", "lifefit-ic5", "sole-bike", "sole-r92", "kettler-c12",
+             "technogym", "inspire", "keep-bike", "mcf-bike", "xcx-bike",
+             "chrono-bike", "volava", "ultrasport", "skandika-wiri", "skandika-x2000",
+             "pitpat-bike", "freebeat-boom", "mepanel", "apex-bike", "npe-cable",
+             "cycleops", "csc-bike", "lifespan-bike", "renpho", "horizon-gr7"})
+        expected.emplace(id, MachineProfile::IndoorBike);
+    for (const char* id : {
+             "fitplus-rower", "trx-row", "trx-row-mrk", "domyos-row", "echelon-rower",
+             "sportstech-rower", "sportsplus-rower", "pafers-rower", "proform-rower", "proform-750r",
+             "proform-sport-rl", "smartrow", "concept2-skierg"})
+        expected.emplace(id, MachineProfile::Rower);
+    for (const char* id : {
+             "trx-ell", "trx-ell-toorx", "trx-ell-dct", "domyos-el", "nautilus-ellip",
+             "nautilus-m7", "nautilus-el-v2", "sportstech-ellip", "bh-elliptical", "ypoo-u3",
+             "ypoo-ftms-el", "ypoo-sch411", "ypoo-feier", "ypoo-sole-e25", "ypoo-true-el",
+             "ypoo-iconsole", "gymstick-gx60", "sole-elliptical", "xterra-xe88", "sole-e55",
+             "octane-q37"})
+        expected.emplace(id, MachineProfile::CrossTrainer);
+    for (const char* id : {
+             "echelon-stair"})
+        expected.emplace(id, MachineProfile::StairClimber);
+    for (const char* id : {
+             "sunnyfit-stepper"})
+        expected.emplace(id, MachineProfile::StepClimber);
     assert(expected.size() == protocols::protocolCount());
     for (std::size_t index = 0; index < protocols::protocolCount(); ++index) {
         const auto& info = protocols::protocolAt(index);
