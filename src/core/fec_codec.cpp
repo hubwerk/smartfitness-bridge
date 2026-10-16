@@ -203,8 +203,6 @@ Page Encoder::generalSettings() const {
     } else {
         put16(out, 4, 0x7FFF);
     }
-    const auto resistance = in.get(Metric::Resistance);
-    out[6] = resistance ? static_cast<std::uint8_t>(clampRound(std::fmin(*resistance, 100.0F) * 2.0F, 200)) : 0xFF;
     out[7] = stateBits();
     return out;
 }
@@ -238,16 +236,16 @@ Page Encoder::specific() {
             const auto negative = in.get(Metric::NegativeElevationGain);
             out[5] = negative ? rollover8(*negative * 10.0F) : 0;
             out[6] = positive ? rollover8(*positive * 10.0F) : 0;
-            out[7] = static_cast<std::uint8_t>((negative ? 0x01 : 0) | (positive ? 0x02 : 0) | stateBits());
+            out[7] = static_cast<std::uint8_t>((positive ? 0x01 : 0) | (negative ? 0x02 : 0) | stateBits());
             break;
         }
         case page::kElliptical: {
             const auto strides = in.get(Metric::StrideCount);
-            out[2] = strides ? rollover8(*strides) : 0;
-            out[3] = positive ? rollover8(*positive * 10.0F) : 0;
+            out[2] = positive ? rollover8(*positive * 10.0F) : 0;
+            out[3] = strides ? rollover8(*strides) : 0;
             out[4] = in.cadence();
             put16(out, 5, in.power(0xFFFF));
-            out[7] = static_cast<std::uint8_t>((positive ? 0x01 : 0) | stateBits());
+            out[7] = static_cast<std::uint8_t>((strides ? 0x01 : 0) | (positive ? 0x02 : 0) | stateBits());
             break;
         }
         case page::kRower: {
@@ -255,7 +253,7 @@ Page Encoder::specific() {
             out[3] = strokes ? rollover8(*strokes) : 0;
             out[4] = in.cadence();
             put16(out, 5, in.power(0xFFFF));
-            out[7] = stateBits();
+            out[7] = static_cast<std::uint8_t>((strokes ? 0x01 : 0) | stateBits());
             break;
         }
         case page::kClimber: {
@@ -264,7 +262,7 @@ Page Encoder::specific() {
             out[3] = strides ? rollover8(*strides) : 0;
             out[4] = in.cadence();
             put16(out, 5, in.power(0xFFFF));
-            out[7] = stateBits();
+            out[7] = static_cast<std::uint8_t>((strides ? 0x01 : 0) | stateBits());
             break;
         }
         default: {  // trainer / stationary bike

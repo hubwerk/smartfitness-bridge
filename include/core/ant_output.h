@@ -79,6 +79,7 @@ private:
     bool controlApplied_ = false;
     std::uint8_t pendingResponse_ = 0;  // page requested via page 70
     std::uint8_t pendingRepeats_ = 0;
+    bool pendingAcknowledged_ = false;
     std::uint32_t pagesSent_ = 0;
     smartfitness::ant::Page lastPage_{};
     Clock clock_;

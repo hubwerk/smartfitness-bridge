@@ -63,6 +63,10 @@ bool MessageParser::feed(std::uint8_t byte, Message& message) {
             state_ = State::Sync;
             if (byte != checksum_) {
                 ++dropped_;
+                if (byte == kSync) {
+                    checksum_ = kSync;
+                    state_ = State::Length;
+                }
                 return false;
             }
             message = current_;

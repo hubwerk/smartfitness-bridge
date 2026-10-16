@@ -4,6 +4,7 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cassert>
 #include <array>
 #include <limits>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "ant_output.h"
+#include "ant_usb_recovery.hpp"
 #include "ble_input_adapter.h"
 #include "bridge/bridge_core.hpp"
 #include "bridge_commands.h"
@@ -65,6 +67,93 @@ struct Rig {
     std::string scanResultsJson() const { return web::scanResultsJson(ui.scanView()); }
     std::string configJson() const { return web::configJson(ui.configView()); }
 };
+
+void testAntUsbRecovery() {
+    using Recovery = smartfitness::usb_transport::AntUsbRecovery;
+    using PendingWrite = smartfitness::usb_transport::AntUsbPendingWrite;
+    using Endpoint = Recovery::Endpoint;
+    Recovery recovery;
+    assert(recovery.available());
+    recovery.request(Endpoint::In);
+    assert(recovery.pending(Endpoint::In) && !recovery.available());
+
+    std::string order;
+    bool haltOk = false;
+    bool flushOk = true;
+    bool clearOk = true;
+    bool submitOk = true;
+    const auto serviceIn = [&](bool busy) {
+        return recovery.service(Endpoint::In, busy, [&] {
+            order += 'h';
+            return haltOk;
+        }, [&] {
+            order += 'f';
+            return flushOk;
+        }, [&] {
+            order += 'c';
+            return clearOk;
+        }, [&] {
+            order += 'i';
+            return submitOk;
+        });
+    };
+    assert(!serviceIn(true) && order.empty());
+    assert(!serviceIn(false) && order == "h");
+    haltOk = true;
+    flushOk = false;
+    order.clear();
+    assert(!serviceIn(false) && order == "hf");
+    flushOk = true;
+    clearOk = false;
+    order.clear();
+    assert(!serviceIn(false) && order == "hfc" && !recovery.available());
+    clearOk = true;
+    submitOk = false;
+    order.clear();
+    assert(!serviceIn(false) && order == "hfci" && !recovery.available());
+    submitOk = true;
+    order.clear();
+    assert(serviceIn(false) && order == "hfci" && recovery.available());
+
+    recovery.request(Endpoint::Out);
+    PendingWrite pendingWrite;
+    const std::uint8_t message[]{0xA4, 0x01, 0x4B, 0x00};
+    std::copy(message, message + sizeof(message), pendingWrite.buffer());
+    pendingWrite.stage(sizeof(message));
+    order.clear();
+    assert(!recovery.service(Endpoint::Out, false, [&] {
+        order += 'h';
+        return false;
+    }, [&] {
+        order += 'f';
+        return true;
+    }, [&] {
+        order += 'c';
+        return true;
+    }, [] {
+        assert(false);
+        return false;
+    }));
+    assert(order == "h" && pendingWrite.pending() && pendingWrite.size() == sizeof(message) &&
+           std::equal(message, message + sizeof(message), pendingWrite.data()) && !recovery.available());
+    order.clear();
+    assert(recovery.service(Endpoint::Out, false, [&] {
+        order += 'h';
+        return true;
+    }, [&] {
+        order += 'f';
+        return true;
+    }, [&] {
+        order += 'c';
+        return true;
+    }, [] {
+        assert(false);
+        return false;
+    }));
+    assert(order == "hfc" && pendingWrite.pending() && recovery.available());
+    pendingWrite.complete();
+    assert(!pendingWrite.pending());
+}
 
 void testConsoleParsing() {
     Command command;
@@ -692,6 +781,7 @@ void testBodyReceipt() {
 }  // namespace
 
 void runWebTests() {
+    testAntUsbRecovery();
     testConsoleParsing();
     testConsoleBlePairing();
     testPairOverrideAndExclusion();

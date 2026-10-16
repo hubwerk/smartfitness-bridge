@@ -49,6 +49,17 @@ void testMessageCodec() {
         }
     }
     assert(complete == 1 && parser.dropped() >= 1);
+    MessageParser truncatedParser;
+    Bytes truncated{kSync, 0x01, msg::kResetSystem, 0x00};  // Missing checksum before the next frame.
+    truncated.insert(truncated.end(), frame.begin(), frame.end());
+    bool recovered = false;
+    for (const auto byte : truncated) {
+        if (truncatedParser.feed(byte, message)) {
+            recovered = true;
+            assert(message.id == msg::kOpenChannel);
+        }
+    }
+    assert(recovered && truncatedParser.dropped() == 1);
     // Oversized lengths are rejected.
     const Bytes oversized{kSync, 0x40, 0x4E};
     for (const auto byte : oversized) assert(!parser.feed(byte, message));
@@ -80,7 +91,7 @@ void testFecBikePages() {
     assert((general[7] & 0x0F) == 0x07 && (general[7] >> 4) == 3);  // HR + distance, in use
 
     const Page settings = encoder.generalSettings();
-    assert(settings[0] == 17 && static_cast<std::int16_t>(u16(settings, 4)) == -250 && settings[6] == 80);
+    assert(settings[0] == 17 && static_cast<std::int16_t>(u16(settings, 4)) == -250 && settings[6] == 0xFF);
 
     const Page metabolic = encoder.metabolic();
     assert(metabolic[0] == 18 && u16(metabolic, 2) == 750 && u16(metabolic, 4) == 6000 && metabolic[6] == 44);
@@ -115,7 +126,8 @@ void testFecFallbacksAndInvalids() {
     assert(std::abs(static_cast<std::int16_t>(u16(encoder.generalSettings(), 4)) - 10000) <= 1);
     assert(u16(encoder.metabolic(), 4) == 6000 && u16(encoder.metabolic(), 2) == 0xFFFF);
     const Page rower = encoder.specific();
-    assert(rower[0] == 22 && rower[3] == (300 & 0xFF) && rower[4] == 28 && u16(rower, 5) == 180);
+    assert(rower[0] == 22 && rower[3] == (300 & 0xFF) && rower[4] == 28 &&
+           (rower[7] & 0x01) == 0x01 && u16(rower, 5) == 180);
 
     // Treadmill: elevation gain, no power.
     TrainerState treadmill = connectedState(MachineProfile::Treadmill);
@@ -125,6 +137,13 @@ void testFecFallbacksAndInvalids() {
     encoder.update(treadmill, MachineProfile::Treadmill, 3000);
     const Page page19 = encoder.specific();
     assert(page19[0] == 19 && page19[4] == 160 && page19[5] == 10 && page19[6] == 123 && (page19[7] & 0x03) == 0x03);
+    treadmill.setSample(Metric::NegativeElevationGain, 0.0F, false);
+    encoder.update(treadmill, MachineProfile::Treadmill, 3000);
+    assert((encoder.specific()[7] & 0x03) == 0x01);
+    treadmill.setSample(Metric::PositiveElevationGain, 0.0F, false);
+    treadmill.setSample(Metric::NegativeElevationGain, 1.0F);
+    encoder.update(treadmill, MachineProfile::Treadmill, 3000);
+    assert((encoder.specific()[7] & 0x03) == 0x02);
     // Nothing for pages 17/18: the cycle falls back to page 16.
     std::set<std::uint8_t> seen;
     for (int index = 0; index < 8; ++index) seen.insert(encoder.next(1)[0]);
@@ -133,15 +152,39 @@ void testFecFallbacksAndInvalids() {
     // Cross trainer and climber pages.
     TrainerState cross = connectedState(MachineProfile::CrossTrainer);
     cross.setSample(Metric::StrideCount, 513.0F);
+    cross.setSample(Metric::PositiveElevationGain, 12.3F);
     cross.setSample(Metric::Power, 120.0F);
     encoder.update(cross, MachineProfile::CrossTrainer, 3000);
     const Page page20 = encoder.specific();
-    assert(page20[0] == 20 && page20[2] == 1 && u16(page20, 5) == 120 && page20[4] == 0xFF);
+    assert(page20[0] == 20 && page20[2] == 123 && page20[3] == 1 && (page20[7] & 0x03) == 0x03);
+    assert(u16(page20, 5) == 120 && page20[4] == 0xFF);
+    cross.setSample(Metric::StrideCount, 0.0F, false);
+    encoder.update(cross, MachineProfile::CrossTrainer, 3000);
+    const Page elevationOnly = encoder.specific();
+    assert(elevationOnly[2] == 123 && elevationOnly[3] == 0 && (elevationOnly[7] & 0x03) == 0x02);
+    cross.setSample(Metric::PositiveElevationGain, 0.0F, false);
+    cross.setSample(Metric::StrideCount, 7.0F);
+    encoder.update(cross, MachineProfile::CrossTrainer, 3000);
+    const Page strideOnly = encoder.specific();
+    assert(strideOnly[2] == 0 && strideOnly[3] == 7 && (strideOnly[7] & 0x03) == 0x01);
+    cross.setSample(Metric::StrideCount, 0.0F, false);
+    encoder.update(cross, MachineProfile::CrossTrainer, 3000);
+    assert((encoder.specific()[7] & 0x03) == 0);
+    TrainerState rowerMissing = connectedState(MachineProfile::Rower);
+    encoder.update(rowerMissing, MachineProfile::Rower, 3000);
+    assert((encoder.specific()[7] & 0x01) == 0);
     TrainerState climber = connectedState(MachineProfile::StairClimber);
     climber.setSample(Metric::StepCount, 42.0F);
     encoder.update(climber, MachineProfile::StairClimber, 3000);
     const Page page23 = encoder.specific();
-    assert(page23[0] == 23 && page23[3] == 42 && u16(page23, 5) == 0xFFFF);
+    assert(page23[0] == 23 && page23[3] == 42 && (page23[7] & 0x01) == 0x01 && u16(page23, 5) == 0xFFFF);
+    climber.setSample(Metric::StrideCount, 7.0F);
+    encoder.update(climber, MachineProfile::StairClimber, 3000);
+    assert(encoder.specific()[3] == 7 && (encoder.specific()[7] & 0x01) == 0x01);
+    climber.setSample(Metric::StrideCount, 0.0F, false);
+    climber.setSample(Metric::StepCount, 0.0F, false);
+    encoder.update(climber, MachineProfile::StairClimber, 3000);
+    assert((encoder.specific()[7] & 0x01) == 0);
 
     // Disconnected: nothing valid, state ready.
     encoder.update(TrainerState{}, MachineProfile::IndoorBike, 4000);
@@ -236,6 +279,14 @@ void testAntOutputLifecycle() {
     const Page status = replies[replies.size() - 3];
     assert(status[0] == 71 && status[1] == 49 && status[3] == 0 && status[6] == 0xF0);
     assert(replies[replies.size() - 2][0] == 71 && replies.back()[0] != 71);
+    radio.injectPage(Page{70, 0xFF, 0xFF, 0xFF, 0xFF, 0x81, 71, 0x01});
+    ant.loop();
+    radio.injectEventTx();
+    ant.loop();
+    assert(radio.written.back().id == msg::kAcknowledgedData && radio.written.back().payload[1] == 71);
+    radio.injectEventTx();
+    ant.loop();
+    assert(radio.written.back().id == msg::kBroadcastData);
     now += AntOutput::kDisplaySeenMs;
     assert(!ant.displaySeen() && !ant.controlActive());
 

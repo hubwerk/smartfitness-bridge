@@ -47,6 +47,8 @@ void AntOutput::begin() {
     parser_.reset();
     link_ = Link::WaitingForStick;
     retryPending_ = false;
+    pendingRepeats_ = 0;
+    pendingAcknowledged_ = false;
 }
 
 void AntOutput::setEnabled(bool enabled) {
@@ -61,6 +63,7 @@ void AntOutput::setEnabled(bool enabled) {
         displaySeenValid_ = false;
         controlApplied_ = false;
         pendingRepeats_ = 0;
+        pendingAcknowledged_ = false;
     }
 }
 
@@ -251,6 +254,7 @@ void AntOutput::handleDisplayPage(const Page& page) {
         if (page[7] != 0x01) return;  // only "request data page"
         const std::uint8_t repeats = static_cast<std::uint8_t>(page[5] & 0x7FU);
         pendingResponse_ = page[6];
+        pendingAcknowledged_ = (page[5] & 0x80U) != 0;
         pendingRepeats_ = repeats == 0 ? 1 : (repeats > kMaxRequestRepeats ? kMaxRequestRepeats : repeats);
         return;
     }
@@ -274,7 +278,8 @@ void AntOutput::sendNextPage() {
         else --pendingRepeats_;
     }
     if (!requested) page = encoder_.next(deviceNumber_);
-    if (!send(encodeMessage(msg::kBroadcastData, kChannel, page))) return;
+    const std::uint8_t response = requested && pendingAcknowledged_ ? msg::kAcknowledgedData : msg::kBroadcastData;
+    if (!send(encodeMessage(response, kChannel, page))) return;
     lastPage_ = page;
     ++pagesSent_;
 }

@@ -1,4 +1,5 @@
 #include "ant_usb_transport.h"
+#include "ant_usb_recovery.hpp"
 
 #ifdef ARDUINO
 
@@ -9,13 +10,16 @@
 #include <freertos/task.h>
 #include <usb/usb_host.h>
 
-#include <cstdio>
+#include <cstring>
 
 namespace {
-constexpr std::size_t kPacketSize = 64;  // full-speed bulk max packet size
+constexpr std::size_t kPacketSize = smartfitness::usb_transport::AntUsbPendingWrite::kCapacity;
 constexpr std::size_t kRxBufferSize = 1024;
 constexpr std::size_t kTxBufferSize = 512;
 constexpr std::uint8_t kInterface = 0;
+constexpr const char* kNoStick = "USB-OTG: no stick";
+constexpr const char* kAntUsb2 = "USB 0fcf:1008";
+constexpr const char* kAntUsbM = "USB 0fcf:1009";
 }  // namespace
 
 struct AntUsbTransport::Impl {
@@ -33,8 +37,10 @@ struct AntUsbTransport::Impl {
     std::atomic<bool> inBusy{false};
     std::atomic<bool> outBusy{false};
     std::atomic<bool> gone{false};
+    smartfitness::usb_transport::AntUsbRecovery recovery;
+    smartfitness::usb_transport::AntUsbPendingWrite pendingWrite;
     std::uint8_t newAddress = 0;  // pending NEW_DEV (client task only)
-    char description[24] = "USB-OTG: no stick";
+    std::atomic<const char*> description{kNoStick};
 
     static void libraryTask(void* arg);
     static void clientTask(void* arg);
@@ -44,8 +50,10 @@ struct AntUsbTransport::Impl {
 
     void open(std::uint8_t address);
     void close();
-    void submitIn();
+    bool submitIn();
     void serviceTx();
+    void serviceRecovery();
+    void updateReady();
 };
 
 void AntUsbTransport::Impl::libraryTask(void*) {
@@ -65,6 +73,7 @@ void AntUsbTransport::Impl::clientTask(void* arg) {
             self->newAddress = 0;
             self->open(address);
         }
+        if (!self->gone.load() && self->device) self->serviceRecovery();
         if (self->gone.load() && !self->inBusy.load() && !self->outBusy.load()) self->close();
         if (self->ready.load()) self->serviceTx();
     }
@@ -85,36 +94,89 @@ void AntUsbTransport::Impl::inDone(usb_transfer_t* transfer) {
     self->inBusy = false;
     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0)
         xStreamBufferSend(self->rx, transfer->data_buffer, transfer->actual_num_bytes, 0);
-    const bool retry = transfer->status == USB_TRANSFER_STATUS_COMPLETED ||
-                       transfer->status == USB_TRANSFER_STATUS_TIMED_OUT;
-    if (retry && self->ready.load()) self->submitIn();
+    if (self->gone.load()) return;
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+        if (!self->recovery.pending(smartfitness::usb_transport::AntUsbRecovery::Endpoint::In)) self->submitIn();
+    } else {
+        self->recovery.request(smartfitness::usb_transport::AntUsbRecovery::Endpoint::In);
+        self->ready = false;
+    }
 }
 
 void AntUsbTransport::Impl::outDone(usb_transfer_t* transfer) {
-    static_cast<Impl*>(transfer->context)->outBusy = false;
+    auto* self = static_cast<Impl*>(transfer->context);
+    self->outBusy = false;
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+        self->pendingWrite.complete();
+    } else if (!self->gone.load()) {
+        self->recovery.request(smartfitness::usb_transport::AntUsbRecovery::Endpoint::Out);
+        self->ready = false;
+    }
 }
 
-void AntUsbTransport::Impl::submitIn() {
+bool AntUsbTransport::Impl::submitIn() {
     in->device_handle = device;
     in->bEndpointAddress = inEndpoint;
     in->num_bytes = static_cast<int>(usb_round_up_to_mps(kPacketSize, inPacketSize));
     in->callback = inDone;
     in->context = this;
     inBusy = true;
-    if (usb_host_transfer_submit(in) != ESP_OK) inBusy = false;
+    if (usb_host_transfer_submit(in) != ESP_OK) {
+        inBusy = false;
+        recovery.request(smartfitness::usb_transport::AntUsbRecovery::Endpoint::In);
+        ready = false;
+        return false;
+    }
+    updateReady();
+    return true;
 }
 
 void AntUsbTransport::Impl::serviceTx() {
     if (outBusy.load()) return;
-    const std::size_t length = xMessageBufferReceive(tx, out->data_buffer, kPacketSize, 0);
-    if (length == 0) return;
+    if (!pendingWrite.pending()) {
+        const std::size_t length = xMessageBufferReceive(tx, pendingWrite.buffer(), kPacketSize, 0);
+        if (length == 0) return;
+        pendingWrite.stage(length);
+    }
+    std::memcpy(out->data_buffer, pendingWrite.data(), pendingWrite.size());
     out->device_handle = device;
     out->bEndpointAddress = outEndpoint;
-    out->num_bytes = static_cast<int>(length);
+    out->num_bytes = static_cast<int>(pendingWrite.size());
     out->callback = outDone;
     out->context = this;
     outBusy = true;
-    if (usb_host_transfer_submit(out) != ESP_OK) outBusy = false;
+    if (usb_host_transfer_submit(out) != ESP_OK) {
+        outBusy = false;
+        recovery.request(smartfitness::usb_transport::AntUsbRecovery::Endpoint::Out);
+        ready = false;
+    }
+}
+
+void AntUsbTransport::Impl::serviceRecovery() {
+    using Endpoint = smartfitness::usb_transport::AntUsbRecovery::Endpoint;
+    recovery.service(Endpoint::In, inBusy.load(), [this] {
+        return usb_host_endpoint_halt(device, inEndpoint) == ESP_OK;
+    }, [this] {
+        return usb_host_endpoint_flush(device, inEndpoint) == ESP_OK;
+    }, [this] {
+        return usb_host_endpoint_clear(device, inEndpoint) == ESP_OK;
+    }, [this] {
+        return submitIn();
+    });
+    recovery.service(Endpoint::Out, outBusy.load(), [this] {
+        return usb_host_endpoint_halt(device, outEndpoint) == ESP_OK;
+    }, [this] {
+        return usb_host_endpoint_flush(device, outEndpoint) == ESP_OK;
+    }, [this] {
+        return usb_host_endpoint_clear(device, outEndpoint) == ESP_OK;
+    }, [] {
+        return true;
+    });
+    updateReady();
+}
+
+void AntUsbTransport::Impl::updateReady() {
+    ready = device && !gone.load() && recovery.available();
 }
 
 void AntUsbTransport::Impl::open(std::uint8_t address) {
@@ -153,13 +215,15 @@ void AntUsbTransport::Impl::open(std::uint8_t address) {
         return;
     }
     interfaceClaimed = true;
-    std::snprintf(description, sizeof(description), "USB %04x:%04x", deviceDesc->idVendor, deviceDesc->idProduct);
+    description = deviceDesc->idProduct == AntUsbTransport::kProductAntUsb2 ? kAntUsb2 : kAntUsbM;
     xStreamBufferReset(rx);
     xMessageBufferReset(tx);
+    recovery.reset();
+    pendingWrite.complete();
     gone = false;
-    ready = true;
+    ready = false;
     submitIn();
-    Serial.printf("[ANT] USB stick %s attached\n", description);
+    Serial.printf("[ANT] USB stick %s attached\n", description.load());
 }
 
 void AntUsbTransport::Impl::close() {
@@ -171,7 +235,7 @@ void AntUsbTransport::Impl::close() {
     }
     interfaceClaimed = false;
     device = nullptr;
-    std::snprintf(description, sizeof(description), "USB-OTG: no stick");
+    description = kNoStick;
     Serial.println("[ANT] USB stick removed");
 }
 
@@ -218,6 +282,8 @@ std::size_t AntUsbTransport::read(std::uint8_t* data, std::size_t capacity) {
     return xStreamBufferReceive(impl_->rx, data, capacity, 0);
 }
 
-const char* AntUsbTransport::description() const { return impl_ ? impl_->description : "USB-OTG: not started"; }
+const char* AntUsbTransport::description() const {
+    return impl_ ? impl_->description.load() : "USB-OTG: not started";
+}
 
 #endif  // ARDUINO
