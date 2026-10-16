@@ -7,8 +7,7 @@ namespace smartfitness {
 namespace ant {
 
 // Byte stream to an ANT radio speaking the ANT serial message protocol
-// (USB stick, UART module). Implementations live in the variants; all calls
-// are made from the main loop.
+// (USB stick, UART module). All calls are made from the main loop.
 class AntTransport {
 public:
     virtual ~AntTransport() = default;

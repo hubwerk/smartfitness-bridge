@@ -34,6 +34,7 @@ enum class Screen : std::uint8_t {
     Settings,
     InputServices,
     OutputServices,
+    AntStatus,
     FtmsName,
     Keyboard,
 };
@@ -103,6 +104,7 @@ private:
     void buildSettings();
     void buildInputServices();
     void buildOutputServices();
+    void buildAntStatus();
     void buildFtmsName();
     void buildKeyboard();
 

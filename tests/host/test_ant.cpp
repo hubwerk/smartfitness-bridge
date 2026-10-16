@@ -1,5 +1,6 @@
 // ANT serial protocol, ANT+ FE-C page codec and AntOutput (fake radio).
 #include "ant/ant_message.hpp"
+#include "ant/ant_uart_transport.hpp"
 #include "ant/fec_codec.hpp"
 #include "ant_output.h"
 #include "fake_ant.hpp"
@@ -7,6 +8,8 @@
 #include <cassert>
 #include <cmath>
 #include <set>
+#include <algorithm>
+#include <limits>
 
 using namespace smartfitness;
 using namespace smartfitness::ant;
@@ -14,6 +17,174 @@ using namespace smartfitness::ant;
 namespace {
 
 using CapableRadio = FakeAntTransport;
+
+class FakeSerial : public AntSerial {
+public:
+    FakeAntTransport radio;
+    bool ready = true;
+    unsigned begins = 0;
+    std::size_t rxLimit = 128, txLimit = 512;
+    MessageParser parser;
+
+    bool begin() override { ++begins; return ready; }
+    std::size_t read(std::uint8_t* data, std::size_t capacity) override {
+        return radio.attached ? radio.read(data, std::min(capacity, rxLimit)) : 0;
+    }
+    std::size_t write(const std::uint8_t* data, std::size_t length) override {
+        const auto count = std::min(length, txLimit);
+        if (!radio.attached) return count;  // A UART cannot sense the physical cable.
+        Message message;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (parser.feed(data[i], message)) {
+                const auto frame = encodeMessage(message.id, message.payload);
+                radio.write(frame.data(), frame.size());
+            }
+        }
+        return count;
+    }
+};
+
+void testUartDetection() {
+    std::uint32_t now = 0;
+    FakeSerial serial;
+    serial.radio.autoRespond = false;
+    AntUartTransport uart(serial, [&] { return now; });
+    assert(!uart.connected() && uart.channelLimit() == 0);
+    const auto data = encodeMessage(msg::kOpenChannel, Bytes{0});
+    assert(!uart.write(data.data(), data.size()));
+    serial.ready = false;
+    assert(!uart.begin());
+    serial.ready = true;
+    assert(uart.begin() && !uart.connected());
+    assert(serial.radio.count(msg::kResetSystem) == 1);
+    serial.radio.incoming = {0, 0xFF, 0x31, kSync, 0xFF};
+    auto broken = encodeMessage(msg::kStartup, Bytes{0x20});
+    broken.back() ^= 1;
+    serial.radio.incoming.insert(serial.radio.incoming.end(), broken.begin(), broken.end());
+    serial.radio.inject(msg::kStartup, {0x20});
+    serial.rxLimit = 1;
+    for (int i = 0; i < 15; ++i) {
+        uart.begin();
+        now += 2;  // Fragmented frames at ordinary serial timing.
+    }
+    assert(uart.connected() && serial.begins == 2);
+    serial.radio.inject(0x54, {8, 1, 0, 0, 0});
+    serial.radio.inject(0x3E, {'A', 'P', '2', 0, 'x'});
+    for (int i = 0; i < 30; ++i) uart.begin();
+    assert(uart.channelLimit() == 8);
+    assert(std::string(uart.description()) == "UART ANT module · AP2 (8 ch)");
+    std::uint8_t bytes[128];
+    MessageParser parser;
+    Message message;
+    unsigned frames = 0;
+    const auto count = uart.read(bytes, sizeof(bytes));
+    for (std::size_t i = 0; i < count; ++i) frames += parser.feed(bytes[i], message);
+    assert(frames == 3);  // Startup, capabilities and version reach AntOutput.
+    assert(uart.read(bytes, sizeof(bytes)) == 0);
+    now += AntUartTransport::kDisconnectMs;
+    uart.begin();
+    assert(!uart.connected() && uart.channelLimit() == 0);
+    assert(std::string(uart.description()) == "UART ANT module");
+    assert(!uart.write(data.data(), data.size()));
+    serial.radio.inject(msg::kStartup, {0x20});
+    for (int i = 0; i < 5; ++i) uart.begin();
+    assert(uart.connected());
+}
+
+void testUartRetryAndTiming() {
+    std::uint32_t now = std::numeric_limits<std::uint32_t>::max() - 999;
+    FakeSerial serial;
+    serial.radio.autoRespond = false;
+    AntUartTransport uart(serial, [&] { return now; });
+    uart.begin();
+    now += 1000;
+    uart.begin();
+    assert(serial.radio.count(0x4D) == 1 && !uart.connected());
+    now += 1000;
+    uart.begin();
+    assert(serial.radio.count(msg::kResetSystem) == 2);
+    // A stale, incomplete frame must not consume the next startup message.
+    serial.radio.incoming = {kSync, 20, msg::kBroadcastData, 0};
+    uart.begin();
+    now += AntUartTransport::kInterByteTimeoutMs;
+    serial.radio.inject(msg::kStartup, {});  // Valid checksum, invalid startup payload.
+    uart.begin();
+    assert(!uart.connected());
+    serial.radio.inject(0x54, {0, 1, 0, 0});
+    uart.begin();
+    assert(!uart.connected());
+    // Radios without a StartupMessage can be discovered through capabilities.
+    serial.radio.inject(0x54, {2, 1, 0, 0});
+    uart.begin();
+    assert(uart.connected() && uart.channelLimit() == 2);
+    now += AntUartTransport::kRetryMs;
+    uart.begin();
+    assert(serial.radio.count(msg::kResetSystem) == 2);  // Heartbeats never reset channels.
+    serial.radio.inject(0x54, {2, 1, 0, 0});
+    uart.begin();
+    now += AntUartTransport::kDisconnectMs - 1;
+    uart.begin();
+    assert(uart.connected());
+    ++now;
+    uart.begin();
+    assert(!uart.connected());
+}
+
+void testUartBuffersAndOutput() {
+    std::uint32_t now = 0;
+    FakeSerial serial;
+    AntUartTransport uart(serial, [&] { return now; });
+    uart.begin();
+    uart.begin();
+    assert(uart.connected());
+    for (int i = 0; i < 4; ++i) uart.begin();
+    serial.txLimit = 0;  // Simulates FIFO full or nRTS not ready.
+    const auto frame = encodeMessage(msg::kBroadcastData, 0, Page{16});
+    unsigned queued = 0;
+    while (uart.write(frame.data(), frame.size())) ++queued;
+    assert(queued == 512 / frame.size());
+    uart.begin();
+    const auto before = serial.radio.count(msg::kBroadcastData);
+    serial.txLimit = 1;  // Partial writes, including ring wraparound.
+    for (unsigned i = 0; i < queued * frame.size(); ++i) uart.begin();
+    assert(serial.radio.count(msg::kBroadcastData) == before + queued);
+    assert(!uart.write(nullptr, 3) && !uart.write(frame.data(), 0));
+    std::array<std::uint8_t, 513> oversized{};
+    assert(!uart.write(oversized.data(), oversized.size()));
+
+    // The real AntOutput negotiates channel limits through this byte stream.
+    serial.txLimit = 512;
+    AntOutput ant;
+    ant.setClock([&] { return now; });
+    ant.setTransport(&uart);
+    ant.setServices(AntOutput::kFec | AntOutput::kHeartRate);
+    ant.setEnabled(true);
+    ant.begin();
+    TrainerState state;
+    state.connected = true;
+    state.trainerDetected = true;
+    state.profile = MachineProfile::IndoorBike;
+    ant.publishTrainerState(state);
+    for (int i = 0; i < 40; ++i) ant.loop();
+    assert(ant.channelOpen(AntOutput::kFec) && ant.channelOpen(AntOutput::kHeartRate));
+    assert(ant.channelLimit() == 8 && uart.channelLimit() == 8);
+    serial.radio.injectEventTx();
+    serial.radio.inject(msg::kChannelEvent, {1, 1, code::kEventTx});
+    for (int i = 0; i < 4; ++i) ant.loop();
+    assert(ant.pagesSent() >= 2);
+    serial.radio.attached = false;
+    now += AntUartTransport::kDisconnectMs;
+    ant.loop();
+    assert(!ant.stickConnected() && !ant.channelOpen());
+    serial.radio.attached = true;
+    now += AntUartTransport::kRetryMs;
+    for (int i = 0; i < 40; ++i) ant.loop();
+    assert(ant.channelOpen(AntOutput::kFec) && ant.channelOpen(AntOutput::kHeartRate));
+    serial.radio.channels = 1;
+    ant.setServices(AntOutput::kFec | AntOutput::kBicyclePower | AntOutput::kHeartRate);
+    for (int i = 0; i < 40; ++i) ant.loop();
+    assert(ant.error() == AntOutput::Error::InsufficientChannels && !ant.channelOpen());
+}
 
 std::uint16_t u16(const Page& page, std::size_t index) {
     return static_cast<std::uint16_t>(page[index] | (page[index + 1] << 8));
@@ -510,6 +681,9 @@ void testSelectableChannels() {
 }  // namespace
 
 void runAntTests() {
+    testUartDetection();
+    testUartRetryAndTiming();
+    testUartBuffersAndOutput();
     testMessageCodec();
     testFecBikePages();
     testFecFallbacksAndInvalids();

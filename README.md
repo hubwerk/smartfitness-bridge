@@ -23,8 +23,10 @@ on the ELECROW CrowPanel 1.28" round rotary display.
 Implemented: real BLE input scanning/pairing, FTMS and sensor decoders, initial
 qdomyos-zwift vendor ports, reconnect/backoff, stale-data handling, FTMS output,
 Wi-Fi setup and web UI, a shared console/API command layer, NVS configuration, and
-a selectable output protocol: BLE FTMS, ANT+ FE-C (web variant, ANT+ USB stick on
-the USB-OTG port; see [ANT+ FE-C output](#ant-fe-c-output-usb-stick)) or off.
+a selectable output protocol: BLE FTMS, ANT+ FE-C with optional sensor channels
+(external ANT radio over USB on web builds or UART on either variant; see
+[ANT+ output](#ant-output)) or off. The UART transport is implemented but
+unverified on hardware.
 OTA is not implemented.
 
 The CrowPanel HMI has been verified on real hardware: the display, rotary encoder
@@ -115,16 +117,17 @@ pio run -e esp32s3dev -t upload     # or: -e crowpanel128
 pio device monitor -b 115200
 ```
 
-- The DevKitC-1 has two USB ports. The web variant uses the port labelled **UART** for flashing, power and the Serial console (`ARDUINO_USB_CDC_ON_BOOT=0`), because the native port labelled **USB** is the USB host port for the ANT+ stick (see [ANT+ FE-C output](#ant-fe-c-output-usb-stick)).
+- The DevKitC-1 has two USB ports. The default web variant uses the port labelled **UART** for flashing, power and the Serial console (`ARDUINO_USB_CDC_ON_BOOT=0`), because the native port labelled **USB** is the USB host port for the ANT+ stick (see [ANT+ output](#ant-output)). UART ANT builds do not use the USB host transport.
 - If upload does not start, hold **BOOT**, press **RST**, release BOOT, and retry.
 - Select ports with `--upload-port` / `--port`, e.g. `COM5` or `/dev/ttyACM0`.
 - `crowpanel128` uploads at 115200 baud because esptool's switch to 921600 on the native USB port can fail with `A fatal error occurred: No serial data received.` Upload speed stays the same because the native USB port ignores the baud rate. If `esp32s3dev` shows the same error on its native **USB** port, add `-O "upload_speed=115200"` to `pio run` or use the **UART** port.
 
 Serial is **115200 baud** (web variant: UART port; HMI variant: USB CDC); it prints
 boot/configuration and Wi-Fi information.
-The ANT+ USB stick (with USB-OTG adapter) is **optional** on the web variant: BLE FTMS
-works without it, and it is only needed if ANT+ FE-C should be used in addition to
-BLE FTMS; see [ANT+ FE-C output](#ant-fe-c-output-usb-stick) and [hardware decisions](docs/hardware-decisions.md).
+An external ANT radio is **optional**: BLE FTMS works without it. The web variant
+defaults to a USB ANT+ stick (with USB-OTG adapter); either variant can instead
+use a UART ANT module when its build flags are configured. See
+[ANT+ output](#ant-output) and [hardware decisions](docs/hardware-decisions.md).
 
 **Optional host tests:** `make host-tests` (requires `make` and `g++` with C++17; on
 Windows, use WSL).
@@ -183,11 +186,18 @@ Screens (same interactions as the web UI):
   (Cancel is focused by default); the editor starts from the measured speed, and the
   bridge never starts the belt by itself. "Stop belt" sends speed 0.
 - **Settings** – FTMS name (presets or on-screen keyboard), output protocol (a
-  press cycles BLE FTMS → Off; ANT+ FE-C is skipped because the CrowPanel has no
-  USB host port for an ANT+ stick), output profile, save, load, factory reset (two
+  press cycles BLE FTMS → ANT+ → Off when an ANT transport is configured;
+  otherwise ANT+ is skipped), BLE service and full multi-channel ANT+ selection,
+  output profile, save, load, factory reset (two
   confirmations), restart, firmware version, brightness, screen timeout and LED
   ring. Brightness/timeout/LED ring are stored in a separate NVS namespace
   (`sfhmi`), not in the shared configuration.
+
+With UART configured, the HMI exposes FE-C, Bicycle Power, Heart Rate, Bicycle
+Speed/Cadence and SDM channel selection and per-channel status through the shared
+transport-configured state. Without a configured transport it shows **ANT unavailable**.
+This reuses the existing multi-channel output and schema v6 service masks; no
+configuration-schema change is required.
 
 The status refreshes at 5 Hz; UI callbacks only enqueue `Command`s that the main
 loop executes. UI strings are centralised in `src/variants/hmi/hmi_strings.cpp`
@@ -233,7 +243,7 @@ flowchart TD
     IS --> CORE["BridgeCore: trainer / capability / bounds gate"]
     CORE --> OUT["FTMS output"]
     CORE --> ANT["ANT+ FE-C output"]
-    ANT --> USBH["USB host task: ANT+ USB stick"]
+    ANT --> USBH["External ANT radio: USB (web default) or UART1 (either variant)"]
     API --> CMD["Shared Command layer / BridgeController"]
     HMI["HMI variant: LVGL UI command queue"] --> CMD
     CON["Serial console"] --> CMD
@@ -253,7 +263,7 @@ The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent 
 - `BtDeviceAdapter`: equipment input interface. Implementations: `SimulatedDeviceAdapter`, `BleInputAdapter` (real BLE devices) and `InputSelector`, which forwards to the BLE input when a device is paired and BLE input is enabled, otherwise to the simulation.
 - `BleInputAdapter` (`include/core/ble_input_adapter.h`): scanning, pairing, connection lifecycle, stale telemetry. It talks to the radio through the `CentralTransport` interface (`include/core/ble/central_transport.hpp`); `NimbleCentral` implements it on the firmware, `tests/host/fake_central.hpp` in host tests.
 - Protocols (`include/core/protocols/`): pure C++ `SourceProtocol` implementations (FTMS, sensors, vendor ports) and the adapter registry.
-- `AntOutput` / `FtmsOutput`: the two outputs; the configured `OutputProtocol` (`include/core/bridge/output_protocol.hpp`) enables at most one of them. `FtmsOutput` is a BLE FTMS peripheral (see below); `AntOutput` is an ANT+ FE-C master channel on an external ANT radio reached through `smartfitness::ant::AntTransport` (`include/core/ant/ant_transport.hpp`; ANT serial messages in `ant_message.hpp`, FE-C pages in `fec_codec.hpp`). The web variant implements the transport with the ESP-IDF USB host (`include/variants/web/ant_usb_transport.h`); the HMI variant has none.
+- `AntOutput` / `FtmsOutput`: the two outputs; the configured `OutputProtocol` (`include/core/bridge/output_protocol.hpp`) enables at most one of them. `FtmsOutput` is a BLE FTMS peripheral (see below); `AntOutput` provides FE-C and selectable sensor master channels on an external ANT radio reached through `smartfitness::ant::AntTransport` (`include/core/ant/ant_transport.hpp`; ANT serial messages in `ant_message.hpp`, FE-C pages in `fec_codec.hpp`). The web variant defaults to the ESP-IDF USB host transport (`include/variants/web/ant_usb_transport.h`); either variant uses UART1 instead when UART build flags are configured.
 - FTMS codec (`include/core/ftms/ftms_codec.hpp`): pure C++ encoding/decoding of FTMS characteristics, used by both the output and the FTMS input.
 - `BridgeController` (`include/core/bridge_controller.h`): the variant-neutral command executor. The Serial console, the web API and the HMI all produce `Command` values (`include/core/bridge_commands.h`) and run them through `BridgeController::execute`; it also builds the status/scan/config view model (`include/core/bridge_view_model.h`).
 - Web variant: `web_json` (`include/variants/web/web_json.h`) renders the view model as JSON; `ApiExchange` (`include/variants/web/web_api.h`) validates API JSON and hands jobs to the loop; `WebPortal` (`include/variants/web/web_portal.h`, firmware only) owns Wi-Fi, DNS/captive portal, mDNS and the HTTPS/WebSocket server (plus the port-80 redirect); `tls_cert` (`include/variants/web/tls_cert.h`) creates and stores the self-signed certificate; `WifiPolicy` (`include/variants/web/wifi_policy.h`) decides AP/STA/fallback.
@@ -469,8 +479,8 @@ safe source start primitive.
 Do not assume the fenix 6/6 Pro can consume/control this FTMS output.
 [HD-002](docs/hardware-decisions.md#hd-002-garmin-watches-eg-fenix-6-pro-and-bluetooth-ftms)
 records the CPS/HRS output and multi-client work needed for recording. Watches that
-support ANT+ FE-C trainers can use the [ANT+ FE-C output](#ant-fe-c-output-usb-stick)
-(web variant with an ANT+ USB stick; not verified on hardware).
+support ANT+ FE-C trainers can use the [ANT+ output](#ant-output)
+(external USB or UART ANT radio; not verified on hardware).
 
 ## Serial console
 The Serial monitor (115200 baud, newline-terminated) accepts the same commands as the web UI:
@@ -485,7 +495,7 @@ The Serial monitor (115200 baud, newline-terminated) accepts the same commands a
 | `sim` | Use the simulated device as input (150 W, 80 rpm, 25 km/h, 120 bpm) |
 | `power <W>`, `resistance <%>`, `incline <%>`, `speed <km/h>` | Control through the `BridgeCore` gate; prints the rejection reason |
 | `trainer on/off` | Toggle simulated trainer detection only (does not promote real equipment) |
-| `output off\|ble-ftms\|ant-fec` | Select the output protocol. `ble-ftms`: FTMS advertising; `ant-fec`: ANT+ FE-C on the ANT+ USB stick (rejected without ANT hardware); `off`: no output (the FTMS client is disconnected, advertising stops and the ANT channel is closed) |
+| `output off\|ble-ftms\|ant-fec` | Select the output protocol. `ble-ftms`: FTMS advertising; `ant-fec`: ANT+ on the configured USB/UART transport (rejected without a configured ANT transport); `off`: no output (the FTMS client is disconnected, advertising stops and ANT channels are closed) |
 | `ftms-input on/off` | Select paired BLE input / simulation; independent of output |
 | `ftms-name <name>` | Set 1–20 printable ASCII characters; spaces are allowed |
 | `ftms-profile <auto\|bike\|treadmill\|cross-trainer\|rower\|step-climber\|stair-climber>` | Select output profile; `auto` follows input; every profile is sent natively; `save` persists |
@@ -510,7 +520,7 @@ The single-page app (`src/variants/web/assets/index.html`, web variant only, pla
 - **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and the active output (BLE FTMS client state, or ANT+ stick/channel/display state) (WebSocket, ≤ 4 Hz).
 - **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. Advertised services and actual notify/indicate subscriptions are separate pills; subscription state is **OK**, **PENDING** or **FAILED** (not inferred from advertisements). Hover a pill for full service/characteristic UUIDs. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
 - **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
-- **Settings:** output protocol (*BLE FTMS*, *ANT+* – needs the ANT+ USB stick, hidden when the firmware has no ANT transport – or *Off*), BLE service and ANT+ channel pills, FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version. Selected services are golden, off/pending tan; **NO DATA** choices are disabled. **Auto** preserves the original FTMS/FE-C-only behavior. FTMS is mandatory for an explicit BLE selection; ANT+ may use sensor-only channels. **Save and restart** to apply a changed BLE GATT topology, then re-pair clients that cache services; Save alone persists the preference but does not rebuild an initialized server. Selecting both FE-C and Power warns about duplicate power sources.
+- **Settings:** output protocol (*BLE FTMS*, *ANT+* – needs an external USB/UART ANT radio, hidden when the firmware has no ANT transport – or *Off*), BLE service and ANT+ channel pills, FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version. Selected services are golden, off/pending tan; **NO DATA** choices are disabled. **Auto** preserves the original FTMS/FE-C-only behavior. FTMS is mandatory for an explicit BLE selection; ANT+ may use sensor-only channels. **Save and restart** to apply a changed BLE GATT topology, then re-pair clients that cache services; Save alone persists the preference but does not rebuild an initialized server. Selecting both FE-C and Power warns about duplicate power sources.
 
 ## REST / WebSocket API
 
@@ -678,9 +688,11 @@ or `null` when invalid. Example disconnected snapshot:
 `input.profile` is the active input machine type; `ftmsOutput.profile` is the
 effective output and `ftmsOutput.override` is the configured selection.
 `outputProtocol` is the selected output; `antOutput` describes the ANT+
-output (`available`: firmware has an ANT transport, `stick`: USB stick attached,
+output (`available`: firmware has a configured ANT transport, `stick`: transport
+reports a radio present, not proof of UART module communication,
 `open`: FE-C channel open, `display`: a display sent a page within 5 s,
-`control`: a display's control page was applied, `hardware`: `USB vid:pid`).
+`control`: a display's control page was applied, `hardware`: transport description,
+such as `USB vid:pid` or UART). The existing JSON schema is unchanged.
 States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 `target` when set is `{"control":"power","value":200}`.
 `ftmsOutput.services` reports each service's selected (`enabled`), metric/profile
@@ -921,12 +933,73 @@ Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnec
 - The Feature characteristic follows the connected device's capabilities; clients usually read it once on connection, so connect the source device before pairing the app.
 - Changing the name while a client is connected applies on the next advertising cycle.
 
-## ANT+ FE-C output (USB stick)
+<a id="ant-fe-c-output-usb-stick"></a>
 
-Select it with `output ant-fec`, the web *Settings → Output protocol* field, or
+## ANT+ output
+
+Select it with `output ant-fec`, the HMI/web *Settings → Output protocol* field, or
 `/api/config` `{"outputProtocol":"ant-fec"}` (then `save`). Only one output
 protocol is active at a time: selecting ANT+ FE-C stops BLE FTMS advertising and
-disconnects its client; selecting BLE FTMS or Off closes the ANT channel.
+disconnects its client; selecting BLE FTMS or Off closes the ANT channels.
+
+### UART ANT module (CrowPanel recommended path; hardware unverified)
+
+The UART transport is implemented on **UART1** for either firmware variant.
+Define both `SF_ANT_UART_TX` and `SF_ANT_UART_RX` to select it; the web variant
+otherwise retains USB as its default, while HMI has no default ANT transport.
+These pins are **unverified schematic placeholders**, not a board pin assignment.
+Check the board revision's schematic, connector routing and peripheral conflicts
+before choosing GPIOs; no example GPIO is asserted safe.
+
+Use an external **D52/nRF24AP2 ANT serial/network processor**, or an **nRF52
+with a compatible ANT SoftDevice plus ANT network-processor firmware** exposing
+the ANT serial protocol. An arbitrary BLE nRF52 module or an ANT SoftDevice alone
+is not sufficient. Obtain and use the radio stack/firmware under
+**Garmin/Dynastream licensing** and comply with **ANT+ adopter terms** for ANT+
+network/profile use.
+
+- Cross signals: ESP32 `SF_ANT_UART_TX` → module RX, module TX →
+  ESP32 `SF_ANT_UART_RX`; connect a common GND. Use **3.3 V logic**;
+  never connect raw 5 V to ESP32 GPIOs.
+- Supply the module **per its datasheet**. CrowPanel `OUT_5V` is gated by
+  GPIO2; set GPIO2 **HIGH before transport begin** if using that rail
+  (**TODO(verify):** rail, enable polarity and connector on the actual schematic).
+  Use appropriate regulation from OUT_5V or a suitable 3.3 V supply as required;
+  this does **not** mean a bare ANT module tolerates 5 V.
+- `SF_ANT_UART_BAUD` defaults to **57600**. Supported rates are 57600, 50000,
+  38400, 19200 and 4800; match the module's configured rate.
+- Optional `SF_ANT_UART_RTS` configures the **host UART CTS input**, connected
+  to the module's **nRTS output (active low)**. Hardware CTS flow control pauses
+  host TX while the module holds nRTS HIGH; LOW permits TX.
+  Do **not** connect a host output to that module output. Without this input,
+  ensure the module's serial timing/flow-control requirements are met.
+- Module **SUSPEND must be deasserted per its datasheet** for UART operation;
+  SUSPEND is not interchangeable with nRTS.
+- Optional `SF_ANT_UART_RESET` is a **host active-low output** to module reset.
+  Verify reset polarity, voltage and pull requirements against the module datasheet.
+
+Illustrative, deliberately commented PlatformIO environment; replace placeholders
+only after schematic verification (it is not a buildable pin prescription):
+
+```ini
+; [env:crowpanel128_ant_uart]
+; extends = env:crowpanel128
+; build_flags =
+;     ${env:crowpanel128.build_flags}
+;     -DSF_ANT_UART_TX=<verified TX GPIO> ; TODO(verify): schematic and pin conflicts
+;     -DSF_ANT_UART_RX=<verified RX GPIO> ; TODO(verify): schematic and pin conflicts
+;     -DSF_ANT_UART_BAUD=57600
+;     ; Optional SF_ANT_UART_RTS: verified host CTS input from module nRTS output
+;     ; Optional SF_ANT_UART_RESET: verified active-low host output to module reset
+```
+
+For web UART builds, inherit `env:esp32s3dev` and its build flags instead.
+UART module startup, reset, flow control, channel capacity and interoperability
+remain **unverified on hardware**. A configured transport enables the existing
+HMI multi-channel selector/status, not a guarantee that a radio responds; no
+configuration-schema change is needed.
+
+### USB ANT stick (web default)
 
 **Hardware (web variant only, optional):** the ANT+ stick and USB-OTG adapter are
 only needed if ANT+ FE-C should be used besides BLE FTMS; without them the web
@@ -940,20 +1013,37 @@ variant runs normally with BLE FTMS.
 - The port must supply 5 V: bridge the board's **USB-OTG** solder jumper (see the
   Espressif ESP32-S3-DevKitC-1 user guide) and power the board through the
   **UART** port, which then also carries flashing and the Serial console.
-- The CrowPanel (HMI variant) has a single USB-C port and no USB host, so ANT+ FE-C
-  cannot be selected there; its *Output* setting cycles BLE FTMS ↔ Off.
+- CrowPanel USB host use is not implemented/recommended; use UART ANT instead.
+
+### CrowPanel USB host is not recommended — schematic verification required
+
+No CrowPanel USB host electrical design has been verified here. An OTG adapter
+alone is not an approved conversion:
+
+- **TODO(verify on schematic):** whether the connector reaches native S3 USB
+  GPIO19/20 or a USB-UART bridge; do not infer routing from its USB-C shape.
+- **TODO(verify on schematic):** whether VBUS can safely provide **5 V output**
+  with suitable switching/current limiting; a power-input connector is not proof.
+- **TODO(verify on schematic):** USB-C **CC sink termination** and any changes
+  needed for a compliant host/source role.
+- **TODO(verify on schematic):** backfeed paths and isolation when an external
+  supply and another USB power source are connected.
+- **TODO(verify on schematic):** whether repurposing native USB causes loss of
+  USB flashing/console access and which recovery/programming path remains usable.
+
+### Shared ANT+ channels and controls
 
 **FE-C channel:** ANT+ network key, RF 2457 MHz, channel period 8192 (4 Hz),
 bidirectional master, device type 17, transmission type 5, device number derived
-from the MAC address. The stick is reset and the channel reconfigured after a
-replug, an error response or a channel-closed event (retry every 2 s).
+from the MAC address. The radio is reset and channels reconfigured after a
+transport reconnect, an error response or a channel-closed event (retry every 2 s).
 
 Optional Bicycle Power, Heart Rate, Bicycle Speed/Cadence and SDM channels run
 alongside or instead of FE-C, selected by `antOutputServices`. Each has its own
 device type and channel state in `antOutput.channels`; only FE-C accepts trainer
 control. Auto retains FE-C alone. All channel data comes from valid source
 metrics; sensor-only configurations must not be interpreted as FE-C control
-availability. Multi-channel stick/app interoperability is unverified on hardware.
+availability. Multi-channel USB/UART radio/app interoperability is unverified on hardware.
 
 **Data pages** follow the active output profile (the same `ftms-profile`
 override as FTMS); every field the source sends is mapped when the FE-C page has
@@ -989,8 +1079,9 @@ page 70 requests are answered for pages 16, 17, 18, the profile's specific page,
 54, 71, 80 and 81. FE-C has no
 speed target, so treadmill speed cannot be set over ANT+.
 
-**Limitations:** not verified on hardware (COOSPO stick, Zwift, Garmin);
-only the Dynastream VID/PID class above is supported; using the ANT+ network
+**Limitations:** neither USB nor UART ANT operation is verified on hardware
+(external radio, Zwift, Garmin); USB supports only the Dynastream VID/PID class
+above, while UART requires compatible ANT network-processor firmware. Using the ANT+ network
 key in a product requires accepting the ANT+ adopter terms (override with
 `-DSF_ANT_NETWORK_KEY=…` for private networks).
 

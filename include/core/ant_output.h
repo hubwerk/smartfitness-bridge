@@ -24,7 +24,7 @@ public:
     static constexpr std::uint8_t kChannel = 0;
     static constexpr std::uint8_t kNetwork = 0;
 
-    // The radio; without one ANT+ FE-C is unavailable (HMI variant).
+    // The radio; without one ANT+ output is unavailable.
     void setTransport(smartfitness::ant::AntTransport* transport);
     bool available() const { return transport_ != nullptr; }
     // ANT+ channel device number (0 is replaced by 1).

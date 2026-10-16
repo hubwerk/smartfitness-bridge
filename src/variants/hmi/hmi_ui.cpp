@@ -268,6 +268,7 @@ std::string HmiUi::signature() const {
             break;
         case Screen::Settings:
         case Screen::OutputServices:
+        case Screen::AntStatus:
             sig += config_.ftmsName + std::to_string(static_cast<int>(config_.outputProtocol)) +
                    std::to_string(static_cast<int>(config_.ftmsOutputProfile)) + std::to_string(config_.antAvailable) +
                    std::to_string(config_.unsaved) + std::to_string(settings_.brightness) +
@@ -279,7 +280,16 @@ std::string HmiUi::signature() const {
                        std::to_string(service.available) + std::to_string(service.active);
             for (const auto& channel : status_.antOutput.channels)
                 sig += "|" + channel.id + ":" + channel.name + std::to_string(channel.deviceType) +
-                       std::to_string(channel.enabled) + std::to_string(channel.open);
+                       std::to_string(channel.enabled) + std::to_string(channel.open) +
+                       std::to_string(channel.available);
+            {
+                const auto& ant = status_.antOutput;
+                sig += "|ANT:" + std::to_string(ant.available) + std::to_string(ant.enabled) +
+                       std::to_string(ant.stick) + std::to_string(ant.open) + ":" + ant.link + ":" +
+                       ant.hardware + ":" + ant.error + ":" + std::to_string(ant.deviceNumber) + ":" +
+                       std::to_string(ant.channelLimit) + std::to_string(ant.display) +
+                       std::to_string(ant.control) + ":" + std::to_string(static_cast<int>(ant.profile));
+            }
             break;
         default:
             break;
@@ -291,6 +301,10 @@ void HmiUi::update() {
     if (header_) {
         const bool alert = screen_ == Screen::Confirm || status_.input.stale ||
                            status_.state == RuntimeState::Disconnected ||
+                           (screen_ == Screen::AntStatus &&
+                            (!status_.antOutput.available || !status_.antOutput.stick ||
+                             (status_.antOutput.enabled && !status_.antOutput.open) ||
+                             !status_.antOutput.error.empty())) ||
                            (toastAlert_ && !lv_obj_has_flag(toast_, LV_OBJ_FLAG_HIDDEN));
         lv_obj_set_style_bg_color(header_, lv_color_hex(alert ? lcars::Alert : lcars::Orange), 0);
     }
@@ -337,6 +351,7 @@ void HmiUi::build(bool keepFocus) {
         case Screen::Settings: buildSettings(); break;
         case Screen::InputServices: buildInputServices(); break;
         case Screen::OutputServices: buildOutputServices(); break;
+        case Screen::AntStatus: buildAntStatus(); break;
         case Screen::FtmsName: buildFtmsName(); break;
         case Screen::Keyboard: buildKeyboard(); break;
     }
@@ -845,12 +860,14 @@ void HmiUi::buildSettings() {
     addButton(list, withValue(Str::FtmsName, config_.ftmsName), [this] { navigate(Screen::FtmsName); });
     addButton(list, withValue(Str::OutputProtocol, outputProtocolLabel(config_.outputProtocol)), [this] {
         submit(makeText(CommandType::OutputProtocol,
-                        outputProtocolName(nextOutputProtocol(config_.outputProtocol, config_.antAvailable))));
+                        outputProtocolName(nextOutputProtocol(config_.outputProtocol, status_.antOutput.available))));
     });
     addButton(list, withValue(Str::FtmsProfile, ftmsProfileLabel(config_.ftmsOutputProfile)), [this] {
         submit(makeText(CommandType::FtmsProfile, ftmsOutputProfileName(nextFtmsProfile(config_.ftmsOutputProfile))));
     });
     addButton(list, tr(Str::OutputServices), [this] { navigate(Screen::OutputServices); });
+    if (status_.antOutput.available)
+        addButton(list, tr(Str::AntStatus), [this] { navigate(Screen::AntStatus); });
     addButton(list, withValue(Str::Brightness, percent(settings_.brightness)), [this] {
         HmiSettings next = settings_;
         next.brightness = nextBrightness(settings_.brightness);
@@ -927,8 +944,83 @@ void HmiUi::buildOutputServices() {
                 submit(toggleOutputService("ftms", config_.ftmsOutputServices, bit));
         }), enabled ? (available ? lcars::Golden : lcars::Alert) : lcars::Tan);
     }
-    // The CrowPanel has no ANT transport; no misleading editable ANT controls.
-    addLabel(list, tr(Str::AntUnavailable));
+    if (status_.antOutput.available) {
+        lcars::pill(addButton(list, std::string("ANT+ ") + tr(Str::ServiceAuto) + "\n" +
+                             onOff(config_.antOutputServices == 0), [this] {
+            Command command = makeText(CommandType::SetOutputServices, "ant");
+            command.serviceMask = 0;
+            submit(command);
+        }), config_.antOutputServices == 0 ? lcars::Golden : lcars::Tan);
+        constexpr const char* antIds[] = {"fec", "power", "hr", "speed-cadence", "sdm"};
+        const char* antNames[] = {"FE-C", tr(Str::AntPower), "HR", tr(Str::AntSpeedCadence), tr(Str::AntFootpod)};
+        const auto mask = config_.antOutputServices == 0 ? 1 : config_.antOutputServices;
+        for (std::uint8_t index = 0; index < 5; ++index) {
+            const auto bit = static_cast<std::uint8_t>(1U << index);
+            const bool enabled = (mask & bit) != 0;
+            bool available = index == 0;
+            bool open = false;
+            for (const auto& channel : status_.antOutput.channels) {
+                if (channel.id == antIds[index]) {
+                    available = channel.available;
+                    open = channel.open;
+                }
+            }
+            std::string text = std::string("ANT+ ") + antNames[index] + " " + onOff(enabled) + "\n";
+            text += tr(open ? Str::AntBroadcasting : available ? Str::ServiceAvailable : Str::ServiceNoData);
+            lcars::pill(addButton(list, text, [this, bit, enabled, available] {
+                if (!enabled && !available) return;
+                const auto command = toggleOutputService("ant", config_.antOutputServices, bit);
+                if (command.serviceMask == 0)
+                    showResult(command, {false, tr(Str::AntSelectChannel)});
+                else
+                    submit(command);
+            }), enabled ? (available ? lcars::Golden : lcars::Alert) : lcars::Tan);
+        }
+        if ((mask & 3) == 3) {
+            auto* warning = addButton(list, tr(Str::AntDuplicatePower), [] {});
+            lcars::pill(warning, lcars::Alert);
+            lv_obj_set_style_bg_color(warning, lv_color_hex(lcars::Alert), LV_STATE_FOCUSED);
+        }
+        addButton(list, tr(Str::AntStatus), [this] { navigate(Screen::AntStatus); });
+    } else {
+        addLabel(list, tr(Str::AntUnavailable));
+    }
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildAntStatus() {
+    makeScreen(tr(Str::AntStatus));
+    lv_obj_t* list = makeList(root_);
+    const auto& ant = status_.antOutput;
+    const Str state = !ant.available ? Str::AntUnavailable :
+                      !ant.stick ? Str::AntNoModule :
+                      !ant.enabled ? Str::OutputOff :
+                      !ant.open ? Str::AntWaiting : Str::AntBroadcasting;
+    // Focusable readouts let the encoder reach every diagnostic without touch.
+    auto readout = [this, list](const std::string& text, bool alert = false) {
+        auto* row = addButton(list, text, [] {});
+        lcars::pill(row, alert ? lcars::Alert : lcars::LightBlue);
+        if (alert) lv_obj_set_style_bg_color(row, lv_color_hex(lcars::Alert), LV_STATE_FOCUSED);
+    };
+    std::string stateText = tr(state);
+    if (ant.stick) stateText += "\n" + std::string(tr(Str::AntDetected));
+    readout(stateText, state == Str::AntNoModule || state == Str::AntWaiting ||
+                       state == Str::AntUnavailable || !ant.error.empty());
+    readout(withValue(Str::AntLink, ant.link.empty() ? "-" : ant.link));
+    readout(withValue(Str::AntHardware, ant.hardware.empty() ? "-" : ant.hardware));
+    readout(withValue(Str::AntDeviceNumber, std::to_string(ant.deviceNumber)));
+    std::size_t open = 0;
+    for (const auto& channel : ant.channels)
+        if (channel.open) ++open;
+    readout(withValue(Str::AntChannels, std::to_string(open) + "/" + std::to_string(ant.channelLimit)));
+    for (const auto& channel : ant.channels) {
+        readout(channel.name + " " + onOff(channel.enabled) + "\n" +
+                tr(channel.open ? Str::AntBroadcasting : Str::AntClosed) + " / " +
+                tr(channel.available ? Str::ServiceAvailable : Str::ServiceNoData));
+    }
+    readout(withValue(Str::AntDisplayStatus, onOff(ant.display)));
+    readout(withValue(Str::AntControlStatus, onOff(ant.control)));
+    if (!ant.error.empty()) readout(ant.error);
     addButton(list, tr(Str::Back), [this] { back(); });
 }
 
