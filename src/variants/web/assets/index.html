@@ -67,7 +67,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
  <div class="status-grid">
  <div class="card"><div class="label">Bridge</div><div id="s-bridge"></div></div>
  <div class="card"><div class="label">Input device</div><div id="s-input"></div></div>
- <div class="card"><div class="label">FTMS output (Zwift, MyWhoosh, …)</div><div id="s-ftms"></div></div>
+ <div class="card"><div class="label">Output (Zwift, MyWhoosh, …)</div><div id="s-out"></div></div>
  <div class="card"><div class="label">Network</div><div id="s-net"></div></div>
  </div>
 </section>
@@ -90,11 +90,11 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 <section id="set" role="tabpanel" aria-labelledby="tab-set" tabindex="0" hidden>
  <h2>04 / System configuration</h2>
  <div class="card"><div class="label">Outputs</div>
+  <div class="row"><label for="c-outputProtocol">Output protocol</label><select id="c-outputProtocol"><option value="ble-ftms">BLE FTMS</option><option value="ant-fec">ANT+ FE-C</option><option value="off">Off</option></select></div>
+  <p class="small" id="c-outputHint">ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.</p>
   <div class="row"><label for="c-ftmsName">FTMS output name</label><input id="c-ftmsName" maxlength="20"></div>
-  <div class="row"><label for="c-ftmsOutput">FTMS output</label><input id="c-ftmsOutput" type="checkbox"></div>
-  <div class="row"><label for="c-ftmsOutputProfile">FTMS output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option><option value="step-climber">Step climber</option><option value="stair-climber">Stair climber</option></select></div>
-  <p class="small">Every profile is sent with its native FTMS data characteristic. The dashboard shows the effective profile.</p>
-  <div class="row"><label for="c-ant">ANT+ FE-C</label><input id="c-ant" type="checkbox"><span class="pill warn">requires hardware (not implemented)</span></div>
+  <div class="row"><label for="c-ftmsOutputProfile">Output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option><option value="step-climber">Step climber</option><option value="stair-climber">Stair climber</option></select></div>
+  <p class="small">Every profile is sent with its native FTMS data characteristic or ANT+ FE-C equipment type. The dashboard shows the effective profile.</p>
   <div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div></div>
  <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
   <div class="row"><label for="c-wifiSsid">Network (SSID)</label><div class="combo"><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="wifi-list" autocomplete="off"><ul id="wifi-list" role="listbox" aria-label="Wi-Fi networks" hidden></ul></div><button class="b sec" id="btn-wifi-scan" aria-busy="false"><span class="spin" aria-hidden="true"></span>Scan</button></div>
@@ -142,7 +142,10 @@ function renderStatus(s){
  if(i.protocol)items.push(pill("adapter: "+i.protocol));if(i.stale)items.push(pill("stale data","warn"));if(i.scanning)items.push(pill("scanning"));
  if(i.error)items.push(pill(i.error,"bad"));if(i.link==="backoff")items.push(pill("retry in "+Math.ceil(i.nextAttemptMs/1000)+" s"));
  fill($("s-input"),items);
- const f=s.ftmsOutput||{};fill($("s-ftms"),[pill(f.enabled?"enabled":"disabled",f.enabled?"ok":""),pill(f.name||""),pill("profile: "+(f.profile||"bike")),pill("override: "+(f.override||"auto")),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);
+ const f=s.ftmsOutput||{},a=s.antOutput||{},op=s.outputProtocol||"ble-ftms";
+ if(op==="ble-ftms")fill($("s-out"),[pill("BLE FTMS","ok"),pill(f.name||""),pill("profile: "+(f.profile||"bike")),pill("override: "+(f.override||"auto")),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);
+ else if(op==="ant-fec")fill($("s-out"),[pill("ANT+ FE-C",a.open?"ok":""),pill(a.stick?"stick: "+(a.hardware||"connected"):(a.available?"no ANT+ USB stick":"no ANT+ hardware"),a.stick?"ok":"warn"),pill("link: "+(a.link||"-")),pill("device #"+(a.deviceNumber||0)),pill("profile: "+(a.profile||"bike")),pill(a.display?"display connected":"no display",a.display?"ok":""),pill(a.control?"display has control":"no display control")]);
+ else fill($("s-out"),[pill("off")]);
  const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
  const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
  $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
@@ -164,8 +167,10 @@ function renderScan(sc){
   const rssi=el("td",d.rssi);rssi.dataset.label="RSSI";svc.dataset.label="Services";ad.dataset.label="Adapter";tr.append(name,rssi,svc,ad,act);return tr}));}
 let cfgHttps=location.protocol==="https:";
 function renderConfig(c){
+ $("c-ftmsName").value=c.ftmsName||"";$("c-simulatedTrainer").checked=!!c.simulatedTrainer;
+ const fec=$("c-outputProtocol").querySelector('option[value="ant-fec"]');fec.disabled=!c.antAvailable;$("c-outputProtocol").value=c.outputProtocol||"ble-ftms";
+ $("c-outputHint").textContent=c.antAvailable?"ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.":"ANT+ FE-C is not available on this hardware.";
  cfgHttps=c.https!==false;$("c-https").checked=cfgHttps;
- $("c-ftmsName").value=c.ftmsName||"";for(const k of["ftmsOutput","ant","simulatedTrainer"])$("c-"+k).checked=!!c[k];
  $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
  $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
@@ -176,7 +181,8 @@ $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run(
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
 $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
  const r=await run("control",{control:$("ctl-kind").value,value:v},true);if(r){$("ctl-result").textContent=r.message;$("ctl-result").className="small "+(r.ok?"ok":"bad")}};
-$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutput:$("c-ftmsOutput").checked,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ant:$("c-ant").checked,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,https:$("c-https").checked,save:true};
+$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,outputProtocol:$("c-outputProtocol").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
+ b.https=$("c-https").checked;
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
  const r=await run("config",b);if(r&&r.ok)loadConfig()};
 let wifiNets=[];

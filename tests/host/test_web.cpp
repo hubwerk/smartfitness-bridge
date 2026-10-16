@@ -4,6 +4,7 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cassert>
 #include <array>
 #include <limits>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "ant_output.h"
+#include "ant_usb_recovery.hpp"
 #include "ble_input_adapter.h"
 #include "bridge/bridge_core.hpp"
 #include "bridge_commands.h"
@@ -66,6 +68,93 @@ struct Rig {
     std::string configJson() const { return web::configJson(ui.configView()); }
 };
 
+void testAntUsbRecovery() {
+    using Recovery = smartfitness::usb_transport::AntUsbRecovery;
+    using PendingWrite = smartfitness::usb_transport::AntUsbPendingWrite;
+    using Endpoint = Recovery::Endpoint;
+    Recovery recovery;
+    assert(recovery.available());
+    recovery.request(Endpoint::In);
+    assert(recovery.pending(Endpoint::In) && !recovery.available());
+
+    std::string order;
+    bool haltOk = false;
+    bool flushOk = true;
+    bool clearOk = true;
+    bool submitOk = true;
+    const auto serviceIn = [&](bool busy) {
+        return recovery.service(Endpoint::In, busy, [&] {
+            order += 'h';
+            return haltOk;
+        }, [&] {
+            order += 'f';
+            return flushOk;
+        }, [&] {
+            order += 'c';
+            return clearOk;
+        }, [&] {
+            order += 'i';
+            return submitOk;
+        });
+    };
+    assert(!serviceIn(true) && order.empty());
+    assert(!serviceIn(false) && order == "h");
+    haltOk = true;
+    flushOk = false;
+    order.clear();
+    assert(!serviceIn(false) && order == "hf");
+    flushOk = true;
+    clearOk = false;
+    order.clear();
+    assert(!serviceIn(false) && order == "hfc" && !recovery.available());
+    clearOk = true;
+    submitOk = false;
+    order.clear();
+    assert(!serviceIn(false) && order == "hfci" && !recovery.available());
+    submitOk = true;
+    order.clear();
+    assert(serviceIn(false) && order == "hfci" && recovery.available());
+
+    recovery.request(Endpoint::Out);
+    PendingWrite pendingWrite;
+    const std::uint8_t message[]{0xA4, 0x01, 0x4B, 0x00};
+    std::copy(message, message + sizeof(message), pendingWrite.buffer());
+    pendingWrite.stage(sizeof(message));
+    order.clear();
+    assert(!recovery.service(Endpoint::Out, false, [&] {
+        order += 'h';
+        return false;
+    }, [&] {
+        order += 'f';
+        return true;
+    }, [&] {
+        order += 'c';
+        return true;
+    }, [] {
+        assert(false);
+        return false;
+    }));
+    assert(order == "h" && pendingWrite.pending() && pendingWrite.size() == sizeof(message) &&
+           std::equal(message, message + sizeof(message), pendingWrite.data()) && !recovery.available());
+    order.clear();
+    assert(recovery.service(Endpoint::Out, false, [&] {
+        order += 'h';
+        return true;
+    }, [&] {
+        order += 'f';
+        return true;
+    }, [&] {
+        order += 'c';
+        return true;
+    }, [] {
+        assert(false);
+        return false;
+    }));
+    assert(order == "hfc" && pendingWrite.pending() && recovery.available());
+    pendingWrite.complete();
+    assert(!pendingWrite.pending());
+}
+
 void testConsoleParsing() {
     Command command;
     std::string error;
@@ -111,7 +200,7 @@ void testConsoleBlePairing() {
     assert(paired == "paired KICKR CORE 1234 (aa:00:00:00:00:21) as ftms; connecting");
     // Pairing persists immediately, enables the BLE input and connects.
     assert(rig.backend.writes() == 1);
-    assert(rig.config.config().ftms.input && rig.config.config().pairedAdapterId == "ftms");
+    assert(rig.config.config().ftmsInput && rig.config.config().pairedAdapterId == "ftms");
     assert(rig.config.config().pairedDeviceName == "KICKR CORE 1234");
     assert(rig.selector.source() == InputSelector::Source::Ble);
     assert(rig.central.connects.size() == 1 && rig.central.connects.back().address == address("aa:00:00:00:00:21"));
@@ -154,7 +243,7 @@ void testConsoleBlePairing() {
     assert(contains(rig.ui.handleCommand("sim"), "simulation connected"));
     assert(rig.selector.source() == InputSelector::Source::Simulation);
     assert(rig.ble.linkState() == BleInputAdapter::LinkState::Idle);
-    assert(rig.config.config().pairedSource.valid && !rig.config.config().ftms.input);
+    assert(rig.config.config().pairedSource.valid && !rig.config.config().ftmsInput);
     assert(contains(rig.ui.handleCommand("connect"), "connecting"));
     assert(rig.selector.source() == InputSelector::Source::Ble);
 
@@ -249,7 +338,7 @@ void testOutputProfiles() {
     assert(contains(rig.ui.handleCommand("factory-reset"), "ftms-profile=auto"));
     assert(rig.ftms.profile() == MachineProfile::IndoorBike);
 
-    rig.ui.handleCommand("ant off");
+    rig.ui.handleCommand("output off");
     ApiExchange api;
     for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower"}) {
         const auto response = api.submit("config", "{\"ftmsOutputProfile\":\"" + value + "\",\"save\":true}");
@@ -271,7 +360,7 @@ void testOutputProfiles() {
         assert(api.submit("config", body).status == 400);
         assert(rig.config.config() == previous);
     }
-    const auto omitted = api.submit("config", R"({"ant":false})");
+    const auto omitted = api.submit("config", R"({"outputProtocol":"off"})");
     assert(omitted.status == 202);
     api.process(rig.ui);
     assert(rig.config.config().ftmsOutputProfile == FtmsOutputProfile::Rower);
@@ -322,13 +411,13 @@ void testApiParsing() {
     assert(!parseApiRequest("control", R"({"control":"power"})", commands, error));
 
     assert(parseApiRequest("config",
-                           R"({"ftmsName":"Garage","ftmsOutput":false,"ant":true,"wifiSsid":"Home",)"
+                           R"({"ftmsName":"Garage","outputProtocol":"ant-fec","ftmsInput":true,"wifiSsid":"Home",)"
                            R"("wifiPassword":"secret-pass","apPassword":"ap-password","save":true})",
                            commands, error));
     assert(commands.size() == 6);
     assert(commands[0].type == CommandType::FtmsName && commands[0].text == "Garage");
-    assert(commands[1].type == CommandType::FtmsOutput && !commands[1].flag);
-    assert(commands[2].type == CommandType::Ant && commands[2].flag);
+    assert(commands[1].type == CommandType::OutputProtocol && commands[1].text == "ant-fec");
+    assert(commands[2].type == CommandType::FtmsInput && commands[2].flag);
     assert(commands[3].type == CommandType::Wifi && commands[3].text2 == "secret-pass" && !commands[3].flag);
     assert(commands[4].type == CommandType::ApPassword);
     assert(commands[5].type == CommandType::Save);
@@ -353,7 +442,12 @@ void testApiParsing() {
     assert(!parseApiRequest("config", R"({"apPassword":"12345678\u0000bad"})", commands, error));
     assert(contains(error, "NUL"));
     assert(!parseApiRequest("pair", R"({"address":"aa:00:00:00:00:01\u0000bad"})", commands, error));
-    assert(!parseApiRequest("config", R"({"ant":"yes"})", commands, error) && contains(error, "true or false"));
+    assert(!parseApiRequest("config", R"({"ftmsInput":"yes"})", commands, error) && contains(error, "true or false"));
+    assert(!parseApiRequest("config", R"({"outputProtocol":"usb"})", commands, error));
+    assert(error == "outputProtocol must be off, ble-ftms or ant-fec");
+    assert(!parseApiRequest("config", R"({"outputProtocol":true})", commands, error));
+    assert(!parseApiRequest("config", R"({"ant":true})", commands, error) && error == "unknown field: ant");
+    assert(!parseApiRequest("config", R"({"ftmsOutput":true})", commands, error));
     assert(!parseApiRequest("config", R"({"unknown":1})", commands, error) && error == "unknown field: unknown");
     assert(!parseApiRequest("config", "{}", commands, error) && error == "no settings given");
     assert(!parseApiRequest("config", R"({"ftmsName":")" + std::string(80, 'x') + "\"}", commands, error));
@@ -495,7 +589,8 @@ void testJsonViews() {
     auto document = parse(config);
     assert(document["wifiSsid"] == "Home" && document["wifiPasswordSet"] == true);
     assert(document["apPasswordDefault"] == false && document["ftmsName"] == FtmsOutput::kDefaultName);
-    assert(document["antRequiresHardware"] == true && document["unsaved"] == true);
+    assert(document["outputProtocol"] == "ble-ftms" && document["antAvailable"] == false);
+    assert(document["unsaved"] == true);
     assert(document["https"] == true);
     rig.ui.handleCommand("https off");
     assert(parse(rig.configJson())["https"] == false && !rig.config.config().httpsEnabled);
@@ -522,7 +617,9 @@ void testJsonViews() {
     assert(document["target"]["control"] == "power" && document["target"]["value"] == 180);
     assert(document["controls"].size() == 4 && document["canControl"] == true);
     assert(document["network"]["ip"] == "192.168.4.1" && document["input"]["paired"].isNull());
-    assert(document["ftmsOutput"]["advertising"] == true);
+    assert(document["ftmsOutput"]["advertising"] == true && document["outputProtocol"] == "ble-ftms");
+    assert(document["antOutput"]["enabled"] == false && document["antOutput"]["available"] == false);
+    assert(document["antOutput"]["link"] == "disabled");
     assert(document["input"]["dropped"]["scans"] == 0);
     assert(document["input"]["dropped"]["events"] == 0);
     assert(document["input"]["dropped"]["notifications"] == 0);
@@ -684,6 +781,7 @@ void testBodyReceipt() {
 }  // namespace
 
 void runWebTests() {
+    testAntUsbRecovery();
     testConsoleParsing();
     testConsoleBlePairing();
     testPairOverrideAndExclusion();

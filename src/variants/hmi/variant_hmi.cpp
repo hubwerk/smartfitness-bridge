@@ -45,6 +45,9 @@ namespace variant {
 
 const char* name() { return "hmi"; }
 
+// The CrowPanel's only USB-C port is the S3's USB-Serial/JTAG: no ANT radio.
+smartfitness::ant::AntTransport* antTransport() { return nullptr; }
+
 void begin(BridgeController& controller, const BridgeConfig& config) {
     (void)config;  // Wi-Fi fields stay in the shared schema; the HMI never starts Wi-Fi.
     settings = hmi::CrowPanelHal::loadSettings();

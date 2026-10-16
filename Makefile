@@ -9,7 +9,8 @@ CORE_TESTS = tests/host/test_main.cpp tests/host/test_bridge_core.cpp tests/host
 	tests/host/test_ifit_bowflex.cpp tests/host/test_trainers_rower.cpp tests/host/test_treadmills.cpp \
 	tests/host/test_sportstech.cpp tests/host/test_fitshow.cpp tests/host/test_toorx.cpp tests/host/test_domyos_ext.cpp \
 	tests/host/test_echelon_ext.cpp tests/host/test_nautilus.cpp tests/host/test_sportsplus.cpp \
-	tests/host/test_vendor_treadmills.cpp tests/host/test_vendor_bikes.cpp tests/host/test_vendor_cardio.cpp
+	tests/host/test_vendor_treadmills.cpp tests/host/test_vendor_bikes.cpp tests/host/test_vendor_cardio.cpp \
+	tests/host/test_ant.cpp
 
 # Web variant (pure C++ parts): API exchange, JSON renderer, Wi-Fi policy.
 WEB_SOURCES = src/variants/web/web_api.cpp src/variants/web/web_json.cpp src/variants/web/wifi_policy.cpp

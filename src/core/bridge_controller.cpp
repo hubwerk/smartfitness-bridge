@@ -79,10 +79,12 @@ bool BridgeController::bleSelected() const {
 void BridgeController::applyConfig() {
     const auto& config = config_.config();
     adapter_.setTrainer(config.simulatedTrainer);
-    ant_.setEnabled(config.antEnabled);
     ftms_.setDeviceName(config.ftmsName);
     ftms_.setProfileOverride(config.ftmsOutputProfile);
-    ftms_.setEnabled(config.ftms.output);
+    ant_.setProfileOverride(config.ftmsOutputProfile);
+    // Exactly one output protocol is active; ANT+ FE-C needs an ANT radio.
+    ftms_.setEnabled(config.outputProtocol == OutputProtocol::BleFtms);
+    ant_.setEnabled(config.outputProtocol == OutputProtocol::AntFec && ant_.available());
     if (ble_ && selector_) {
         const bool paired = config.pairedSource.valid && !config.pairedAdapterId.empty();
         if (paired) {
@@ -96,7 +98,7 @@ void BridgeController::applyConfig() {
         } else if (ble_->pairedDevice().valid) {
             ble_->clearPairedDevice();
         }
-        selector_->select(config.ftms.input && paired ? InputSelector::Source::Ble
+        selector_->select(config.ftmsInput && paired ? InputSelector::Source::Ble
                                                       : InputSelector::Source::Simulation);
     }
     bridge_.loop();
@@ -123,16 +125,20 @@ std::string BridgeController::status() const {
     }
     std::snprintf(buffer, sizeof(buffer),
                   "state=%s speed=%skm/h cadence=%srpm power=%sW hr=%sbpm "
-                  "target=%s ANT=%d FTMS(input=%d,output=%d) "
+                  "target=%s output=%s ftms-input=%d "
                   "ftms-out(advertising=%d,client=%d,control=%d) unsaved=%d",
                   runtimeStateName(bridge_.state()), values[0], values[1], values[2], values[3],
                   bridge_.hasControlTarget() ? "set" : "none",
-                  config_.config().antEnabled, config_.config().ftms.input, config_.config().ftms.output,
+                  outputProtocolName(config_.config().outputProtocol), config_.config().ftmsInput,
                   ftms_.advertising(), ftms_.clientConnected(), ftms_.controlGranted(), config_.hasUnsavedChanges());
     std::string text = buffer;
     text += std::string(" input-profile=") + machineProfileName(bridge_.trainerState().profile) +
             " output-profile=" + machineProfileName(ftms_.profile()) +
             " ftms-profile=" + ftmsOutputProfileName(config_.config().ftmsOutputProfile);
+    if (config_.config().outputProtocol == OutputProtocol::AntFec)
+        text += std::string(" ant(link=") + AntOutput::linkName(ant_.link()) +
+                ",device=" + std::to_string(ant_.deviceNumber()) + ",display=" + std::to_string(ant_.displaySeen()) +
+                ",control=" + std::to_string(ant_.controlActive()) + ")";
     if (ble_) {
         text += std::string(" input=") + (bleSelected() ? "ble" : "sim") +
                 " link=" + BleInputAdapter::linkStateName(ble_->linkState());
@@ -185,7 +191,7 @@ CommandResult BridgeController::execute(const Command& command) {
             return ok("status | sim | scan [s] | scan-stop | scan-results | pair <addr> [adapter|auto] [public|random] | "
                       "connect | disconnect | unpair | trainer on/off | "
                       "power W | speed km/h | incline % | resistance % | "
-                      "ant on/off | ftms-input on/off | ftms-output on/off | ftms-name <name> | "
+                      "output off/ble-ftms/ant-fec | ftms-input on/off | ftms-name <name> | "
                       "ftms-profile auto/bike/treadmill/cross-trainer/rower/step-climber/stair-climber | "
                       "wifi <ssid> [password] | wifi-clear | ap-pass <password> | https on/off | "
                       "save | load | factory-reset | restart");
@@ -201,8 +207,8 @@ CommandResult BridgeController::execute(const Command& command) {
             // Without BLE input "scan" keeps its original meaning: connect the simulation.
             [[fallthrough]];
         case CommandType::Simulate: {
-            if (ble_ && config_.config().ftms.input) {
-                config_.config().ftms.input = false;
+            if (ble_ && config_.config().ftmsInput) {
+                config_.config().ftmsInput = false;
                 applyConfig();
             }
             if (!bridge_.scanAndConnect()) return fail("connection failed");
@@ -233,7 +239,7 @@ CommandResult BridgeController::execute(const Command& command) {
         case CommandType::Connect:
             if (!ble_) return fail("BLE input not available");
             if (!config_.config().pairedSource.valid) return fail("no paired device; scan and pair first");
-            config_.config().ftms.input = true;
+            config_.config().ftmsInput = true;
             applyConfig();
             if (!ble_->scanAndConnect()) return fail("connection request rejected: " + ble_->lastError());
             bridge_.loop();
@@ -284,15 +290,19 @@ CommandResult BridgeController::execute(const Command& command) {
             applyConfig();
             return ok(status());
         }
+        case CommandType::OutputProtocol: {
+            OutputProtocol protocol;
+            if (!parseOutputProtocol(command.text, protocol)) return fail("output must be off, ble-ftms or ant-fec");
+            if (protocol == OutputProtocol::AntFec && !ant_.available())
+                return fail("ANT+ FE-C needs an ANT+ USB stick (web variant, USB-OTG port)");
+            config_.config().outputProtocol = protocol;
+            applyConfig();
+            return ok(status());
+        }
         case CommandType::Trainer:
-        case CommandType::Ant:
-        case CommandType::FtmsInput:
-        case CommandType::FtmsOutput: {
+        case CommandType::FtmsInput: {
             auto& config = config_.config();
-            bool* setting = command.type == CommandType::Trainer ? &config.simulatedTrainer
-                            : command.type == CommandType::Ant   ? &config.antEnabled
-                            : command.type == CommandType::FtmsInput ? &config.ftms.input
-                                                                     : &config.ftms.output;
+            bool* setting = command.type == CommandType::Trainer ? &config.simulatedTrainer : &config.ftmsInput;
             *setting = command.flag;
             applyConfig();
             return ok(status());
@@ -373,15 +383,26 @@ StatusView BridgeController::statusView() const {
         input.paired.name = config.pairedDeviceName;
         input.paired.adapter = config.pairedAdapterId;
     }
+    view.outputProtocol = config.outputProtocol;
     auto& ftms = view.ftmsOutput;
-    ftms.enabled = config.ftms.output;
+    ftms.enabled = ftms_.enabled();
     ftms.profile = ftms_.profile();
     ftms.override = config.ftmsOutputProfile;
     ftms.name = ftms_.deviceName();
     ftms.advertising = ftms_.advertising();
     ftms.client = ftms_.clientConnected();
     ftms.control = ftms_.controlGranted();
-    view.ant = config.antEnabled;
+    auto& ant = view.antOutput;
+    ant.enabled = ant_.enabled();
+    ant.available = ant_.available();
+    ant.link = AntOutput::linkName(ant_.link());
+    ant.stick = ant_.stickConnected();
+    ant.open = ant_.channelOpen();
+    ant.deviceNumber = ant_.deviceNumber();
+    ant.profile = ant_.profile();
+    ant.display = ant_.displaySeen();
+    ant.control = ant_.controlActive();
+    ant.hardware = ant_.hardware();
     view.unsaved = config_.hasUnsavedChanges();
     return view;
 }
@@ -426,11 +447,10 @@ ConfigView BridgeController::configView() const {
     ConfigView view;
     view.version = SMARTFITNESS_VERSION;
     view.ftmsName = config.ftmsName.empty() ? std::string(FtmsOutput::kDefaultName) : config.ftmsName;
-    view.ftmsOutput = config.ftms.output;
+    view.outputProtocol = config.outputProtocol;
+    view.antAvailable = ant_.available();
     view.ftmsOutputProfile = config.ftmsOutputProfile;
-    view.ftmsInput = config.ftms.input;
-    view.ant = config.antEnabled;
-    view.antRequiresHardware = true;
+    view.ftmsInput = config.ftmsInput;
     view.simulatedTrainer = config.simulatedTrainer;
     view.wifiSsid = config.wifiSsid;
     view.wifiPasswordSet = !config.wifiPassword.empty();

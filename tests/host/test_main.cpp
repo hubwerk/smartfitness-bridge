@@ -31,6 +31,7 @@ void runVendorBikesTests();
 void runVendorBikesRegistryTests();
 void runVendorCardioTests();
 void runVendorCardioRegistryTests();
+void runAntTests();
 #ifdef SF_TEST_WEB
 void runWebTests();
 #endif
@@ -66,6 +67,7 @@ int main() {
     runVendorTreadmillsRegistryTests();
     runVendorBikesRegistryTests();
     runVendorCardioRegistryTests();
+    runAntTests();
 #ifdef SF_TEST_WEB
     runWebTests();
 #endif

@@ -14,6 +14,7 @@
 
 #include "bridge/bridge_core.hpp"
 #include "bridge/machine_profile.hpp"
+#include "bridge/output_protocol.hpp"
 
 namespace smartfitness {
 
@@ -66,6 +67,19 @@ struct FtmsOutputView {
     bool control = false;
 };
 
+struct AntOutputView {
+    bool enabled = false;
+    bool available = false;    // an ANT radio transport exists (web variant)
+    std::string link;          // AntOutput::linkName()
+    bool stick = false;        // ANT+ USB stick attached
+    bool open = false;         // FE-C channel broadcasting
+    std::uint16_t deviceNumber = 0;
+    MachineProfile profile = MachineProfile::IndoorBike;
+    bool display = false;      // a display (app/head unit) talked recently
+    bool control = false;      // the display controls the source
+    std::string hardware;
+};
+
 struct StatusView {
     std::string version;
     RuntimeState state = RuntimeState::Disconnected;
@@ -77,8 +91,9 @@ struct StatusView {
     bool hasTarget = false;
     ControlRequest target{Control::Power, 0.0F};
     InputView input;
+    OutputProtocol outputProtocol = OutputProtocol::BleFtms;
     FtmsOutputView ftmsOutput;
-    bool ant = false;
+    AntOutputView antOutput;
     bool unsaved = false;
 
     const MetricView& metric(Metric which) const { return telemetry[static_cast<std::size_t>(which)]; }
@@ -115,11 +130,10 @@ struct ScanView {
 struct ConfigView {
     std::string version;
     std::string ftmsName;  // effective name (default when unset)
-    bool ftmsOutput = false;
-    FtmsOutputProfile ftmsOutputProfile = FtmsOutputProfile::Auto;
+    OutputProtocol outputProtocol = OutputProtocol::BleFtms;
+    bool antAvailable = false;  // ANT+ FE-C selectable (ANT radio transport present)
+    FtmsOutputProfile ftmsOutputProfile = FtmsOutputProfile::Auto;  // output profile (FTMS and FE-C)
     bool ftmsInput = false;
-    bool ant = false;
-    bool antRequiresHardware = true;
     bool simulatedTrainer = false;
     std::string wifiSsid;
     bool wifiPasswordSet = false;  // passwords are never exposed

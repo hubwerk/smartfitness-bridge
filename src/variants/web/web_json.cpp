@@ -94,7 +94,19 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
     ftms["advertising"] = out.advertising;
     ftms["client"] = out.client;
     ftms["control"] = out.control;
-    document["ant"] = status.ant;
+    const auto& antView = status.antOutput;
+    JsonObject ant = document["antOutput"].to<JsonObject>();
+    ant["enabled"] = antView.enabled;
+    ant["available"] = antView.available;
+    ant["link"] = antView.link;
+    ant["stick"] = antView.stick;
+    ant["open"] = antView.open;
+    ant["deviceNumber"] = antView.deviceNumber;
+    ant["profile"] = machineProfileName(antView.profile);
+    ant["display"] = antView.display;
+    ant["control"] = antView.control;
+    ant["hardware"] = antView.hardware;
+    document["outputProtocol"] = outputProtocolName(status.outputProtocol);
     document["unsaved"] = status.unsaved;
     JsonObject net = document["network"].to<JsonObject>();
     net["mode"] = network.mode;
@@ -141,11 +153,10 @@ std::string configJson(const ConfigView& config) {
     document["type"] = "config";
     document["version"] = config.version;
     document["ftmsName"] = config.ftmsName;
-    document["ftmsOutput"] = config.ftmsOutput;
+    document["outputProtocol"] = outputProtocolName(config.outputProtocol);
+    document["antAvailable"] = config.antAvailable;
     document["ftmsOutputProfile"] = ftmsOutputProfileName(config.ftmsOutputProfile);
     document["ftmsInput"] = config.ftmsInput;
-    document["ant"] = config.ant;
-    document["antRequiresHardware"] = config.antRequiresHardware;
     document["simulatedTrainer"] = config.simulatedTrainer;
     // Passwords are never returned, only whether they are set.
     document["wifiSsid"] = config.wifiSsid;

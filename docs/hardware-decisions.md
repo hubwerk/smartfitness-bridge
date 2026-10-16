@@ -2,7 +2,7 @@
 
 ## HD-001: ANT+ is not possible with the built-in ESP32-S3 radio
 
-**Status:** Accepted
+**Status:** Accepted; USB stick transport implemented (web variant), not verified on hardware
 
 ### Context
 The original goal includes ANT+ FE-C output. The ESP32-S3 radio supports Wi-Fi and Bluetooth LE 5 only.
@@ -11,19 +11,25 @@ silicon (e.g. Nordic nRF52 with SoftDevice S212/S340, nRF24AP2). Espressif provi
 the radio cannot be reprogrammed to speak ANT.
 
 ### Decision
-1. **Primary output is Bluetooth LE.** FTMS is implemented for fitness apps such as
-   Zwift and MyWhoosh; interoperability is not verified on hardware.
-2. **ANT+ FE-C is deferred** and will require external hardware. Preferred option when needed:
-   **USB ANT+ stick on the ESP32-S3 USB-OTG port (USB host mode)** speaking the ANT serial protocol.
+1. **The output protocol is selectable:** BLE FTMS (default), ANT+ FE-C or off
+   (`OutputProtocol`, config schema v5). Only one output is active at a time.
+2. **ANT+ FE-C uses a USB ANT+ stick on the ESP32-S3 USB-OTG port (USB host mode)** speaking the
+   ANT serial protocol. Integration basis: COOSPO ANT+ USB stick (Dynastream ANTUSB2/ANTUSB-m
+   class, USB `0fcf:1008` / `0fcf:1009`, one vendor interface with bulk IN/OUT endpoints).
 3. Alternatives, if the USB route fails:
    - nRF52832/nRF52840 with ANT SoftDevice as co-processor via UART/SPI (own firmware required)
    - Ready-made ANT module (nRF24AP2 / D52) via UART (availability may be limited)
 
 ### Consequences
-- `AntOutput` stays an interface without transport until hardware is chosen.
-- The ANT transport must be implemented behind an abstraction (e.g. `AntTransport`) so USB stick and
-  UART module can be swapped.
-- Wiring/power for USB host mode (5 V on the OTG port) must be documented once implemented.
+- `AntOutput` (core, host-tested) implements the ANT channel and the FE-C pages behind
+  `smartfitness::ant::AntTransport`; `AntUsbTransport` (web variant) implements it with the
+  ESP-IDF USB Host Library (two tasks on core 0, non-blocking buffers to the main loop).
+  A UART module can be added as another transport.
+- **Wiring/power (DevKitC-1):** stick on the port labelled **USB** via an OTG adapter; bridge the
+  **USB-OTG** solder jumper so the 5 V rail feeds VBUS; power, flash and use the Serial console
+  through the **UART** port (`ARDUINO_USB_CDC_ON_BOOT=0` for the web variant).
+- The CrowPanel (HMI variant) has one USB-C port and no USB host: ANT+ FE-C is unavailable there.
+- Garmin/Zwift interoperability, stick hot-plugging and BLE/Wi-Fi/USB coexistence need hardware tests.
 
 ## HD-002: Garmin watches (e.g. fenix 6 Pro) and Bluetooth FTMS
 
@@ -104,7 +110,7 @@ Arduino core `WebServer` is synchronous and plain HTTP. Core 2.0.17 ships ESP-ID
   TLS session is never used by two tasks at once; one broadcast is in flight at a time.
 - Serve the self-contained gzipped web app from flash; provide captive DNS/probe
   redirects, mDNS (`_https._tcp`), REST and server-to-client `/ws` telemetry.
-- HTTPS is a persisted setting (`httpsEnabled`, config schema v4, default on).
+- HTTPS is a persisted setting (`httpsEnabled`, config schema v5, default on).
   When it is off, or the certificate/TLS server cannot start, the same handlers
   run on a plain `esp_http_server` on port 80 (`ws://…/ws`, up to 7 connections,
   `_http._tcp`), and only `http://` origins are trusted. Changes apply after restart.

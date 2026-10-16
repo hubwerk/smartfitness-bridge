@@ -147,6 +147,30 @@ void testStatusTexts() {
     ftms.client = true;
     assert(ftmsLabel(ftms) == "App connected");
 
+    StatusView output;
+    assert(outputLabel(output) == "FTMS off");  // default BLE FTMS, output not yet enabled
+    output.ftmsOutput.enabled = true;
+    output.ftmsOutput.advertising = true;
+    assert(outputLabel(output) == "Advertising");
+    output.ftmsOutput.client = true;
+    assert(outputLabel(output) == "APP LINK");
+    output.outputProtocol = OutputProtocol::Off;
+    assert(outputLabel(output) == "Output off");
+    output.outputProtocol = OutputProtocol::AntFec;
+    assert(outputLabel(output) == "No ANT+ radio");
+    output.antOutput.available = true;
+    assert(outputLabel(output) == "No ANT+ stick");
+    output.antOutput.stick = true;
+    assert(outputLabel(output) == "ANT+ on");
+    output.antOutput.display = true;
+    assert(outputLabel(output) == "ANT+ link");
+
+    assert(nextOutputProtocol(OutputProtocol::Off, false) == OutputProtocol::BleFtms);
+    assert(nextOutputProtocol(OutputProtocol::BleFtms, false) == OutputProtocol::Off);
+    assert(nextOutputProtocol(OutputProtocol::BleFtms, true) == OutputProtocol::AntFec);
+    assert(nextOutputProtocol(OutputProtocol::AntFec, true) == OutputProtocol::Off);
+    assert(nextOutputProtocol(OutputProtocol::AntFec, false) == OutputProtocol::Off);
+
     assert(targetLabel(status) == "No target");
     status.hasTarget = true;
     status.target = {Control::Speed, 8.0F};
@@ -214,7 +238,8 @@ void testCommandsQueueAndConfirm() {
     }
     assert(queue.size() == 0 && !queue.pop(command));
 
-    assert(makeFlag(CommandType::FtmsOutput, true).flag);
+    assert(makeFlag(CommandType::FtmsInput, true).flag);
+    assert(makeText(CommandType::OutputProtocol, "ant-fec").text == "ant-fec");
     assert(makeText(CommandType::FtmsName, "SF Bike").text == "SF Bike");
 
     ScanDeviceView device;
