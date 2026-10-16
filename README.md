@@ -830,7 +830,7 @@ disconnects its client; selecting BLE FTMS or Off closes the ANT channel.
 
 **Hardware (web variant only, optional):** the ANT+ stick and USB-OTG adapter are
 only needed if ANT+ FE-C should be used besides BLE FTMS; without them the web
-variant runs normally with BLE FTMS (ANT+ FE-C then cannot be selected).
+variant runs normally with BLE FTMS.
 
 - An ANT+ USB stick of the Dynastream ANTUSB2/ANTUSB-m class (USB `0fcf:1008`
   / `0fcf:1009`); the integration basis is the **COOSPO ANT+ USB stick**, which
