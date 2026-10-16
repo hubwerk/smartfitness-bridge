@@ -122,8 +122,9 @@ pio device monitor -b 115200
 
 Serial is **115200 baud** (web variant: UART port; HMI variant: USB CDC); it prints
 boot/configuration and Wi-Fi information.
-ANT+ FE-C needs an ANT+ USB stick on the web variant; see
-[ANT+ FE-C output](#ant-fe-c-output-usb-stick) and [hardware decisions](docs/hardware-decisions.md).
+The ANT+ USB stick (with USB-OTG adapter) is **optional** on the web variant: BLE FTMS
+works without it, and it is only needed if ANT+ FE-C should be used in addition to
+BLE FTMS; see [ANT+ FE-C output](#ant-fe-c-output-usb-stick) and [hardware decisions](docs/hardware-decisions.md).
 
 **Optional host tests:** `make host-tests` (requires `make` and `g++` with C++17; on
 Windows, use WSL).
@@ -827,7 +828,9 @@ Select it with `output ant-fec`, the web *Settings → Output protocol* field, o
 protocol is active at a time: selecting ANT+ FE-C stops BLE FTMS advertising and
 disconnects its client; selecting BLE FTMS or Off closes the ANT channel.
 
-**Hardware (web variant only):**
+**Hardware (web variant only, optional):** the ANT+ stick and USB-OTG adapter are
+only needed if ANT+ FE-C should be used besides BLE FTMS; without them the web
+variant runs normally with BLE FTMS (ANT+ FE-C then cannot be selected).
 
 - An ANT+ USB stick of the Dynastream ANTUSB2/ANTUSB-m class (USB `0fcf:1008`
   / `0fcf:1009`); the integration basis is the **COOSPO ANT+ USB stick**, which
