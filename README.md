@@ -395,7 +395,12 @@ the saved BLE source again. `save` persists that input toggle.
 
 See [supported devices](docs/supported-devices.md) for the complete adapter table,
 match rules, metrics, controls, attribution, and test status. Only the listed
-qdomyos-zwift (and Sportstech/FitHome) ports exist; this is not support for its entire device catalogue.
+qdomyos-zwift (and Sportstech/FitHome) ports exist. Batch 2 covers the remaining
+BLE vendor classes (FitShow, Toorx/TRX App Gate, Domyos treadmill/elliptical/rower,
+Echelon rower/stride/stair, Nautilus/Bowflex, Sportstech/SportPlus/Pafers and
+further treadmills, bikes, ellipticals and rowers). Bluetooth Classic, ANT+,
+USB/serial, Wi-Fi/ADB, accessories and the other entries listed as not ported are
+excluded. None of these ports is verified on hardware.
 
 To add a protocol:
 1. Implement pure C++ `SourceProtocol` in `include/core/protocols/` and `src/core/protocols/`:
@@ -406,10 +411,14 @@ To add a protocol:
    discovery is opt-in through `ConnectPlan`; explicitly allowlist write UUIDs
    and receive the resolved endpoint through `onWriteEndpoint()`.
 2. Add an id (`[a-z0-9_-]`, at most 16 characters), matcher, factory, and priority
-   to `kProtocols` in `src/core/protocols/registry.cpp`. Highest matching priority wins;
+   to `kProtocols` in `src/core/protocols/registry.cpp`, or expose a family's
+   `descriptorCount()`/`descriptorAt()` and append it to `kFamilies` (append only:
+   the order is the detection tie order). Highest matching priority wins;
    avoid broad vendor matches stealing unrelated devices from standard protocols.
 3. Add host tests with representative byte samples and malformed/truncated packets
-   in `tests/host/test_ble_input.cpp`, and add the source to the Makefile.
+   (in `tests/host/test_ble_input.cpp` or a family test file registered in the
+   Makefile and `tests/host/test_main.cpp`), and add every new id to the expected
+   map in `testProtocolProfiles`.
 4. For ports, retain a GPL attribution header with upstream project, source file,
    revision, and derived behavior; label synthetic vectors versus hardware captures.
 
