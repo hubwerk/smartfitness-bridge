@@ -12,6 +12,7 @@
 #include "bridge_controller.h"
 #include "bridge_view_model.h"
 #include "config_store.h"
+#include "fake_ant.hpp"
 #include "fake_central.hpp"
 #include "ftms_output.h"
 #include "protocols/registry.hpp"
@@ -34,8 +35,10 @@ struct ControllerRig {
     ConfigStore config{backend};
     BridgeCore core;
     BridgeController controller{core, config, simulation, ant, ftms};
+    FakeAntTransport antRadio;
 
-    ControllerRig() {
+    explicit ControllerRig(bool withAnt = false) {
+        if (withAnt) ant.setTransport(&antRadio);
         config.begin();
         core.attach(selector, ant, ftms);
         core.begin();
@@ -76,8 +79,10 @@ void testDefaultViews() {
     assert(status.ftmsOutput.override == FtmsOutputProfile::Auto && !status.unsaved);
 
     const ConfigView config = rig.controller.configView();
-    assert(config.ftmsName == FtmsOutput::kDefaultName && config.ftmsOutput && !config.ftmsInput);
-    assert(config.ant && config.antRequiresHardware && config.simulatedTrainer);
+    assert(config.ftmsName == FtmsOutput::kDefaultName && !config.ftmsInput);
+    assert(config.outputProtocol == OutputProtocol::BleFtms && !config.antAvailable && config.simulatedTrainer);
+    assert(status.outputProtocol == OutputProtocol::BleFtms && !status.antOutput.enabled);
+    assert(!status.antOutput.available && status.antOutput.link == "disabled");
     assert(config.wifiSsid.empty() && !config.wifiPasswordSet && config.apPasswordDefault && !config.unsaved);
 
     const ScanView scan = rig.controller.scanView();
@@ -216,9 +221,9 @@ void testConfigViewTracksCommands() {
     Command profile = make(CommandType::FtmsProfile);
     profile.text = "treadmill";
     assert(rig.controller.execute(profile).ok);
-    Command ant = make(CommandType::Ant);
-    ant.flag = false;
-    assert(rig.controller.execute(ant).ok);
+    Command output = make(CommandType::OutputProtocol);
+    output.text = "off";
+    assert(rig.controller.execute(output).ok);
     Command wifi = make(CommandType::Wifi);
     wifi.text = "Home";
     wifi.text2 = "secret-pass";
@@ -226,19 +231,72 @@ void testConfigViewTracksCommands() {
 
     ConfigView config = rig.controller.configView();
     assert(config.ftmsName == "Garage Bike" && config.ftmsOutputProfile == FtmsOutputProfile::Treadmill);
-    assert(!config.ant && config.wifiSsid == "Home" && config.wifiPasswordSet && config.unsaved);
+    assert(config.outputProtocol == OutputProtocol::Off && config.wifiSsid == "Home" && config.wifiPasswordSet && config.unsaved);
     StatusView status = rig.controller.statusView();
     assert(status.ftmsOutput.name == "Garage Bike" && status.ftmsOutput.override == FtmsOutputProfile::Treadmill);
-    assert(status.ftmsOutput.profile == MachineProfile::Treadmill && !status.ant && status.unsaved);
+    assert(status.ftmsOutput.profile == MachineProfile::Treadmill && !status.ftmsOutput.enabled && status.unsaved);
 
     assert(rig.controller.execute(make(CommandType::Save)).ok);
     assert(!rig.controller.configView().unsaved);
     const CommandResult reset = rig.controller.execute(make(CommandType::FactoryReset));
     assert(reset.ok && reset.message.find("factory defaults restored") == 0);
     config = rig.controller.configView();
-    assert(config.ftmsName == FtmsOutput::kDefaultName && config.ant && config.wifiSsid.empty());
+    assert(config.ftmsName == FtmsOutput::kDefaultName && config.outputProtocol == OutputProtocol::BleFtms &&
+           config.wifiSsid.empty());
     assert(!rig.controller.restartRequested());
     assert(rig.controller.execute(make(CommandType::Restart)).ok && rig.controller.restartRequested());
+}
+
+void testOutputProtocolSelection() {
+    {
+        ControllerRig rig;
+        Command output = make(CommandType::OutputProtocol);
+        output.text = "ant-fec";
+        const CommandResult rejected = rig.controller.execute(output);
+        assert(!rejected.ok && rig.controller.configView().outputProtocol == OutputProtocol::BleFtms);
+        output.text = "usb";
+        assert(!rig.controller.execute(output).ok);
+    }
+    ControllerRig rig(true);
+    assert(rig.controller.configView().antAvailable);
+    assert(rig.ftms.enabled() && !rig.ant.enabled());
+    Command output = make(CommandType::OutputProtocol);
+    output.text = "ant-fec";
+    assert(rig.controller.execute(output).ok);
+    assert(!rig.ftms.enabled() && rig.ant.enabled());
+    rig.ant.setClock([&rig] { return rig.now; });
+    for (int index = 0; index < 4; ++index) rig.core.loop();
+    StatusView status = rig.controller.statusView();
+    assert(status.outputProtocol == OutputProtocol::AntFec && status.antOutput.enabled && status.antOutput.available);
+    assert(status.antOutput.link == "open" && status.antOutput.stick && status.antOutput.open);
+    assert(status.antOutput.hardware == "fake" && !status.antOutput.display && !status.antOutput.control);
+    assert(rig.controller.handleCommand("status").find("output=ant-fec") != std::string::npos);
+
+    // The simulated trainer's data reaches the FE-C pages.
+    assert(rig.controller.execute(make(CommandType::Simulate)).ok);
+    Command power = control(Control::Power, 220.0F);
+    assert(rig.controller.execute(power).ok);
+    for (int index = 0; index < 8; ++index) {
+        rig.antRadio.injectEventTx();
+        rig.core.loop();
+    }
+    bool sawTrainerPage = false;
+    for (const auto& page : rig.antRadio.pages()) sawTrainerPage = sawTrainerPage || page[0] == 25;
+    assert(sawTrainerPage);
+
+    // A display's target power page is applied through the core gate.
+    rig.antRadio.injectPage(smartfitness::ant::Page{49, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20, 0x03});  // 200 W
+    rig.core.loop();
+    assert(rig.core.controlTarget().control == Control::Power && rig.core.controlTarget().value == 200.0F);
+    assert(rig.controller.statusView().antOutput.control);
+
+    output.text = "ble-ftms";
+    assert(rig.controller.execute(output).ok);
+    assert(rig.ftms.enabled() && !rig.ant.enabled() && rig.antRadio.count(smartfitness::ant::msg::kCloseChannel) == 1);
+    output.text = "off";
+    assert(rig.controller.execute(output).ok);
+    assert(!rig.ftms.enabled() && !rig.ant.enabled());
+    assert(rig.controller.statusView().antOutput.link == "disabled");
 }
 
 void testAdapterViews() {
@@ -282,6 +340,7 @@ void runControllerTests() {
     testScanAndPairViews();
     testScanSortingAndRelevance();
     testConfigViewTracksCommands();
+    testOutputProtocolSelection();
     testAdapterViews();
     testWithoutBleInput();
 }

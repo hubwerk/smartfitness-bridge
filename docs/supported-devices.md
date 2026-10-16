@@ -240,8 +240,8 @@ present fields. Energy sub-fields that are unavailable are sent as the FTMS
 "not available" values (`0xFFFF`/`0xFF`) and decode as absent. The second
 member of an FTMS field pair that shares one flag (e.g. inclination + ramp
 angle) is sent as 0 only when the pair is required by the spec and the bridge
-has no value; ramp angle is derived from inclination and rower pace from speed
-when missing.
+has no value; ramp angle is derived from inclination (and inclination from ramp
+angle) and rower pace from speed when missing.
 
 Records longer than 20 bytes (default ATT MTU) are split into several
 notifications as FTMS requires: all but the last set "More Data", and the

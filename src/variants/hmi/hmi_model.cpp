@@ -217,6 +217,22 @@ std::string ftmsLabel(const FtmsOutputView& ftms) {
     return tr(Str::FtmsIdle);
 }
 
+std::string outputLabel(const StatusView& status) {
+    switch (status.outputProtocol) {
+        case OutputProtocol::BleFtms:
+            return status.ftmsOutput.client ? "APP LINK" : ftmsLabel(status.ftmsOutput);
+        case OutputProtocol::AntFec: {
+            const auto& ant = status.antOutput;
+            if (!ant.available) return tr(Str::AntUnavailable);
+            if (!ant.stick) return tr(Str::AntNoStick);
+            if (ant.display) return tr(Str::AntDisplay);
+            return tr(Str::AntOpen);
+        }
+        case OutputProtocol::Off: break;
+    }
+    return tr(Str::OutputOff);
+}
+
 std::string targetLabel(const StatusView& status) {
     if (!status.hasTarget) return tr(Str::NoTarget);
     const auto& spec = controlSpec(status.target.control);
@@ -289,6 +305,15 @@ FtmsOutputProfile nextFtmsProfile(FtmsOutputProfile profile) {
     const auto next = static_cast<std::uint8_t>(profile) + 1;
     return next > static_cast<std::uint8_t>(FtmsOutputProfile::StairClimber) ? FtmsOutputProfile::Auto
                                                                               : static_cast<FtmsOutputProfile>(next);
+}
+
+OutputProtocol nextOutputProtocol(OutputProtocol protocol, bool antAvailable) {
+    switch (protocol) {
+        case OutputProtocol::Off: return OutputProtocol::BleFtms;
+        case OutputProtocol::BleFtms: return antAvailable ? OutputProtocol::AntFec : OutputProtocol::Off;
+        case OutputProtocol::AntFec: break;
+    }
+    return OutputProtocol::Off;
 }
 
 const std::vector<std::string>& ftmsNamePresets() {

@@ -109,6 +109,16 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
         command.text = value;
         return true;
     }
+    if (key == "output") {
+        OutputProtocol protocol;
+        if (!parseOutputProtocol(value, protocol)) {
+            error = "output must be off, ble-ftms or ant-fec";
+            return false;
+        }
+        command.type = CommandType::OutputProtocol;
+        command.text = value;
+        return true;
+    }
     if (key == "scan") {
         float seconds = 0.0F;
         if (!parseFloat(value, seconds) || !std::isfinite(seconds) || seconds < 1.0F || seconds > 60.0F) {
@@ -167,9 +177,7 @@ bool parseConsoleCommand(const std::string& line, Command& command, std::string&
     };
     static const Toggle kToggles[] = {
         {"trainer", CommandType::Trainer},
-        {"ant", CommandType::Ant},
         {"ftms-input", CommandType::FtmsInput},
-        {"ftms-output", CommandType::FtmsOutput},
         {"https", CommandType::Https},
     };
     for (const auto& entry : kToggles) {

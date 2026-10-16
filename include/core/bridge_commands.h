@@ -24,9 +24,8 @@ enum class CommandType : std::uint8_t {
     Disconnect,
     Unpair,
     Trainer,      // simulation trainer on/off
-    Ant,
     FtmsInput,
-    FtmsOutput,
+    OutputProtocol,  // text: off / ble-ftms / ant-fec
     FtmsName,
     FtmsProfile,
     Control,
@@ -45,7 +44,7 @@ struct Command {
     bool flag = false;
     smartfitness::Control control = smartfitness::Control::Power;
     float value = 0.0F;
-    std::string text;   // ftms name/profile, wifi ssid, ap password
+    std::string text;   // ftms name/profile, output protocol, wifi ssid, ap password
     std::string text2;  // wifi password
     smartfitness::ble::BleAddress address;
     bool addressTypeGiven = false;

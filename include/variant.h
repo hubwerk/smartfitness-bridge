@@ -15,11 +15,19 @@
 
 class BridgeController;
 struct BridgeConfig;
+namespace smartfitness {
+namespace ant {
+class AntTransport;
+}
+}  // namespace smartfitness
 
 namespace variant {
 
 // "web" or "hmi".
 const char* name();
+// ANT radio for the ANT+ FE-C output; nullptr when the variant has none.
+// Called from setup() before the core starts.
+smartfitness::ant::AntTransport* antTransport();
 // Called once from setup() after the core is running and the configuration
 // has been applied (controller.begin()).
 void begin(BridgeController& controller, const BridgeConfig& config);
