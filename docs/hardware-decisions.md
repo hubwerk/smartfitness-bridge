@@ -316,3 +316,73 @@ hardware measurements.
   only, and exposes BLE restart requirements. CrowPanel has no ANT transport
   and displays that limitation explicitly. No new fonts or runtime libraries
   are introduced.
+
+## HD-009: Selectable BLE services and ANT+ output channels
+
+**Status:** Accepted; host/simulator verified. Firmware and radio interoperability
+still require hardware verification.
+
+### Context
+Apps and head units may consume individual power, heart-rate or speed/cadence
+profiles instead of a complete fitness-equipment profile. Output selection must
+remain explicit, persist across boots, and distinguish configured services from
+available source data and actual subscriptions. BLE input and output share one
+NimBLE stack, so rebuilding the server must not tear down the central connection.
+
+### Decision
+- Use configuration **schema 6** with independent `ftmsOutputServices` and
+  `antOutputServices` byte masks. New configurations and migrations from schemas
+  1–5 default both masks to **Auto (`0`)**. Auto means the baseline profile only,
+  not every available service. Other existing configuration fields retain their
+  values during migration.
+
+  | Bit | BLE service | ANT+ channel |
+  |---|---|---|
+  | `1` | Fitness Machine (FTMS) | Fitness Equipment (FE-C) |
+  | `2` | Cycling Power (CPS) | Bicycle Power |
+  | `4` | Heart Rate (HR) | Heart Rate |
+  | `8` | Cycling Speed/Cadence (CSC) | Bicycle Speed/Cadence |
+  | `16` | Running Speed/Cadence (RSC) | Stride Speed/Distance (SDM) |
+
+  Explicit BLE masks must include FTMS; explicit ANT masks may select a subset
+  without FE-C. The existing output-protocol selection still chooses the active
+  transport. Shared `SetOutputServices` commands validate transport, masks and
+  compatible source capabilities.
+- Freeze the BLE GATT topology when it is first initialized for advertising.
+  Later effective service-selection changes set `restartRequired`; users must
+  **save and restart** to apply them persistently. Do not deinitialize/reinitialize
+  the shared NimBLE stack merely to rebuild output services. Auto `0` and explicit
+  baseline `1` are equivalent topologies. When a saved RSC selection uses Auto
+  profile detection, defer initialization until the connected source establishes
+  a compatible profile rather than freezing the disconnected default bike profile.
+- Report configured BLE enablement separately from availability and activity.
+  Activity reflects the app's data-characteristic CCCD subscription on the applied
+  topology, not simply a BLE connection or an enabled setting. Do not fabricate
+  absent mandatory sensor data or reinterpret rowing strokes/steps as bicycle
+  crank cadence. RSC/SDM are treadmill profiles; bicycle cadence profiles use
+  bicycle semantics.
+- Allocate selectable ANT+ master channels for the selected profiles, with
+  profile-specific device types, periods and payload encoders. Discover the
+  external radio's capabilities/channel capacity before opening the requested
+  channels; expose capability/channel-limit failures rather than silently
+  dropping selected channels. Only FE-C accepts controls, through the existing
+  core control/safety gate; standalone sensor channels are telemetry-only.
+- Keep transport/configuration logic in the shared core and radio adapters.
+  Web and HMI consume snapshots and submit shared commands. CrowPanel HMI has
+  no ANT radio transport: show **ANT unavailable**, not editable ANT controls.
+  Both interfaces distinguish selected, available and active services and explain
+  BLE save/restart requirements.
+
+### Consequences
+- Existing installations keep baseline FTMS/FE-C behavior through Auto defaults.
+  Optional profiles consume extra GATT characteristics, advertisement space or
+  radio channels only when selected.
+- BLE service changes may not match the currently applied topology until restart;
+  snapshots and UI hints must preserve that distinction. Saving alone does not
+  rebuild live GATT, and restarting without saving can lose the selection.
+- ANT capacity, source/profile compatibility, app subscriptions and missing/stale
+  samples are observable runtime states, not evidence that every selected
+  service is transmitting valid telemetry.
+- Shared NimBLE central ownership and existing control safety rules remain intact.
+  Real-radio interoperability, firmware-linked memory use and round-panel
+  readability still require device verification.

@@ -28,14 +28,17 @@ inline bool outputMetricAvailable(const TrainerState& state, Metric metric) {
 
 // Capabilities remain useful before the first sample and during stale periods.
 // Encoders still require valid samples, so an available service never invents data.
-inline std::uint8_t availableOutputServices(const TrainerState& state, MachineProfile profile) {
+inline std::uint8_t availableOutputServices(const TrainerState& state, MachineProfile profile, bool ant = false) {
     std::uint8_t mask = kOutputServiceDefault;
     if (outputMetricAvailable(state, Metric::Power)) mask |= kOutputServicePower;
     if (outputMetricAvailable(state, Metric::HeartRate)) mask |= kOutputServiceHeartRate;
     if (outputMetricAvailable(state, Metric::Speed) || outputMetricAvailable(state, Metric::Cadence)) {
-        if (profile == MachineProfile::IndoorBike) mask |= kOutputServiceSpeedCadence;
+        if (profile == MachineProfile::IndoorBike && (ant || state.profile == MachineProfile::IndoorBike))
+            mask |= kOutputServiceSpeedCadence;
     }
-    if (profile == MachineProfile::Treadmill && outputMetricAvailable(state, Metric::Speed))
+    // RSC requires cadence; ANT SDM has an explicit unavailable-cadence value.
+    if (profile == MachineProfile::Treadmill && outputMetricAvailable(state, Metric::Speed) &&
+        (ant || (state.profile == MachineProfile::Treadmill && outputMetricAvailable(state, Metric::Cadence))))
         mask |= kOutputServiceRunningSpeedCadence;
     return mask;
 }
@@ -44,9 +47,10 @@ inline std::uint8_t availableOutputServices(const TrainerState& state) {
     return availableOutputServices(state, state.profile);
 }
 
-inline bool outputServicesAvailable(std::uint8_t selection, const TrainerState& state, MachineProfile profile) {
+inline bool outputServicesAvailable(std::uint8_t selection, const TrainerState& state, MachineProfile profile,
+                                    bool ant = false) {
     return validOutputServices(selection) &&
-           (selection == kOutputServiceAuto || (selection & availableOutputServices(state, profile)) == selection);
+           (selection == kOutputServiceAuto || (selection & availableOutputServices(state, profile, ant)) == selection);
 }
 
 inline const char* outputServiceId(std::uint8_t bit, bool ant = false) {

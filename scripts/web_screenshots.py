@@ -31,7 +31,7 @@ PAIRED = {
     "subscriptions": [
         {"service": "00001826-0000-1000-8000-00805f9b34fb",
          "characteristic": "00002ad2-0000-1000-8000-00805f9b34fb", "name": "FTMS",
-         "state": "subscribed", "indicate": False},
+         "state": "ok", "indicate": False},
         {"service": "00001826-0000-1000-8000-00805f9b34fb",
          "characteristic": "00002ad9-0000-1000-8000-00805f9b34fb", "name": "FTMS",
          "state": "pending", "indicate": True},
@@ -47,7 +47,8 @@ BLE_SERVICES = [
         ("hr", "HR", True, True), ("csc", "CSC", False, True), ("rsc", "RSC", False, False)]
 ]
 ANT_CHANNELS = [
-    {"id": ident, "name": name, "deviceType": device_type, "enabled": enabled, "open": False}
+    {"id": ident, "name": name, "deviceType": device_type, "enabled": enabled, "open": False,
+     "available": ident != "sdm"}
     for ident, name, device_type, enabled in [
         ("fec", "FE-C", 17, True), ("power", "Power", 11, False), ("hr", "HR", 120, True),
         ("speed-cadence", "Speed / cadence", 121, False), ("sdm", "Footpod", 124, False)]
@@ -290,7 +291,7 @@ def render(browser, output, name, width, height):
             expect(page.locator("#paired-advertised .sensor")).to_have_count(3)
             expect(page.locator("#paired-advertised .sensor").first).to_have_attribute(
                 "title", "00001826-0000-1000-8000-00805f9b34fb")
-            expect(page.locator("#paired-subscriptions .ok")).to_have_text("FTMS · 2ad2 · NOTIFY · subscribed")
+            expect(page.locator("#paired-subscriptions .ok")).to_have_text("FTMS · 2ad2 · NOTIFY · ok")
             expect(page.locator("#paired-subscriptions .pending")).to_have_text("FTMS · 2ad9 · INDICATE · pending")
             expect(page.locator("#paired-subscriptions .bad")).to_have_text("HR · 2a37 · NOTIFY · failed")
             expect(page.locator("#paired-subscriptions .bad")).to_have_attribute(
@@ -433,6 +434,20 @@ def render(browser, output, name, width, height):
     expect(page.locator("#ant-service-state")).to_contain_text("insufficient-channels")
     expect(page.locator("#ant-service-state")).to_contain_text("channel capacity: 1")
     expect(page.locator("#ant-service-state .bad")).to_have_count(3)
+    # SDM can use valid treadmill speed without running cadence; BLE RSC cannot.
+    speed_only = json.loads(json.dumps(STATUS))
+    speed_only["ftmsOutput"]["profile"] = "treadmill"
+    speed_only["telemetry"]["cadence"] = None
+    for service in speed_only["ftmsOutput"]["services"]:
+        if service["id"] == "rsc":
+            service["available"] = False
+    for channel in speed_only["antOutput"]["channels"]:
+        if channel["id"] == "sdm":
+            channel["available"] = True
+    sockets[0].send(json.dumps(speed_only))
+    expect(ble_group.locator('[data-service="rsc"]')).to_be_disabled()
+    expect(ant_group.locator('[data-service="sdm"]')).to_be_enabled()
+    expect(ant_group.locator('[data-service="sdm"]')).not_to_contain_text("NO DATA")
     # Wi-Fi scan: spinner while busy, then a listbox under the SSID field.
     ssid, wifi_list, wifi_button = (page.locator("#c-wifiSsid"), page.locator("#wifi-list"),
                                     page.locator("#btn-wifi-scan"))

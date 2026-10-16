@@ -117,6 +117,7 @@ FtmsOutput::~FtmsOutput() {
 void FtmsOutput::begin() {
     BridgeOutput::begin();
     sensorEncoder_.reset();
+    profileDiscoveryStartedMs_ = now();
     begun_ = true;
     resetSession();
     refreshProfile();
@@ -420,7 +421,7 @@ void FtmsOutput::startAdvertising() {
     // Read-only sources count too: trainerDetected is deliberately not used.
     if (!topologyFrozen_ && (configuredServices_ & ble::kRsc) &&
         profileOverride_ == FtmsOutputProfile::Auto && profile_ != MachineProfile::Treadmill &&
-        !trainerState().connected) return;
+        !trainerState().connected && now() - profileDiscoveryStartedMs_ < kProfileDiscoveryWaitMs) return;
     const std::uint32_t timestamp = now();
     if (advertiseFailed_ && timestamp - advertiseFailedMs_ < kAdvertiseRetryMs) return;
     advertising_ = transportBegin() && transportStartAdvertising();

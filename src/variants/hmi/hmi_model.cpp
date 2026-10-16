@@ -277,7 +277,7 @@ std::string advertisedServicesLabel(const std::vector<std::string>& services) {
 
 Str subscriptionStateLabel(const std::string& state) {
     if (state == "ok") return Str::ServiceOk;
-    if (state == "fail") return Str::ServiceFail;
+    if (state == "failed" || state == "fail") return Str::ServiceFail;
     return Str::ServicePending;
 }
 

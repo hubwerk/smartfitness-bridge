@@ -508,7 +508,7 @@ except pairing/unpairing, which persist their own changes immediately.
 ### Using the UI
 The single-page app (`src/variants/web/assets/index.html`, web variant only, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
 - **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and the active output (BLE FTMS client state, or ANT+ stick/channel/display state) (WebSocket, ≤ 4 Hz).
-- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. Advertised services and actual notify/indicate subscriptions are separate pills; subscription state is **SUBSCRIBED**, **PENDING** or **FAILED** (not inferred from advertisements). Hover a pill for full service/characteristic UUIDs. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
+- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. Advertised services and actual notify/indicate subscriptions are separate pills; subscription state is **OK**, **PENDING** or **FAILED** (not inferred from advertisements). Hover a pill for full service/characteristic UUIDs. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
 - **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
 - **Settings:** output protocol (*BLE FTMS*, *ANT+* – needs the ANT+ USB stick, hidden when the firmware has no ANT transport – or *Off*), BLE service and ANT+ channel pills, FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version. Selected services are golden, off/pending tan; **NO DATA** choices are disabled. **Auto** preserves the original FTMS/FE-C-only behavior. FTMS is mandatory for an explicit BLE selection; ANT+ may use sensor-only channels. **Save and restart** to apply a changed BLE GATT topology, then re-pair clients that cache services; Save alone persists the preference but does not rebuild an initialized server. Selecting both FE-C and Power warns about duplicate power sources.
 
@@ -595,7 +595,8 @@ This selects FTMS + CPS + HR. A sensor-only ANT+ selection is allowed:
 This selects Power + HR without FE-C. Only available metrics/profile combinations
 can be selected; missing data is never synthesized as zero. Power needs power,
 HR needs heart rate, CSC/ANT speed-cadence needs a bike with speed or cadence,
-and RSC/SDM needs a treadmill with speed or cadence. Capability information can
+BLE RSC needs a treadmill with both speed and running cadence, while ANT+ SDM
+needs treadmill speed (cadence is optional). Capability information can
 make a service available before the first sample; encoding still requires valid
 samples. Unknown bits, negative/fractional masks, strings, booleans and null are
 rejected. An explicit BLE mask without bit `1` is rejected. A syntactically valid
@@ -667,7 +668,7 @@ or `null` when invalid. Example disconnected snapshot:
   "outputProtocol":"ble-ftms",
   "antOutput":{"enabled":false,"available":true,"link":"disabled","stick":false,"open":false,"deviceNumber":4660,
     "profile":"bike","display":false,"control":false,"hardware":"","error":"","channelLimit":0,
-    "channels":[{"id":"fec","name":"Fitness Equipment (FE-C)","deviceType":17,"enabled":true,"open":false}]},
+    "channels":[{"id":"fec","name":"Fitness Equipment (FE-C)","deviceType":17,"enabled":true,"open":false,"available":true}]},
   "unsaved":false,
   "network":{"mode":"ap","ssid":"SmartFitness-XXXX","ip":"192.168.4.1","hostname":"smartfitness.local","stations":1}
 }
@@ -686,7 +687,8 @@ States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 availability (`available`), and actual notification subscription (`active`) state.
 Configured services can differ from the boot-applied topology;
 `ftmsOutput.restartRequired:true` means save and restart to apply the selection.
-`antOutput.channels` reports each channel's selected and actual open states;
+`antOutput.channels` reports each channel's selected, metric/profile availability,
+and actual open states;
 top-level `antOutput.open` remains the FE-C channel state for backward compatibility,
 so it can be false while sensor-only channels are open. Service/channel arrays in
 the example are abbreviated; IDs are `ftms,cps,hr,csc,rsc` and
@@ -704,14 +706,14 @@ than silently omitting requested channels.
   "advertisedServiceNames":{"1826":"FTMS"},
   "subscriptions":[{"service":"00001826-0000-1000-8000-00805f9b34fb",
     "characteristic":"00002ad2-0000-1000-8000-00805f9b34fb",
-    "name":"FTMS","state":"subscribed","indicate":false}]
+    "name":"FTMS","state":"ok","indicate":false}]
 }
 ```
 
 `advertisedServices` records advertised UUIDs (not proof of a successful GATT
 subscription); `advertisedServiceNames` maps those UUID strings to short labels.
 `subscriptions` contains planned/attempted characteristics with
-`pending`, `subscribed` or `failed` state and the requested indication mode.
+`pending`, `ok` or `failed` state and the requested indication mode.
 Unknown services use a short UUID label; full UUID values are always retained.
 Empty arrays mean no reported advertisements/subscriptions, not a transport error.
 

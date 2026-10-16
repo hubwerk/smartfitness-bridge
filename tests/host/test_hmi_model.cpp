@@ -209,9 +209,11 @@ void testServiceDisplays() {
     assert(advertisedServicesLabel({}) == "ADV -");
     assert(advertisedServicesLabel({"1826", "1818", "180d"}) == "ADV FTMS CPS HR");
     assert(subscriptionStateLabel("ok") == Str::ServiceOk);
-    assert(subscriptionStateLabel("fail") == Str::ServiceFail);
+    assert(subscriptionStateLabel("failed") == Str::ServiceFail);
+    assert(subscriptionStateLabel("fail") == Str::ServiceFail);  // legacy display alias
     assert(subscriptionStateLabel("pending") == Str::ServicePending);
     assert(subscriptionStateLabel("unknown") == Str::ServicePending);
+    assert(std::string(tr(subscriptionStateLabel("failed"))) == "FAIL");
     StatusView status;
     assert(outputServicesLabel(status) == "OUT -");
     status.ftmsOutput.services = {{"ftms", "FTMS", true, true, true},

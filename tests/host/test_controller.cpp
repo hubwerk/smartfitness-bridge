@@ -237,15 +237,15 @@ void testPairedServiceAndSubscriptionViews() {
     pair.adapterId = "ftms";
     assert(rig.controller.execute(pair).ok);
     auto paired = rig.controller.statusView().input.paired;
-    assert(paired.advertisedServices == std::vector<std::string>({"0x1826", "0x180d"}));
+    assert(paired.advertisedServices == std::vector<std::string>({"1826", "180d"}));
     assert(!paired.subscriptions.empty());
     assert(paired.subscriptions.size() == rig.ble.subscriptions().size());
     bool sawIndication = false;
     for (std::size_t i = 0; i < paired.subscriptions.size(); ++i) {
         const auto& sourceSubscription = rig.ble.subscriptions()[i];
         const auto& view = paired.subscriptions[i];
-        assert(view.service == sourceSubscription.service.toString());
-        assert(view.characteristic == sourceSubscription.characteristic.toString());
+        assert(view.service == "1826");
+        assert(view.characteristic == sourceSubscription.characteristic.toString().substr(2));
         assert(view.state == "pending" && view.indicate == sourceSubscription.indicate);
         sawIndication = sawIndication || view.indicate;
     }
@@ -266,7 +266,7 @@ void testPairedServiceAndSubscriptionViews() {
            std::vector<ble::Uuid>({ble::Uuid::from16(0x1826), ble::Uuid::from16(0x180D)}));
     assert(rebooted.controller.execute(make(CommandType::Connect)).ok);
     assert(rebooted.controller.statusView().input.paired.advertisedServices ==
-           std::vector<std::string>({"0x1826", "0x180d"}));
+           std::vector<std::string>({"1826", "180d"}));
     assert(rig.controller.execute(make(CommandType::Unpair)).ok);
     paired = rig.controller.statusView().input.paired;
     assert(!paired.valid && paired.advertisedServices.empty() && paired.subscriptions.empty());
@@ -414,17 +414,32 @@ void testOutputServicesCommands() {
     assert(rig.controller.execute(services).ok);
     assert(rig.controller.execute(make(CommandType::Load)).ok);
     assert(rig.ant.configuredServices() == 6 && rig.ftms.configuredServices() == 15);
+    assert(rig.controller.execute(make(CommandType::Disconnect)).ok);
+    services.text = "ftms";
+    services.serviceMask = 15;
+    assert(rig.controller.execute(services).ok);  // Retaining saved services needs no live samples.
+    assert(rig.controller.execute(make(CommandType::Save)).ok);
+    services.serviceMask = 13;
+    assert(rig.controller.execute(services).ok);  // Unavailable services can still be disabled.
+    services.serviceMask = 15;
+    assert(!rig.controller.execute(services).ok);  // Re-enabling power still requires data.
+    assert(rig.controller.execute(make(CommandType::Simulate)).ok);
     services.text = "ftms";
     services.serviceMask = 17;
     assert(!rig.controller.execute(services).ok);  // Bike is not a running profile.
     Command profile = make(CommandType::FtmsProfile);
     profile.text = "treadmill";
     assert(rig.controller.execute(profile).ok);
-    assert(rig.controller.execute(services).ok);
-    assert(rig.controller.statusView().ftmsOutput.services[4].available);
+    assert(!rig.controller.execute(services).ok);  // A bike override does not invent running cadence.
+    assert(!rig.controller.statusView().ftmsOutput.services[4].available);
+    services.text = "ant";
+    assert(rig.controller.execute(services).ok);  // SDM can represent virtual treadmill speed.
     assert(rig.controller.execute(make(CommandType::FactoryReset)).ok);
     assert(rig.ftms.configuredServices() == 0 && rig.ant.configuredServices() == 0);
     assert(!rig.controller.execute(control(Control::Power, 100)).ok);  // Control gate unchanged.
+    ControllerRig noAnt;
+    services.serviceMask = 0;
+    assert(!noAnt.controller.execute(services).ok);
 }
 
 void testServiceAvailabilityUsesCapabilitiesWithoutInventingSamples() {
@@ -437,13 +452,21 @@ void testServiceAvailabilityUsesCapabilitiesWithoutInventingSamples() {
     assert(!state.sample(Metric::Power).valid);
     assert(availableOutputServices(state, MachineProfile::Treadmill) == 7);  // RSC needs speed, not cadence alone.
     state.capabilities.setMetric(Metric::Speed, true);
+    assert(availableOutputServices(state, MachineProfile::Treadmill) == 7);
+    state.profile = MachineProfile::Treadmill;
     assert(availableOutputServices(state, MachineProfile::Treadmill) == 23);
+    assert(availableOutputServices(state, MachineProfile::IndoorBike) == 7);
     assert(availableOutputServices(state, MachineProfile::Rower) == 7);
     assert(outputServicesAvailable(0, TrainerState{}, MachineProfile::IndoorBike));
     assert(!outputServicesAvailable(2, TrainerState{}, MachineProfile::IndoorBike));
     TrainerState sampled;
     sampled.setSample(Metric::Speed, 0.0F);
     assert(availableOutputServices(sampled) == 9);  // Real zero is still valid.
+    assert(availableOutputServices(sampled, MachineProfile::Treadmill) == 1);  // BLE RSC cadence is mandatory.
+    assert(availableOutputServices(sampled, MachineProfile::Treadmill, true) == 17);  // SDM supports missing cadence.
+    sampled.setSample(Metric::Cadence, 0.0F);
+    sampled.profile = MachineProfile::Treadmill;
+    assert(availableOutputServices(sampled, MachineProfile::Treadmill) == 17);
 }
 
 void testWithoutBleInput() {

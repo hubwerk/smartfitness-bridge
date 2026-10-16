@@ -80,6 +80,7 @@ struct AntChannelView {
     std::uint8_t deviceType = 0;
     bool enabled = false;
     bool open = false;
+    bool available = false;
 };
 
 struct FtmsOutputView {

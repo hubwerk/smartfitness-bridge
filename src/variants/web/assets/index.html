@@ -126,7 +126,7 @@ let serviceMasks={ftms:0,ant:0},antAvailable=false,configuredFtmsServices=0;
 const outputServices={ftms:[["ftms","FTMS",1],["cps","CPS",2],["hr","HR",4],["csc","CSC",8],["rsc","RSC",16]],ant:[["fec","FE-C",1],["power","Power",2],["hr","HR",4],["speed-cadence","Speed / cadence",8],["sdm","Footpod",16]]};
 function outputEntries(kind){return kind==="ftms"?(status.ftmsOutput||{}).services||[]:(status.antOutput||{}).channels||[]}
 function outputEntry(kind,id){return outputEntries(kind).find(e=>e.id===id)}
-function serviceAvailable(kind,id){if(kind==="ant"){const bit=outputServices.ant.find(([name])=>name===id)[2];id=outputServices.ftms.find(([, ,mask])=>mask===bit)[0];kind="ftms"}return !!outputEntry(kind,id)?.available}
+function serviceAvailable(kind,id){const entry=outputEntry(kind,id);if(kind==="ant"&&typeof entry?.available==="boolean")return entry.available;if(kind==="ant"){const bit=outputServices.ant.find(([name])=>name===id)[2];id=outputServices.ftms.find(([, ,mask])=>mask===bit)[0];kind="ftms"}return !!outputEntry(kind,id)?.available}
 function renderServiceControls(){
  for(const kind of["ftms","ant"]){const mask=serviceMasks[kind],group=$("c-"+kind+"Services"),key=JSON.stringify([mask,outputServices[kind].map(([id])=>serviceAvailable(kind,id))]);
   const out=kind==="ftms"?status.ftmsOutput||{}:status.antOutput||{};
@@ -182,7 +182,7 @@ function renderStatus(s){
  const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
  const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
  fill($("paired-advertised"),p&&(p.advertisedServices||[]).length?p.advertisedServices.map(uuid=>{const b=pill((p.advertisedServiceNames||{})[uuid]||uuidLabel(uuid),"sensor");b.title=fullUuid(uuid);return b}):[pill("none reported","pending")]);
- fill($("paired-subscriptions"),p&&(p.subscriptions||[]).length?p.subscriptions.map(sub=>{const b=pill((sub.name||sub.service)+" · "+uuidLabel(sub.characteristic)+" · "+(sub.indicate?"INDICATE":"NOTIFY")+" · "+sub.state,sub.state==="subscribed"?"ok":sub.state==="failed"?"bad":"pending");b.title=fullUuid(sub.service)+" / "+fullUuid(sub.characteristic);return b}):[pill("none","pending")]);
+ fill($("paired-subscriptions"),p&&(p.subscriptions||[]).length?p.subscriptions.map(sub=>{const b=pill((sub.name||sub.service)+" · "+uuidLabel(sub.characteristic)+" · "+(sub.indicate?"INDICATE":"NOTIFY")+" · "+sub.state,sub.state==="ok"||sub.state==="subscribed"?"ok":sub.state==="failed"?"bad":"pending");b.title=fullUuid(sub.service)+" / "+fullUuid(sub.characteristic);return b}):[pill("none","pending")]);
  renderServiceControls();
  $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
  $("unsaved").textContent=s.unsaved?"unsaved changes":"saved";$("fw").textContent=s.version||"";

@@ -206,6 +206,8 @@ The CrowPanel has no ANT transport, so ANT+ is shown as unavailable rather than
 offering controls that cannot work. Dashboard and Devices show compact `OUT`
 summaries of enabled services; enablement alone does not imply live data.
 New service strings include English and German translations.
+See [HD-009](../hardware-decisions.md#hd-009-selectable-ble-services-and-ant-output-channels)
+for schema migration, boot-frozen GATT and ANT radio/channel decisions.
 
 ## Web gallery
 

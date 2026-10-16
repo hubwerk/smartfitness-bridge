@@ -142,6 +142,7 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
         channel["deviceType"] = entry.deviceType;
         channel["enabled"] = entry.enabled;
         channel["open"] = entry.open;
+        channel["available"] = entry.available;
     }
     document["outputProtocol"] = outputProtocolName(status.outputProtocol);
     document["unsaved"] = status.unsaved;

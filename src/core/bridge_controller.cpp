@@ -55,6 +55,11 @@ const char* loadResultName(ConfigLoadResult result) {
 CommandResult ok(const std::string& message) { return {true, message}; }
 CommandResult fail(const std::string& message) { return {false, message}; }
 
+std::string pairedUuidString(const ble::Uuid& uuid) {
+    const auto text = uuid.toString();
+    return uuid.isShort() ? text.substr(2) : text;
+}
+
 PairedSourceDevice toSource(const ble::BleAddress& address) {
     PairedSourceDevice source;
     source.valid = true;
@@ -187,7 +192,7 @@ CommandResult BridgeController::pair(const Command& command) {
     if (result) {
         for (const auto& uuid : result->services) {
             if (advertisedServices.size() >= ble::kMaxAdvertisedServices) break;
-            advertisedServices.push_back(uuid.toString());
+            advertisedServices.push_back(pairedUuidString(uuid));
         }
     }
     if (!config_.pairSource(toSource(device.address), device.name, device.adapterId, advertisedServices))
@@ -317,14 +322,17 @@ CommandResult BridgeController::execute(const Command& command) {
         case CommandType::SetOutputServices: {
             const bool ftms = command.text == "ftms";
             if (!ftms && command.text != "ant") return fail("output services must select ftms or ant");
+            if (!ftms && !ant_.available()) return fail("ANT+ output is unavailable");
             if (!validOutputServices(command.serviceMask, ftms))
                 return fail(ftms ? "FTMS services must be Auto or include bit 1; maximum mask is 31" :
                                    "ANT services must be Auto or a mask from 1 to 31");
             const auto profile = effectiveOutputProfile(config_.config().ftmsOutputProfile,
                                                         bridge_.trainerState().profile);
-            if (!outputServicesAvailable(command.serviceMask, bridge_.trainerState(), profile))
-                return fail("selected services require unavailable source metrics or a compatible output profile");
             auto& config = config_.config();
+            const auto previous = ftms ? config.ftmsOutputServices : config.antOutputServices;
+            const auto added = effectiveOutputServices(command.serviceMask) & ~effectiveOutputServices(previous);
+            if ((added & availableOutputServices(bridge_.trainerState(), profile, !ftms)) != added)
+                return fail("selected services require unavailable source metrics or a compatible output profile");
             (ftms ? config.ftmsOutputServices : config.antOutputServices) = command.serviceMask;
             applyConfig();
             return ok(ftms && ftms_.restartRequired() ? "FTMS services selected; save and restart to apply" : status());
@@ -414,11 +422,11 @@ StatusView BridgeController::statusView() const {
         input.paired.adapter = config.pairedAdapterId;
         if (ble_) {
             for (const auto& uuid : ble_->advertisedServices())
-                input.paired.advertisedServices.push_back(uuid.toString());
+                input.paired.advertisedServices.push_back(pairedUuidString(uuid));
             for (const auto& subscription : ble_->subscriptions()) {
                 SubscriptionView item;
-                item.service = subscription.service.toString();
-                item.characteristic = subscription.characteristic.toString();
+                item.service = pairedUuidString(subscription.service);
+                item.characteristic = pairedUuidString(subscription.characteristic);
                 item.state = subscription.state;
                 item.indicate = subscription.indicate;
                 input.paired.subscriptions.push_back(std::move(item));
@@ -449,6 +457,7 @@ StatusView BridgeController::statusView() const {
     ant.error = AntOutput::errorName(ant_.error());
     ant.channelLimit = ant_.channelLimit();
     const auto available = availableOutputServices(state, ftms.profile);
+    const auto antAvailable = availableOutputServices(state, ant.profile, true);
     for (std::uint8_t bit = 1; bit <= kOutputServiceRunningSpeedCadence; bit <<= 1) {
         OutputServiceView service;
         service.id = outputServiceId(bit);
@@ -463,6 +472,7 @@ StatusView BridgeController::statusView() const {
         channel.deviceType = antOutputDeviceType(bit);
         channel.enabled = (effectiveOutputServices(config.antOutputServices) & bit) != 0;
         channel.open = ant_.channelOpen(bit);
+        channel.available = (antAvailable & bit) != 0;
         ant.channels.push_back(std::move(channel));
     }
     view.unsaved = config_.hasUnsavedChanges();

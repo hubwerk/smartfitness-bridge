@@ -21,6 +21,7 @@ public:
     static constexpr std::size_t kMaxWriteLength = 20;
     static constexpr std::uint32_t kBikeDataMinIntervalMs = 250;
     static constexpr std::uint32_t kBikeDataMaxIntervalMs = 1000;
+    static constexpr std::uint32_t kProfileDiscoveryWaitMs = 30000;
 
     FtmsOutput();
     ~FtmsOutput() override;
@@ -123,6 +124,7 @@ private:
     std::uint8_t configuredServices_ = 0;
     std::uint8_t appliedServices_ = smartfitness::ble::kFtms;
     bool topologyFrozen_ = false;
+    std::uint32_t profileDiscoveryStartedMs_ = 0;
     smartfitness::ble::SensorEncoder sensorEncoder_;
     std::uint32_t lastSensorDataMs_ = 0;
     bool sensorDataSent_ = false;

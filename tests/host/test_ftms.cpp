@@ -181,6 +181,23 @@ void testBleServiceSelection() {
     configuredAfterBegin.setServices(31);
     configuredAfterBegin.loop();
     assert(configuredAfterBegin.services() == 31 && !configuredAfterBegin.restartRequired());
+
+    std::uint32_t discoveryTime = 0;
+    FtmsOutput absentTreadmill;
+    absentTreadmill.setClock([&discoveryTime] { return discoveryTime; });
+    absentTreadmill.setServices(31);
+    absentTreadmill.begin();
+    absentTreadmill.loop();
+    assert(!absentTreadmill.advertising());
+    discoveryTime = FtmsOutput::kProfileDiscoveryWaitMs - 1;
+    absentTreadmill.loop();
+    assert(!absentTreadmill.advertising());
+    ++discoveryTime;
+    absentTreadmill.loop();
+    assert(absentTreadmill.advertising() && absentTreadmill.services() == 15);
+    absentTreadmill.publishTrainerState(treadmill);
+    absentTreadmill.loop();
+    assert(absentTreadmill.restartRequired());  // Late discovery uses the existing restart hint.
 }
 
 ftms::ControlPointCommand decode(const Bytes& bytes) {

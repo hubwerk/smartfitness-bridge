@@ -19,6 +19,7 @@
 #include "bridge_commands.h"
 #include "config_store.h"
 #include "fake_central.hpp"
+#include "fake_ant.hpp"
 #include "ftms_output.h"
 #include "web_api.h"
 #include "bridge_controller.h"
@@ -483,7 +484,9 @@ void testApiParsing() {
 }
 
 void testApiExchange() {
+    FakeAntTransport antTransport;
     Rig rig;
+    rig.ant.setTransport(&antTransport);
     ApiExchange api;
     assert(api.submit("control", "{bad").status == 400);
     assert(api.submit("control", std::string(ApiExchange::kMaxBodySize + 1, ' ')).status == 413);
@@ -531,6 +534,11 @@ void testApiExchange() {
     ConfigStore restored(rig.backend);
     assert(restored.begin() == ConfigLoadResult::Loaded);
     assert(restored.config().ftmsOutputServices == 7 && restored.config().antOutputServices == 6);
+    rig.core.setTrainerState(TrainerState{});
+    const auto unchanged = api.submit("config", R"({"ftmsOutputServices":7,"antOutputServices":6,"save":true})");
+    assert(unchanged.status == 202);
+    api.process(rig.ui);
+    assert(parse(api.result(parse(unchanged.body)["id"].as<std::uint32_t>()).body)["ok"] == true);
     const auto previousWrites = rig.backend.writes();
     const auto unavailable = api.submit("config", R"({"ftmsOutputServices":17,"save":true})");
     assert(unavailable.status == 202);  // Valid syntax; bike data cannot supply running-speed output.
@@ -672,11 +680,12 @@ void testJsonViews() {
     view.input.paired.advertisedServices = {"00001826-0000-1000-8000-00805f9b34fb",
                                           "12345678-1234-5678-9abc-def012345678"};
     view.input.paired.subscriptions = {
-        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad2-0000-1000-8000-00805f9b34fb", "subscribed", false},
+        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad2-0000-1000-8000-00805f9b34fb", "ok", false},
         {"00001826-0000-1000-8000-00805f9b34fb", "00002ad9-0000-1000-8000-00805f9b34fb", "pending", true},
         {"0000180d-0000-1000-8000-00805f9b34fb", "00002a37-0000-1000-8000-00805f9b34fb", "failed", false}};
     view.ftmsOutput.services = {{"ftms", "FTMS", true, true, true}, {"cps", "CPS", false, false, false}};
     view.antOutput.channels = {{"fec", "FE-C", 17, true, true}, {"hr", "HR", 120, false, false}};
+    view.antOutput.channels[0].available = true;
     view.antOutput.error = "insufficient-channels";
     view.antOutput.channelLimit = 1;
     document = parse(web::statusJson(view, rig.network));
@@ -686,7 +695,7 @@ void testJsonViews() {
     assert(paired["advertisedServices"][1] == "12345678-1234-5678-9abc-def012345678");
     assert(paired["advertisedServiceNames"]["00001826-0000-1000-8000-00805f9b34fb"] == "FTMS");
     assert(paired["subscriptions"].size() == 3);
-    assert(paired["subscriptions"][0]["state"] == "subscribed");
+    assert(paired["subscriptions"][0]["state"] == "ok");
     assert(paired["subscriptions"][1]["state"] == "pending" && paired["subscriptions"][1]["indicate"] == true);
     assert(paired["subscriptions"][2]["state"] == "failed");
     assert(document["ftmsOutput"]["services"][0]["active"] == true);
@@ -694,6 +703,8 @@ void testJsonViews() {
     assert(document["ftmsOutput"]["services"][1]["available"] == false);
     assert(document["antOutput"]["channels"][0]["deviceType"] == 17);
     assert(document["antOutput"]["channels"][1]["open"] == false);
+    assert(document["antOutput"]["channels"][0]["available"] == true);
+    assert(document["antOutput"]["channels"][1]["available"] == false);
     assert(document["antOutput"]["error"] == "insufficient-channels");
     assert(document["antOutput"]["channelLimit"] == 1);
 }

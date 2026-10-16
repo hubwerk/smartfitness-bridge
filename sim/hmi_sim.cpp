@@ -592,7 +592,7 @@ StatusView bikeStatus() {
     status.input.paired.advertisedServices = {"1826", "1818", "180d"};
     status.input.paired.subscriptions = {{"1826", "2ad2", "ok", false},
                                         {"1826", "2ad9", "ok", true},
-                                        {"1818", "2a63", "fail", false},
+                                        {"1818", "2a63", "failed", false},
                                         {"180d", "2a37", "pending", false}};
     status.ftmsOutput.enabled = true;
     status.ftmsOutput.name = "SmartFitness Bridge";
@@ -625,7 +625,7 @@ StatusView treadmillStatus() {
     status.input.paired = {true, "aa:00:00:00:00:22", false, "WalkingPad", "walkingpad-r1", {}, {}};
     status.input.paired.advertisedServices = {"1826", "180d"};
     status.input.paired.subscriptions = {{"1826", "2acd", "ok", false},
-                                        {"1826", "2ad9", "fail", true},
+                                        {"1826", "2ad9", "failed", true},
                                         {"180d", "2a37", "pending", false}};
     status.ftmsOutput.enabled = true;
     status.ftmsOutput.profile = MachineProfile::Treadmill;
@@ -757,7 +757,7 @@ void knobWalkthrough() {
     press();
     assert(lastCommand(CommandType::SetOutputServices) && g_commands.back().serviceMask == 5);
     checkLayout("output-services-knob");
-    turn(3);  // RSC has no data: readable by knob, but cannot be enabled.
+    turn(2);  // CSC has no data on this treadmill: readable, but cannot be enabled.
     const auto beforeUnavailable = g_commands.size();
     press();
     assert(g_commands.size() == beforeUnavailable);
@@ -849,6 +849,10 @@ void checkServiceRefresh() {
     turn(5);  // failed CPS notification
     auto* focused = lv_group_get_focused(lv_indev_get_group(g_knob));
     assert(std::string(lv_label_get_text(lv_obj_get_child(focused, 0))).find("FAIL") != std::string::npos);
+    lv_style_value_t subscriptionFill{};
+    assert(lv_obj_get_local_style_prop(focused, LV_STYLE_BG_COLOR, &subscriptionFill, LV_PART_MAIN) ==
+           LV_STYLE_RES_FOUND);
+    assert(lv_color_to_u32(subscriptionFill.color) == lv_color_to_u32(lv_color_hex(lcars::Alert)));
     status.input.paired.subscriptions[2].state = "ok";
     g_ui.setStatus(status);
     pump(100);
