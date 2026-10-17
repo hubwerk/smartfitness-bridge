@@ -9,6 +9,7 @@ stream is deterministic (no timestamp/file name) so builds are reproducible.
 import gzip
 import io
 import os
+import re
 
 try:
     Import("env")  # noqa: F821 - provided by PlatformIO/SCons
@@ -41,9 +42,21 @@ def render(payload: bytes) -> str:
     )
 
 
+def web_content(debug_web: bool = False) -> str:
+    with open(SOURCE, encoding="utf-8") as handle:
+        source = handle.read()
+    return re.sub(
+        r"^(?:<!--|//|/\*) #ifdef DEBUG_WEB(?: -->| \*/)?\n(.*?)^(?:<!--|//|/\*) #endif(?: -->| \*/)?\n",
+        lambda match: match[1] if debug_web else "",
+        source, flags=re.MULTILINE | re.DOTALL,
+    )
+
+
 def main() -> None:
-    with open(SOURCE, "rb") as handle:
-        content = render(compress(handle.read()))
+    content = (
+        "#ifdef DEBUG_WEB\n" + render(compress(web_content(True).encode())) +
+        "#else\n" + render(compress(web_content().encode())) + "#endif\n"
+    )
     os.makedirs(os.path.dirname(TARGET), exist_ok=True)
     if os.path.exists(TARGET):
         with open(TARGET, "r", encoding="utf-8") as handle:
@@ -54,4 +67,5 @@ def main() -> None:
     print(f"embed_web_assets: wrote {os.path.relpath(TARGET, ROOT)}")
 
 
-main()
+if __name__ == "__main__" or "env" in globals():
+    main()

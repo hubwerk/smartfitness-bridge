@@ -2,6 +2,7 @@
 // (BLE input, BridgeCore, FTMS/ANT+ FE-C output, configuration, Serial console) and
 // hands over to the selected variant through variant::begin()/variant::loop().
 #include <Arduino.h>
+#include "debug_serial.h"
 #include "variant.h"
 #include "bridge/bridge_core.hpp"
 #include "ant_output.h"
@@ -45,16 +46,19 @@ void updateExcludedPeer() {
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.printf("SmartFitness Bridge %s (%s variant) starting...\n", SMARTFITNESS_VERSION, variant::name());
+#ifdef DEBUG_WEB
+    debugweb::begin();
+#endif
+    DBG_SERIAL.printf("SmartFitness Bridge %s (%s variant) starting...\n", SMARTFITNESS_VERSION, variant::name());
 
     // Load the persisted configuration before outputs are enabled (controller.begin applies it).
     switch (configStore.begin()) {
-        case ConfigLoadResult::Loaded: Serial.println("[Config] loaded from NVS"); break;
-        case ConfigLoadResult::Missing: Serial.println("[Config] no saved configuration; using defaults"); break;
-        case ConfigLoadResult::Invalid: Serial.println("[Config] saved configuration invalid; using defaults"); break;
+        case ConfigLoadResult::Loaded: DBG_SERIAL.println("[Config] loaded from NVS"); break;
+        case ConfigLoadResult::Missing: DBG_SERIAL.println("[Config] no saved configuration; using defaults"); break;
+        case ConfigLoadResult::Invalid: DBG_SERIAL.println("[Config] saved configuration invalid; using defaults"); break;
     }
 
-    if (!bleCentral.begin()) Serial.println("[BLE] central could not be started");
+    if (!bleCentral.begin()) DBG_SERIAL.println("[BLE] central could not be started");
     antOutput.setTransport(variant::antTransport());
     antOutput.setClock([] { return static_cast<std::uint32_t>(millis()); });
     // Stable, per-device ANT+ device number from the factory MAC.
@@ -67,7 +71,7 @@ void setup() {
 
     const BridgeConfig& config = configStore.config();
     variant::begin(controller, config);
-    if (!config.pairedSource.valid) Serial.println("[BridgeCore] no paired device; use scan + pair, or sim");
+    if (!config.pairedSource.valid) DBG_SERIAL.println("[BridgeCore] no paired device; use scan + pair, or sim");
 }
 
 void loop() {

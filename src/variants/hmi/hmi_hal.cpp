@@ -7,6 +7,7 @@
 #include "hmi_hal.h"
 
 #include <Arduino.h>
+#include "debug_serial.h"
 #include <Preferences.h>
 #include <Wire.h>
 #include <esp_heap_caps.h>
@@ -178,7 +179,7 @@ bool CrowPanelHal::begin() {
     ledcWrite(board::kBacklightPwmChannel, 0);
 
     touchBegin();
-    if (!touchReady) Serial.println("[HMI] touch controller not responding (knob still works)");
+    if (!touchReady) DBG_SERIAL.println("[HMI] touch controller not responding (knob still works)");
 
     gfx.init();
     gfx.initDMA();
@@ -201,7 +202,7 @@ bool CrowPanelHal::begin() {
     // One partial buffer: the flush waits for DMA, so a second buffer would not overlap.
     void* first = allocBuffer();
     if (!first) {
-        Serial.println("[HMI] no memory for the LVGL draw buffer");
+        DBG_SERIAL.println("[HMI] no memory for the LVGL draw buffer");
         return false;
     }
     display_ = lv_display_create(board::kWidth, board::kHeight);

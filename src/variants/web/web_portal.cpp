@@ -21,6 +21,11 @@
 #include "config_store.h"
 #include "tls_cert.h"
 #include "web_request.h"
+#include "debug_serial.h"
+#ifdef DEBUG_WEB
+#include <ArduinoJson.h>
+#include <mbedtls/base64.h>
+#endif
 
 namespace {
 constexpr std::uint16_t kDnsPort = 53;
@@ -140,6 +145,64 @@ struct WebPortal::Impl {
     bool scanPending = false;
     bool configPending = false;
     std::atomic<bool> sending{false};
+#ifdef DEBUG_WEB
+    std::uint64_t debugCursor = 0;
+    struct LogResponse {
+        httpd_req_t* request;
+        std::string offset;
+        bool started = false;
+    };
+
+    static bool logSink(const char* data, std::size_t size, std::uint64_t end, void* context) {
+        auto& response = *static_cast<LogResponse*>(context);
+        auto* request = response.request;
+        if (!data) {
+            httpd_resp_set_type(request, "text/plain; charset=utf-8");
+            httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+            httpd_resp_set_hdr(request, "Content-Disposition", "attachment; filename=\"debug.log\"");
+            response.offset = std::to_string(end);
+            httpd_resp_set_hdr(request, "X-Debug-End", response.offset.c_str());
+            return true;
+        }
+        response.started = true;
+        return httpd_resp_send_chunk(request, data, size) == ESP_OK;
+    }
+
+    static esp_err_t debugLog(httpd_req_t* request) {
+        LogResponse response{request, {}, false};
+        if (!debugweb::streamLog(logSink, &response))
+            return response.started ? ESP_FAIL : sendJson(request, 503, "{\"error\":\"debug log unavailable\"}");
+        return httpd_resp_send_chunk(request, nullptr, 0);
+    }
+
+    void publishDebug() {
+        if (!server || sending) return;
+        std::array<int, kMaxClientSockets> fds{};
+        std::size_t count = fds.size();
+        if (httpd_get_client_list(server, &count, fds.data()) != ESP_OK) return;
+        bool listening = false;
+        for (std::size_t i = 0; i < count; ++i)
+            listening = listening || httpd_ws_get_fd_info(server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET;
+        if (!listening) return;
+        char data[1024];
+        const auto chunk = debugweb::readChunk(debugCursor, data, sizeof(data));
+        if (!chunk.size) return;
+        // Base64 preserves byte offsets and partial UTF-8 sequences across frames.
+        unsigned char encoded[4 * ((sizeof(data) + 2) / 3) + 1];
+        std::size_t length = 0;
+        if (mbedtls_base64_encode(encoded, sizeof(encoded), &length,
+                                 reinterpret_cast<const unsigned char*>(data), chunk.size) != 0) return;
+        JsonDocument document;
+        document["type"] = "debug";
+        document["start"] = chunk.start;
+        document["end"] = chunk.end;
+        document["reset"] = chunk.reset;
+        document["data"] = std::string(reinterpret_cast<const char*>(encoded), length);
+        std::string message;
+        serializeJson(document, message);
+        if (broadcast(message)) debugCursor = chunk.end;
+    }
+#endif
 
     explicit Impl(WebPortal& owner) : portal(owner) {}
 
@@ -274,6 +337,9 @@ struct WebPortal::Impl {
             {"/ws", HTTP_GET, socket, this, true, false, nullptr},
             {"/api/*", HTTP_GET, apiGet, this, false, false, nullptr},
             {"/api/*", HTTP_POST, apiPost, this, false, false, nullptr},
+#ifdef DEBUG_WEB
+            {"/debug/log", HTTP_GET, debugLog, this, false, false, nullptr},
+#endif
         };
         for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(server, &handler);
         httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, notFound);
@@ -365,14 +431,14 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
 
     if (https_ && !impl_->startHttps()) {
         // Keep the web interface reachable (e.g. to switch HTTPS off) rather than losing it.
-        Serial.println("[Web] HTTPS server start failed; falling back to plain HTTP");
+        DBG_SERIAL.println("[Web] HTTPS server start failed; falling back to plain HTTP");
         https_ = false;
         secureWeb = false;
     }
     if (https_) {
-        if (!impl_->startHttpRedirect()) Serial.println("[Web] HTTP redirect server start failed");
+        if (!impl_->startHttpRedirect()) DBG_SERIAL.println("[Web] HTTP redirect server start failed");
     } else if (!impl_->startHttp()) {
-        Serial.println("[Web] HTTP server start failed; web UI unavailable");
+        DBG_SERIAL.println("[Web] HTTP server start failed; web UI unavailable");
     }
 
     impl_->mdnsRunning = MDNS.begin(kHostname);
@@ -380,7 +446,7 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
         if (https_) MDNS.addService("https", "tcp", kHttpsPort);
         else MDNS.addService("http", "tcp", kHttpPort);
     }
-    Serial.printf("[Web] %s%s.local/ (or the address shown above)%s\n", https_ ? "https://" : "http://", kHostname,
+    DBG_SERIAL.printf("[Web] %s%s.local/ (or the address shown above)%s\n", https_ ? "https://" : "http://", kHostname,
                   https_ ? "; self-signed certificate" : "; HTTPS is off");
 }
 
@@ -390,16 +456,16 @@ void WebPortal::applyMode(WifiMode mode) {
     WiFi.mode(wantAp && wantSta ? WIFI_AP_STA : wantAp ? WIFI_AP : WIFI_STA);
     if (wantAp) {
         if (!WiFi.softAP(apSsid_.c_str(), apPassword_.c_str())) {
-            Serial.println("[WiFi] access point start failed; retrying with default password");
+            DBG_SERIAL.println("[WiFi] access point start failed; retrying with default password");
             apPassword_ = BridgeConfig{}.apPassword;
             if (!WiFi.softAP(apSsid_.c_str(), apPassword_.c_str()))
-                Serial.println("[WiFi] access point retry failed");
+                DBG_SERIAL.println("[WiFi] access point retry failed");
         }
         if (impl_ && !impl_->dnsRunning) {
             impl_->dns.setErrorReplyCode(DNSReplyCode::NoError);
             impl_->dnsRunning = impl_->dns.start(kDnsPort, "*", WiFi.softAPIP());
         }
-        Serial.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at %s%s/\n", apSsid_.c_str(),
+        DBG_SERIAL.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at %s%s/\n", apSsid_.c_str(),
                       apPassword_ == BridgeConfig{}.apPassword ? apPassword_.c_str() : "(custom)",
                       https_ ? "https://" : "http://", WiFi.softAPIP().toString().c_str());
     } else if (impl_ && impl_->dnsRunning) {
@@ -414,7 +480,7 @@ void WebPortal::beginStation() {
     if (WiFi.status() == WL_CONNECTED) return;
     WiFi.begin(ssid_.c_str(), password_.empty() ? nullptr : password_.c_str());
     WiFi.setAutoReconnect(true);
-    Serial.printf("[WiFi] connecting to \"%s\"\n", ssid_.c_str());
+    DBG_SERIAL.printf("[WiFi] connecting to \"%s\"\n", ssid_.c_str());
 }
 
 void WebPortal::updateWifiScan(std::uint32_t now) {
@@ -425,7 +491,7 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
         WiFi.scanDelete();
         lastWifiScanAttemptMs_ = now - kWifiScanRetryMs;
         api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
-        Serial.println("[WiFi] network scan started");
+        DBG_SERIAL.println("[WiFi] network scan started");
     }
     if (!wifiScan_.scanning()) return;
     const std::int16_t found = WiFi.scanComplete();
@@ -451,7 +517,7 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
     if (applied_ == WifiMode::Ap) WiFi.enableSTA(false);  // scanning switched the station interface on
     else beginStation();
     api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
-    Serial.printf("[WiFi] network scan finished: %u network(s)\n", static_cast<unsigned>(wifiScan_.networks().size()));
+    DBG_SERIAL.printf("[WiFi] network scan finished: %u network(s)\n", static_cast<unsigned>(wifiScan_.networks().size()));
 }
 
 NetworkStatus WebPortal::networkStatus() const {
@@ -506,6 +572,9 @@ void WebPortal::loop() {
         lastScanMs_ = now - kScanIntervalMs;
     }
     publish(now);
+#ifdef DEBUG_WEB
+    impl_->publishDebug();
+#endif
     updateWifiScan(now);
     if (impl_->dnsRunning) impl_->dns.processNextRequest();
     if (now - lastPolicyMs_ >= kPolicyIntervalMs) {

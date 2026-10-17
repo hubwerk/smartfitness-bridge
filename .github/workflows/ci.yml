@@ -22,7 +22,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [esp32s3dev, crowpanel128]
+        include:
+          - env: esp32s3dev
+            debug_web: false
+          - env: crowpanel128
+            debug_web: false
+          - env: esp32s3dev
+            debug_web: true
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: actions/setup-python@v5.6.0
@@ -40,11 +46,17 @@ jobs:
       - name: Install PlatformIO
         run: python -m pip install platformio==6.2.0
       - name: Build firmware
-        run: pio run -e ${{ matrix.env }}
+        env:
+          DEBUG_WEB: ${{ matrix.debug_web }}
+        run: |
+          if [ "$DEBUG_WEB" = true ]; then
+            sed -i 's/; -DDEBUG_WEB/-DDEBUG_WEB/' platformio.ini
+          fi
+          pio run -e ${{ matrix.env }}
       - name: Upload firmware
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: firmware-${{ matrix.env }}
+          name: firmware-${{ matrix.env }}${{ matrix.debug_web && '-debug' || '' }}
           path: |
             .pio/build/${{ matrix.env }}/firmware.bin
             .pio/build/${{ matrix.env }}/bootloader.bin

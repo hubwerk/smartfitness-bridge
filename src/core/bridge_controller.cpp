@@ -12,6 +12,7 @@
 #include <utility>
 #ifdef ARDUINO
 #include <Arduino.h>
+#include "debug_serial.h"
 #endif
 
 using namespace smartfitness;
@@ -121,7 +122,7 @@ void BridgeController::begin() {
     // Auto-connect the paired BLE device on boot.
     if (bleSelected()) bridge_.scanAndConnect();
 #ifdef ARDUINO
-    Serial.println(ble_ ? "[Console] Serial console. Type help." : "[Console] Serial console; simulation only. Type help.");
+    DBG_SERIAL.println(ble_ ? "[Console] Serial console. Type help." : "[Console] Serial console; simulation only. Type help.");
 #endif
 }
 
@@ -541,8 +542,8 @@ void BridgeController::loop() {
         const char character = static_cast<char>(Serial.read());
         if (character == '\r') continue;
         if (character == '\n') {
-            if (overflow_) Serial.println("[Console] command too long");
-            else if (!input_.empty()) Serial.println(handleCommand(input_).c_str());
+            if (overflow_) DBG_SERIAL.println("[Console] command too long");
+            else if (!input_.empty()) DBG_SERIAL.println(handleCommand(input_).c_str());
             input_.clear();
             overflow_ = false;
         } else if (!overflow_) {

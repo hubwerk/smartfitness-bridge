@@ -13,6 +13,7 @@
 
 #ifdef ARDUINO
 #include <Arduino.h>
+#include "debug_serial.h"
 #include <Preferences.h>
 #endif
 
@@ -160,16 +161,16 @@ bool loadOrCreateTlsIdentity(const std::string& dnsName, const std::array<std::u
         if (validTlsIdentity(identity)) return true;
     }
 
-    Serial.println("[Web] generating self-signed TLS certificate (valid until 9999-12-31)");
+    DBG_SERIAL.println("[Web] generating self-signed TLS certificate (valid until 9999-12-31)");
     std::string error;
     if (!generateTlsIdentity(dnsName, ipAddress, identity, error) || !validTlsIdentity(identity)) {
-        Serial.printf("[Web] TLS certificate generation failed: %s\n", error.empty() ? "invalid result" : error.c_str());
+        DBG_SERIAL.printf("[Web] TLS certificate generation failed: %s\n", error.empty() ? "invalid result" : error.c_str());
         identity = TlsIdentity{};
         return false;
     }
     if (!prefs.begin("sftls", false) || prefs.putString("cert", identity.certificatePem.c_str()) == 0 ||
         prefs.putString("key", identity.privateKeyPem.c_str()) == 0)
-        Serial.println("[Web] storing the TLS certificate failed; a new one is generated on the next boot");
+        DBG_SERIAL.println("[Web] storing the TLS certificate failed; a new one is generated on the next boot");
     prefs.end();
     return true;
 }

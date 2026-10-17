@@ -252,6 +252,12 @@ Mobile (390×844; full-page screenshots include scrollable content):
 | ![Dashboard mobile](web/05-dashboard-mobile.png) | ![Devices mobile](web/06-devices-mobile.png) |
 | ![Control mobile](web/07-control-mobile.png) | ![Settings mobile](web/08-settings-mobile.png) |
 
+Optional `DEBUG_WEB` build:
+
+| Debug desktop | Debug mobile |
+|---|---|
+| ![Debug desktop](web/05-debug-desktop.png) | ![Debug mobile](web/05-debug-mobile.png) |
+
 ## Before / after
 
 Header-only HMI revision (same fixtures; historical elbow images are not

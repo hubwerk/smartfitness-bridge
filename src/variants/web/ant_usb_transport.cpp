@@ -4,6 +4,7 @@
 #ifdef ARDUINO
 
 #include <Arduino.h>
+#include "debug_serial.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/message_buffer.h>
 #include <freertos/stream_buffer.h>
@@ -223,7 +224,7 @@ void AntUsbTransport::Impl::open(std::uint8_t address) {
     gone = false;
     ready = false;
     submitIn();
-    Serial.printf("[ANT] USB stick %s attached\n", description.load());
+    DBG_SERIAL.printf("[ANT] USB stick %s attached\n", description.load());
 }
 
 void AntUsbTransport::Impl::close() {
@@ -236,7 +237,7 @@ void AntUsbTransport::Impl::close() {
     interfaceClaimed = false;
     device = nullptr;
     description = kNoStick;
-    Serial.println("[ANT] USB stick removed");
+    DBG_SERIAL.println("[ANT] USB stick removed");
 }
 
 bool AntUsbTransport::begin() {
@@ -253,20 +254,20 @@ bool AntUsbTransport::begin() {
     clientConfig.async.callback_arg = impl;
     if (!impl->rx || !impl->tx || usb_host_install(&hostConfig) != ESP_OK) {
         failed_ = true;
-        Serial.println("[ANT] USB host could not be started");
+        DBG_SERIAL.println("[ANT] USB host could not be started");
         return false;
     }
     if (usb_host_client_register(&clientConfig, &impl->client) != ESP_OK ||
         usb_host_transfer_alloc(kPacketSize, 0, &impl->in) != ESP_OK ||
         usb_host_transfer_alloc(kPacketSize, 0, &impl->out) != ESP_OK) {
         failed_ = true;
-        Serial.println("[ANT] USB host client could not be registered");
+        DBG_SERIAL.println("[ANT] USB host client could not be registered");
         return false;
     }
     xTaskCreatePinnedToCore(Impl::libraryTask, "usb_host", 4096, impl, 2, nullptr, 0);
     xTaskCreatePinnedToCore(Impl::clientTask, "ant_usb", 4096, impl, 2, nullptr, 0);
     impl_ = impl;
-    Serial.println("[ANT] USB host started; waiting for an ANT+ USB stick on the USB-OTG port");
+    DBG_SERIAL.println("[ANT] USB host started; waiting for an ANT+ USB stick on the USB-OTG port");
     return true;
 }
 
