@@ -3,6 +3,7 @@
 
 #include <LittleFS.h>
 #include <esp_partition.h>
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -11,6 +12,10 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+
+#ifndef DEBUG_WEB_IDF_LEVEL
+#define DEBUG_WEB_IDF_LEVEL 3
+#endif
 
 namespace {
 constexpr char kPath[] = "/debug.log";
@@ -30,6 +35,8 @@ std::uint64_t absoluteEnd = 0;
 bool writable = false;
 bool started = false;
 bool serialOnly = false;
+vprintf_like_t uartVprintf = nullptr;
+thread_local bool inDebugVprintf = false;
 
 class Lock {
 public:
@@ -86,6 +93,52 @@ std::size_t lossMarker(char (&marker)[100], std::uint64_t dropped) {
     return std::snprintf(marker, sizeof(marker),
         "\n[Debug] LOST OUTPUT: %llu byte(s)/ISR call(s)\n",
         static_cast<unsigned long long>(dropped));
+}
+
+std::size_t stripAnsi(char* text, std::size_t size) {
+    std::size_t read = 0;
+    std::size_t written = 0;
+    while (read < size) {
+        if (static_cast<unsigned char>(text[read]) == 0x1b && read + 1 < size && text[read + 1] == '[') {
+            read += 2;
+            while (read < size) {
+                const unsigned char character = static_cast<unsigned char>(text[read++]);
+                if (character >= 0x40 && character <= 0x7e) break;
+            }
+            continue;
+        }
+        text[written++] = text[read++];
+    }
+    return written;
+}
+
+int debugVprintf(const char* format, va_list args) {
+    if (!format || inDebugVprintf) return 0;
+    inDebugVprintf = true;
+
+    va_list uartArgs;
+    va_copy(uartArgs, args);
+    const int uartResult = uartVprintf ? uartVprintf(format, uartArgs) : 0;
+    va_end(uartArgs);
+
+    if (workerTask && xTaskGetCurrentTaskHandle() == workerTask) {
+        inDebugVprintf = false;
+        return uartResult;
+    }
+
+    char buffer[kBlockBytes / 2];
+    va_list logArgs;
+    va_copy(logArgs, args);
+    const int length = std::vsnprintf(buffer, sizeof(buffer), format, logArgs);
+    va_end(logArgs);
+    if (length > 0) {
+        const std::size_t available = std::min(static_cast<std::size_t>(length), sizeof(buffer) - 1);
+        if (static_cast<std::size_t>(length) > available) recordLoss(static_cast<std::size_t>(length) - available);
+        const std::size_t clean = stripAnsi(buffer, available);
+        debugSerial.write(reinterpret_cast<const std::uint8_t*>(buffer), clean);
+    }
+    inDebugVprintf = false;
+    return uartResult;
 }
 
 void useSerialFallback(const char* reason) {
@@ -239,6 +292,8 @@ void begin() {
     if (xTaskCreate(worker, "debug-log", 4096, nullptr, 1, &workerTask) != pdPASS) {
         useSerialFallback("[Debug] logger worker allocation failed; direct Serial fallback\n");
     }
+    uartVprintf = esp_log_set_vprintf(debugVprintf);
+    esp_log_level_set("*", static_cast<esp_log_level_t>(DEBUG_WEB_IDF_LEVEL));
 }
 
 Chunk readChunk(std::uint64_t offset, char* data, std::size_t capacity) {

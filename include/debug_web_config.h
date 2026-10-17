@@ -1,0 +1,13 @@
+#if defined(DEBUG_WEB)
+#ifndef DEBUG_WEB_IDF_LEVEL
+#define DEBUG_WEB_IDF_LEVEL 3
+#endif
+
+#undef CORE_DEBUG_LEVEL
+#define CORE_DEBUG_LEVEL DEBUG_WEB_IDF_LEVEL
+#define USE_ESP_IDF_LOG
+
+#ifndef CONFIG_NIMBLE_CPP_LOG_LEVEL
+#define CONFIG_NIMBLE_CPP_LOG_LEVEL 2
+#endif
+#endif

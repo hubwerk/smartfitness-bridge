@@ -29,6 +29,10 @@ void reset() {
     fake::formats = fake::opens = fake::flushes = fake::mounts = 0;
     fake::serialCalls = fake::fsCalls = fake::mutexCalls = 0;
     fake::maxSize = 0;
+    fake::currentTask = nullptr;
+    fake::activeVprintf = nullptr;
+    fake::logLevel = -1;
+    fake::emitNestedLog = false;
     fake::file.clear();
     fake::partition.assign(fake::partition.size(), 0xff);
     Serial.output.clear();
@@ -241,6 +245,26 @@ void testInitializationFallback() {
     }
 }
 
+void testEspLogForwarding() {
+    reset();
+    debugweb::begin();
+    assert(fake::activeVprintf != nullptr && fake::logLevel == ESP_LOG_INFO);
+
+    fake::emit("\033[0;32m[IDF] ready\033[0m\n");
+    fake::emitNestedLog = true;
+    fake::emit("[IDF] outer\n");
+    fake::currentTask = workerTask;
+    fake::emit("[IDF] logger task\n");
+    fake::currentTask = nullptr;
+    pump();
+
+    assert(fake::file.find("[IDF] ready\n") != std::string::npos);
+    assert(fake::file.find("[IDF] outer\n") != std::string::npos);
+    assert(fake::file.find("nested logger message") == std::string::npos);
+    assert(fake::file.find("[IDF] logger task") == std::string::npos);
+    assert(Serial.output.find("\033[0;32m[IDF] ready\033[0m\n") != std::string::npos);
+}
+
 void testConcurrentProducers() {
     reset();
     debugweb::begin();
@@ -284,6 +308,7 @@ int main() {
     testLossAndIsr();
     testRotationAndFailure();
     testInitializationFallback();
+    testEspLogForwarding();
     testConcurrentProducers();
     reset();
     std::cout << "debug serial tests passed\n";

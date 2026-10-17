@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <cstdarg>
+#include <algorithm>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -34,6 +36,7 @@ inline std::size_t maxSize = 0;
 inline int workerIterations = 0;
 struct StopWorker {};
 inline void (*task)(void*) = nullptr;
+inline void* currentTask = nullptr;
 }  // namespace fake
 
 class Print {
@@ -80,6 +83,7 @@ using portMUX_TYPE = std::mutex;
 #define portENTER_CRITICAL_ISR(mutex) (mutex)->lock()
 #define portEXIT_CRITICAL_ISR(mutex) (mutex)->unlock()
 inline bool xPortInIsrContext() { return fake::isr; }
+inline TaskHandle_t xTaskGetCurrentTaskHandle() { return fake::currentTask; }
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
     ++fake::mutexAllocations;
     if (fake::allMutexAllocationsFail || fake::mutexAllocations == fake::mutexAllocationFailAt) return nullptr;
