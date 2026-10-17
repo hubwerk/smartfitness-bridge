@@ -43,6 +43,8 @@ enum class CentralEventType : std::uint8_t {
     // Before Connected, one per effective subscription: index = subscription
     // index, data = service + characteristic UUID (32 bytes), mask =
     // kSubscriptionIndicate when indicating, reasonCode = SubscriptionOutcome.
+    // Exception: a final Overflow event names the first characteristic that
+    // did not fit and its index is the number skipped, not a list position.
     SubscriptionResult,
     // Before Connected when ConnectPlan::reportServices: one GATT primary
     // service UUID (16 bytes) per event.
