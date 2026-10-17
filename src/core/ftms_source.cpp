@@ -286,7 +286,7 @@ bool FtmsSource::sendControl(const ftms::Bytes& payload) {
     const bool queued = queueWrite(kService, kControlPoint, payload, true);
 #if defined(ARDUINO) && defined(DEBUG_WEB)
     if (!payload.empty())
-        SF_DEBUG_LOG("[FTMS-CP] send %s op=0x%02x params=%s %s\n", opcodeName(payload[0]),
+        SF_DEBUG_LOG("[FTMS-CP] send %s (0x%02x) params=%s %s\n", opcodeName(payload[0]),
                      static_cast<unsigned>(payload[0]), debuglog::Hex(payload.data() + 1, payload.size() - 1).c_str(),
                      queued ? "queued" : "dropped: write queue full/invalid payload");
 #endif

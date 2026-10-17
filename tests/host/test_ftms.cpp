@@ -95,7 +95,7 @@ int main() {
     control.onRead(Source::ReadFeature, feature.data(), feature.size());
     diagnostics.clear();
     assert(control.onConnected((1U << Source::SubBike) | (1U << Source::SubControlPoint), 10));
-    assert(logged("state unavailable -> requesting") && logged("send Request Control op=0x00"));
+    assert(logged("state unavailable -> requesting") && logged("send Request Control (0x00)"));
     control.tick(3010);
     assert(logged("timeout Request Control attempt=1/3 retry") && logged("attempt=2/3"));
     control.tick(6010);
@@ -108,9 +108,9 @@ int main() {
     assert(control.onConnected((1U << Source::SubBike) | (1U << Source::SubControlPoint), 10));
     const ftms::Bytes granted{0x80, 0, 1};
     control.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 11);
-    assert(logged("state requesting -> granted") && logged("send Start/Resume op=0x07"));
+    assert(logged("state requesting -> granted") && logged("send Start/Resume (0x07)"));
     assert(control.control({Control::Power, 200}, 12));
-    assert(logged("send Set Target Power op=0x05 params=c8 00 queued"));
+    assert(logged("send Set Target Power (0x05) params=c8 00 queued"));
 
     const std::array<Source::Subscription, 6> identities{{
         Source::SubBike, Source::SubTreadmill, Source::SubCrossTrainer,
