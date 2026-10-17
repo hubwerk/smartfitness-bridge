@@ -17,6 +17,14 @@ profile is sent natively with its own FTMS data characteristic (see
 [FTMS machine profiles and data fields](#ftms-machine-profiles-and-data-fields)).
 An override never adds missing source control capabilities.
 
+FTMS input subscriptions follow all Fitness Machine Type bits in the current
+advertisement's `0x1826` Service Data. For example, an indoor bike subscribes to
+`0x2AD2` and Control Point `0x2AD9` (indicate), not treadmill/rower data.
+Without Service Data, the last observed mask is retained only in RAM; if unknown,
+only data characteristics actually present in GATT are subscribed. Feature/range
+reads and control safety checks are unchanged. Every non-broadcast connection
+attempt first checks for a fresh advertisement; `searching` is shown in both UIs.
+
 | Id (priority) | Device / profile | Match rule | Metrics | Control | Source / attribution | Test status | FTMS output profile |
 |---|---|---|---|---|---|---|---|
 | `keiser-m3i` (90) | Keiser M3i | Name starts `M3` and manufacturer payload passes Keiser broadcast parser | Cadence, power, nonzero HR; gear decoded as resistance; no speed/distance forwarded | None; advertisement-only (no GATT connection) | qdomyos-zwift `src/devices/m3ibike/m3ibike.cpp`; `yesoul_keiser.hpp/.cpp` | Host broadcast/detection tests; hardware unverified | `bike` |

@@ -219,7 +219,7 @@ function renderStatus(s){
  fill($("s-bridge"),[pill(s.state,["disconnected","error","fault"].includes(s.state)?"bad":"ok"),pill(s.trainer?"trainer":"no trainer",s.trainer?"ok":""),pill(s.canControl?"control ready":"no control",s.canControl?"ok":""),
   ...(s.controls||[]).map(c=>pill(c)),pill(s.deviceName||"no device")]);
  const i=s.input||{},items=[pill("source: "+i.source),pill("profile: "+(i.profile||"bike"))];
- if(i.link)items.push(pill("link: "+i.link,i.link==="ready"||i.link==="listening"?"ok":i.link==="backoff"?"warn":""));
+ if(i.link)items.push(pill("link: "+i.link,i.link==="connected"||i.link==="ready"||i.link==="listening"?"ok":i.link==="reconnecting"||i.link==="backoff"?"warn":i.link==="searching"?"pending":""));
  if(i.protocol)items.push(pill("adapter: "+i.protocol));if(i.stale)items.push(pill("stale data","warn"));if(i.scanning)items.push(pill("scanning"));
  if(i.error)items.push(pill(i.error,"bad"));if(i.link==="backoff")items.push(pill("retry in "+Math.ceil(i.nextAttemptMs/1000)+" s"));
  fill($("s-input"),items);

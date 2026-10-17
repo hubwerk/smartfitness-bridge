@@ -236,6 +236,11 @@ void testConsoleBlePairing() {
         ui.attachBleInput(selector, ble);
         ui.begin();
         assert(selector.source() == InputSelector::Source::Ble);
+        assert(ble.linkState() == BleInputAdapter::LinkState::Probing && central.connects.empty());
+        central.advertise(address("aa:00:00:00:00:21"), "KICKR CORE 1234", {0x1826});
+        core.loop();
+        now += 500;
+        core.loop();
         assert(central.connects.size() == 1 && central.connects.back().address == address("aa:00:00:00:00:21"));
         assert(ble.pairedDevice().adapterId == "ftms" && ble.pairedDevice().name == "KICKR CORE 1234");
     }
@@ -608,6 +613,9 @@ void testApiBleQueueRejections() {
 
     rig.central.acceptStop = true;
     rig.central.acceptConnect = false;
+    assert(rig.ble.startScan());
+    rig.central.advertise(address("aa:00:00:00:00:21"), "Bike", {0x1826});
+    rig.core.loop();
     result = execute("pair", R"({"address":"aa:00:00:00:00:21","adapter":"ftms"})");
     assert(result["ok"] == false);
     assert(contains(result["message"].as<std::string>(), "connection request rejected"));

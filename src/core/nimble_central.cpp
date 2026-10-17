@@ -18,10 +18,16 @@ NimBLEUUID toNimble(const ble::Uuid& uuid) {
     return NimBLEUUID(uuid.toCanonicalString());
 }
 
-NimBLERemoteCharacteristic* findCharacteristic(NimBLEClient* client, const ble::Uuid& service,
-                                               const ble::Uuid& characteristic) {
-    NimBLERemoteService* remote = client->getService(toNimble(service));
-    return remote ? remote->getCharacteristic(toNimble(characteristic)) : nullptr;
+NimBLERemoteCharacteristic* findCached(NimBLEClient* client, const ble::Uuid& service,
+                                      const ble::Uuid& characteristic) {
+    const NimBLEUUID serviceUuid = toNimble(service);
+    const NimBLEUUID characteristicUuid = toNimble(characteristic);
+    for (auto* remote : *client) {
+        if (remote->getUUID() != serviceUuid) continue;
+        for (auto* cached : *remote)
+            if (cached->getUUID() == characteristicUuid) return cached;
+    }
+    return nullptr;
 }
 
 // Generic Access / Generic Attribute say nothing about the device.
@@ -37,6 +43,10 @@ struct NimbleCentral::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimB
     void onResult(NimBLEAdvertisedDevice* device) override {
         ble::ScanReport report;
         if (!ble::BleAddress::parse(device->getAddress().toString(), report.address, device->getAddressType())) return;
+        {
+            std::lock_guard<std::mutex> lock(scanMutex);
+            if (probing && report.address != probeAddress) return;
+        }
         report.rssi = static_cast<std::int8_t>(device->getRSSI());
         report.connectable = device->isConnectable();
         if (device->haveName()) report.setName(device->getName());
@@ -83,6 +93,9 @@ struct NimbleCentral::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimB
     NimBLEClient* client = nullptr;
     ble::ConnectionSession connectedSession;
     std::mutex callbackMutex;
+    std::mutex scanMutex;
+    bool probing = false;
+    ble::BleAddress probeAddress;
 };
 
 bool NimbleCentral::begin() {
@@ -129,11 +142,22 @@ bool NimbleCentral::send(const Cmd& cmd) {
 }
 
 bool NimbleCentral::startScan(std::uint32_t durationMs, bool duplicates, bool highDuty) {
+    return queueScan(durationMs, duplicates, highDuty, nullptr);
+}
+
+bool NimbleCentral::startProbe(const ble::BleAddress& address, std::uint32_t durationMs) {
+    return queueScan(durationMs, true, true, &address);
+}
+
+bool NimbleCentral::queueScan(std::uint32_t durationMs, bool duplicates, bool highDuty,
+                              const ble::BleAddress* target) {
     Cmd cmd;
     cmd.op = Op::StartScan;
     cmd.durationMs = durationMs;
     cmd.duplicates = duplicates;
     cmd.highDuty = highDuty;
+    cmd.probe = target != nullptr;
+    if (target) cmd.address = *target;
     std::lock_guard<std::mutex> lock(commandMutex_);
     cmd.session = scanGeneration_ + 1;
     const bool wasScanning = scanning_.exchange(true);
@@ -253,6 +277,11 @@ void NimbleCentral::doStartScan(const Cmd& cmd) {
     }
     scan->setInterval(kScanInterval);
     scan->setWindow(cmd.highDuty ? kScanWindowHighDuty : kScanWindowNormal);
+    {
+        std::lock_guard<std::mutex> scanLock(impl_->scanMutex);
+        impl_->probing = cmd.probe;
+        impl_->probeAddress = cmd.address;
+    }
     scan->setAdvertisedDeviceCallbacks(impl_, cmd.duplicates);
     scan->setDuplicateFilter(!cmd.duplicates);
     // NimBLE-Arduino 1.4.x takes seconds; 0 scans until stopped.
@@ -303,6 +332,8 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
     }
     if (cancelled(cmd.session)) return;
     const NimBLEAddress address(cmd.address.toString(), cmd.address.type);
+    pushEvent(ble::CentralEventType::ConnectProgress, cmd.session,
+              static_cast<std::uint8_t>(ble::ConnectPhase::Connect));
     if (!client->connect(address, true)) {
         pushEvent(ble::CentralEventType::ConnectFailed, cmd.session, ble::kConnectFailure, 0, nullptr, 0,
                   static_cast<std::uint16_t>(client->getLastError()));
@@ -312,15 +343,34 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         doDisconnect();
         return;
     }
-    // Fixed plans only enumerate all primary services when none are known;
-    // later getService() lookups reuse this cache.
-    if (cmd.plan.reportServices && !cmd.plan.discoverNotifications) client->getServices(true);
+    auto progress = [this, &cmd](ble::ConnectPhase phase) {
+        pushEvent(ble::CentralEventType::ConnectProgress, cmd.session, static_cast<std::uint8_t>(phase));
+    };
+    auto discoveryFailed = [this, client, &cmd]() {
+        if (!cancelled(cmd.session))
+            pushEvent(ble::CentralEventType::ConnectFailed, cmd.session, ble::kServiceDiscoveryFailure,
+                      0, nullptr, 0, static_cast<std::uint16_t>(client->getLastError()));
+        doDisconnect();
+    };
+    progress(ble::ConnectPhase::Discovery);
+    // In NimBLE 1.4.3 the vector refresh APIs discard characteristic discovery
+    // errors. This public operation returns failure and discovers each service,
+    // characteristic and descriptor once; all later access is cache-only.
+    const bool discovered = client->discoverAttributes();
+    if (cancelled(cmd.session)) { doDisconnect(); return; }
+    progress(ble::ConnectPhase::Discovery);
+    if (!discovered || !client->isConnected()) {
+        discoveryFailed();
+        return;
+    }
+    const auto* services = client->getServices(false);
     // Reads are reported before Connected so protocols can derive capabilities.
     for (std::uint8_t index = 0; index < cmd.plan.readCount; ++index) {
         if (cancelled(cmd.session)) { doDisconnect(); return; }
         const auto& read = cmd.plan.reads[index];
-        NimBLERemoteCharacteristic* characteristic = findCharacteristic(client, read.service, read.characteristic);
+        NimBLERemoteCharacteristic* characteristic = findCached(client, read.service, read.characteristic);
         if (!characteristic || !characteristic->canRead()) continue;
+        progress(ble::ConnectPhase::Read);
         const NimBLEAttValue value = characteristic->readValue();
         if (cancelled(cmd.session)) { doDisconnect(); return; }
         pushEvent(ble::CentralEventType::ReadResult, cmd.session, index, 0, value.data(), value.length());
@@ -346,20 +396,11 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
     if (plan.discoverNotifications) {
         plan.subscriptionCount = 0;
         bool writeFound = false;
-        const auto* services = client->getServices(true);
-        if (!services) {
-            pushEvent(ble::CentralEventType::ConnectFailed, cmd.session, ble::kServiceDiscoveryFailure, 0, nullptr, 0,
-                      static_cast<std::uint16_t>(client->getLastError()));
-            doDisconnect();
-            return;
-        }
         for (auto* service : *services) {
             if (cancelled(session)) { doDisconnect(); return; }
             ble::Uuid serviceUuid;
             if (!ble::Uuid::parse(service->getUUID().toString(), serviceUuid)) continue;
-            const auto* characteristics = service->getCharacteristics(true);
-            if (!characteristics) continue;
-            for (auto* characteristic : *characteristics) {
+            for (auto* characteristic : *service) {
                 if (cancelled(session)) { doDisconnect(); return; }
                 ble::Uuid characteristicUuid;
                 if (!ble::Uuid::parse(characteristic->getUUID().toString(), characteristicUuid)) continue;
@@ -386,8 +427,9 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         if (cancelled(cmd.session)) { doDisconnect(); return; }
         const auto& subscription = plan.subscriptions[index];
         NimBLERemoteCharacteristic* characteristic =
-            findCharacteristic(client, subscription.service, subscription.characteristic);
+            findCached(client, subscription.service, subscription.characteristic);
         if (!characteristic) {
+            if (subscription.ifPresent) continue;
             reportSubscription(index, subscription, ble::SubscriptionOutcome::NotFound);
             continue;
         }
@@ -401,7 +443,9 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
                                                bool) {
             pushEvent(ble::CentralEventType::Notification, session, index, 0, data, length);
         };
+        progress(ble::ConnectPhase::Subscribe);
         const bool subscribed = characteristic->subscribe(!subscription.indicate, callback, true);
+        if (cancelled(cmd.session)) { doDisconnect(); return; }
         if (subscribed) mask |= 1UL << index;
         reportSubscription(index, subscription,
                            subscribed ? ble::SubscriptionOutcome::Ok : ble::SubscriptionOutcome::CccdFailed);
@@ -410,7 +454,7 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
     if (overflowCount != 0) reportSubscription(overflowCount, firstOverflow, ble::SubscriptionOutcome::Overflow);
     if (plan.reportServices) {
         std::size_t reported = 0;
-        for (auto* service : *client->getServices(false)) {
+        for (auto* service : *services) {
             if (reported >= ble::kMaxAdvertisedServices) break;
             ble::Uuid uuid;
             if (!ble::Uuid::parse(service->getUUID().toString(), uuid) || genericService(uuid)) continue;
@@ -444,7 +488,7 @@ void NimbleCentral::doWrite(const Cmd& cmd) {
         return;
     }
     NimBLERemoteCharacteristic* characteristic =
-        findCharacteristic(client, cmd.write.service, cmd.write.characteristic);
+        findCached(client, cmd.write.service, cmd.write.characteristic);
     if (!characteristic) {
         pushEvent(ble::CentralEventType::WriteFailed, cmd.session);
         return;

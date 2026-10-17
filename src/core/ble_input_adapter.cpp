@@ -17,6 +17,23 @@ namespace {
 
 bool reached(std::uint32_t now, std::uint32_t deadline) { return static_cast<std::int32_t>(now - deadline) >= 0; }
 
+bool validFtmsData(const ble::Advertisement& advertisement) {
+    const auto& data = advertisement.ftmsServiceData;
+    return data.size() == 3 && (data[0] & 1U) && (data[1] & 0x3fU);
+}
+
+#ifdef ARDUINO
+const char* phaseName(ble::ConnectPhase phase) {
+    switch (phase) {
+        case ble::ConnectPhase::Connect: return "connect";
+        case ble::ConnectPhase::Discovery: return "discovery";
+        case ble::ConnectPhase::Read: return "read";
+        case ble::ConnectPhase::Subscribe: return "subscribe";
+    }
+    return "unknown";
+}
+#endif
+
 }  // namespace
 
 BleInputAdapter::BleInputAdapter(ble::CentralTransport& transport, Clock clock)
@@ -28,6 +45,7 @@ BleInputAdapter::BleInputAdapter(ble::CentralTransport& transport, Clock clock, 
 const char* BleInputAdapter::linkStateName(LinkState state) {
     switch (state) {
         case LinkState::Idle: return "idle";
+        case LinkState::Probing: return "searching";
         case LinkState::Connecting: return "connecting";
         case LinkState::Ready: return "connected";
         case LinkState::Backoff: return "reconnecting";
@@ -86,12 +104,26 @@ void BleInputAdapter::setPairedDevice(const PairedDevice& device) {
         protocol_.reset();
         advertisedServices_.clear();
         subscriptions_.clear();
+        hasPairedAdvertisement_ = false;
+        pairedAdvertisement_ = {};
+        if (const auto* result = findResult(device.address)) {
+            pairedAdvertisement_.address = result->address;
+            pairedAdvertisement_.name = result->name;
+            pairedAdvertisement_.rssi = result->rssi;
+            pairedAdvertisement_.services = result->services;
+            pairedAdvertisement_.ftmsServiceData = result->ftmsServiceData;
+            pairedAdvertisementMs_ = result->lastSeenMs;
+            pairedServiceDataMs_ = result->ftmsDataSeenMs;
+            hasPairedAdvertisement_ = true;
+        }
     }
 }
 
 void BleInputAdapter::clearPairedDevice() {
     disconnect();
     paired_ = {};
+    hasPairedAdvertisement_ = false;
+    pairedAdvertisement_ = {};
     protocol_.reset();
 }
 
@@ -120,21 +152,40 @@ bool BleInputAdapter::startConnection() {
     protocol_->reset();
     advertisedServices_ = paired_.advertisedServices;
     subscriptions_.clear();
-    if (const auto* result = findResult(paired_.address)) {
-        ble::Advertisement advertisement;
-        advertisement.address = result->address;
-        advertisement.ftmsServiceData = result->ftmsServiceData;
-        for (const auto& service : result->services) {
+    subscriptionIndices_.clear();
+    subscriptionOptional_.clear();
+    ++attempts_;
+    stateSinceMs_ = now;
+    if (!protocol_->advertisementOnly() &&
+        (!hasPairedAdvertisement_ || now - pairedAdvertisementMs_ >= 2000)) {
+        state_ = LinkState::Probing;
+        probeFound_ = false;
+        pairedAdvertisement_.ftmsServiceData.clear();
+        if (!userScan_ && !transport_.startProbe(paired_.address, timing_.probeMs)) {
+            scheduleReconnect("probe scan request rejected");
+            return false;
+        }
+        return true;
+    }
+    return connectAfterProbe();
+}
+
+bool BleInputAdapter::connectAfterProbe() {
+    const std::uint32_t now = clock_();
+    if (hasPairedAdvertisement_ && now - pairedAdvertisementMs_ < 2000) {
+        if (now - pairedServiceDataMs_ >= 2000) pairedAdvertisement_.ftmsServiceData.clear();
+        for (const auto& service : pairedAdvertisement_.services) {
             if (advertisedServices_.size() < ble::kMaxAdvertisedServices &&
                 std::find(advertisedServices_.begin(), advertisedServices_.end(), service) == advertisedServices_.end())
                 advertisedServices_.push_back(service);
         }
-        advertisement.services = advertisedServices_;
         paired_.advertisedServices = advertisedServices_;
-        protocol_->onAdvertisement(advertisement, now);
+        protocol_->onAdvertisement(pairedAdvertisement_, now);
     }
-    ++attempts_;
     stateSinceMs_ = now;
+    progressMs_ = now;
+    connectPhase_ = ble::ConnectPhase::Connect;
+    progressResults_ = 0;
 #ifdef ARDUINO
     if (!reconnecting_ && attempts_ == 1) {
         if (paired_.name.empty())
@@ -147,6 +198,21 @@ bool BleInputAdapter::startConnection() {
                           paired_.address.toString().c_str());
         lastReconnectLogMs_ = now;
         hasReconnectLog_ = true;
+    }
+    if (hasPairedAdvertisement_ && now - pairedAdvertisementMs_ < 2000) {
+        static const char* const names[] = {
+            "treadmill", "cross-trainer", "step-climber", "stair-climber", "rower", "indoor-bike"
+        };
+        std::string types;
+        if (validFtmsData(pairedAdvertisement_)) {
+            for (std::size_t index = 0; index < 6; ++index) {
+                if (!(pairedAdvertisement_.ftmsServiceData[1] & (1U << index))) continue;
+                if (!types.empty()) types += ",";
+                types += names[index];
+            }
+        }
+        DBG_SERIAL.printf("[BLE] advertisement: rssi=%d, ftms types=%s\n",
+                          pairedAdvertisement_.rssi, types.empty() ? "none" : types.c_str());
     }
 #endif
     if (protocol_->advertisementOnly()) {
@@ -161,17 +227,21 @@ bool BleInputAdapter::startConnection() {
 #endif
         return true;
     }
-    if ((userScan_ && !stopScan()) || (transport_.scanning() && !transport_.stopScan())) {
+    if ((userScan_ || transport_.scanning()) && !transport_.stopScan()) {
         scheduleReconnect("stop scan request rejected");
         return false;
     }
+    userScan_ = false;
     ++session_;
     auto plan = protocol_->plan();
     // Discovery plans start empty; the central reports what it subscribed.
     for (std::size_t index = 0; index < plan.subscriptionCount && index < ble::kMaxSubscriptions; ++index) {
         const auto& subscription = plan.subscriptions[index];
         subscriptions_.push_back({subscription.service, subscription.characteristic, subscription.indicate, "pending", ""});
+        subscriptionIndices_.push_back(static_cast<std::uint8_t>(index));
+        subscriptionOptional_.push_back(subscription.ifPresent);
     }
+    expectedResults_ = plan.readCount + plan.subscriptionCount;
     plan.reportServices = advertisedServices_.empty();
     gattServicesRequested_ = plan.reportServices;
     gattServices_.clear();
@@ -186,12 +256,15 @@ bool BleInputAdapter::startConnection() {
 bool BleInputAdapter::closeLink() {
     advertisedServices_.clear();
     subscriptions_.clear();
+    subscriptionIndices_.clear();
+    subscriptionOptional_.clear();
     bool accepted = true;
     if (state_ == LinkState::Connecting || state_ == LinkState::Ready) {
         accepted = transport_.disconnect(session_);
         // Idle/Backoff ignore this session; the next attempt gets a new ID.
     }
-    if (state_ == LinkState::Listening && !userScan_) accepted = transport_.stopScan() && accepted;
+    if ((state_ == LinkState::Listening || state_ == LinkState::Probing) && !userScan_)
+        accepted = transport_.stopScan() && accepted;
     if (protocol_) protocol_->reset();
     targetPower_ = 0.0F;
     hasTargetPower_ = false;
@@ -202,6 +275,8 @@ bool BleInputAdapter::closeLink() {
 void BleInputAdapter::scheduleReconnect(const std::string& reason, const char* subscriptionReason) {
     lastError_ = reason;
     std::vector<BleSubscriptionStatus> kept;
+    auto keptIndices = subscriptionIndices_;
+    auto keptOptional = subscriptionOptional_;
     if (subscriptionReason) {
         for (auto& subscription : subscriptions_) {
             if (subscription.state != "pending") continue;
@@ -212,6 +287,10 @@ void BleInputAdapter::scheduleReconnect(const std::string& reason, const char* s
     }
     closeLink();
     subscriptions_ = std::move(kept);
+    if (subscriptionReason) {
+        subscriptionIndices_ = std::move(keptIndices);
+        subscriptionOptional_ = std::move(keptOptional);
+    }
     if (autoConnect_ && paired_.valid) {
         reconnecting_ = true;
         backoffMs_ = backoffMs_ == 0 ? timing_.backoffInitialMs : backoffMs_ * 2;
@@ -230,9 +309,22 @@ std::uint32_t BleInputAdapter::nextAttemptInMs() const {
     return reached(now, nextAttemptMs_) ? 0 : nextAttemptMs_ - now;
 }
 
+void BleInputAdapter::connectTimedOut(std::uint32_t now) {
+#ifdef ARDUINO
+    DBG_SERIAL.printf("[BLE] connect timeout after %u ms (phase=%s, results=%u/%u)\n",
+                      static_cast<unsigned>(now - stateSinceMs_), phaseName(connectPhase_),
+                      static_cast<unsigned>(progressResults_), static_cast<unsigned>(expectedResults_));
+#else
+    (void)now;
+#endif
+    scheduleReconnect("connect timeout", "timeout");
+}
+
 void BleInputAdapter::loop() {
     ble::ScanReport report;
     while (transport_.pollScan(report)) handleScanReport(report);
+    if (state_ == LinkState::Connecting && clock_() - stateSinceMs_ >= timing_.connectMaxMs)
+        connectTimedOut(clock_());
     ble::CentralEvent event;
     while (transport_.pollEvent(event)) handleEvent(event);
     const std::uint32_t lifecycleDrops = transport_.droppedLifecycleEvents();
@@ -245,11 +337,31 @@ void BleInputAdapter::loop() {
     }
 
     const std::uint32_t now = clock_();
-    if (userScan_ && reached(now, scanUntilMs_)) stopScan();
+    if (userScan_ && reached(now, scanUntilMs_)) {
+        if (state_ == LinkState::Probing) userScan_ = false;
+        else stopScan();
+    }
 
     switch (state_) {
+        case LinkState::Probing:
+            if (probeFound_ && (validFtmsData(pairedAdvertisement_) || now - probeFoundMs_ >= 500 ||
+                                now - stateSinceMs_ >= timing_.probeMs)) {
+                connectAfterProbe();
+            } else if (now - stateSinceMs_ >= timing_.probeMs) {
+#ifdef ARDUINO
+                DBG_SERIAL.printf("[BLE] %s not advertising (asleep, out of range or connected to another app)\n",
+                                  paired_.address.toString().c_str());
+#endif
+                scheduleReconnect("not-advertising");
+            } else if (!transport_.scanning() &&
+                       !transport_.startProbe(paired_.address, timing_.probeMs - (now - stateSinceMs_))) {
+                scheduleReconnect("probe scan request rejected");
+            }
+            break;
         case LinkState::Connecting:
-            if (now - stateSinceMs_ > timing_.connectTimeoutMs) scheduleReconnect("connect timeout", "timeout");
+            if (now - progressMs_ >= timing_.connectTimeoutMs || now - stateSinceMs_ >= timing_.connectMaxMs) {
+                connectTimedOut(now);
+            }
             break;
         case LinkState::Ready:
             protocol_->tick(now);
@@ -289,6 +401,32 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
     }
     if (event.session != session_ || !protocol_) return;
     const bool linkActive = state_ == LinkState::Connecting || state_ == LinkState::Ready;
+    if (state_ == LinkState::Connecting) {
+        switch (event.type) {
+            case ble::CentralEventType::ReadResult:
+                connectPhase_ = ble::ConnectPhase::Read;
+                ++progressResults_;
+                progressMs_ = now;
+                break;
+            case ble::CentralEventType::SubscriptionResult:
+                connectPhase_ = ble::ConnectPhase::Subscribe;
+                ++progressResults_;
+                progressMs_ = now;
+                break;
+            case ble::CentralEventType::GattService:
+            case ble::CentralEventType::WriteEndpoint:
+                connectPhase_ = ble::ConnectPhase::Discovery;
+                progressMs_ = now;
+                break;
+            case ble::CentralEventType::ConnectProgress:
+                if (event.index <= static_cast<std::uint8_t>(ble::ConnectPhase::Subscribe)) {
+                    connectPhase_ = static_cast<ble::ConnectPhase>(event.index);
+                    progressMs_ = now;
+                }
+                break;
+            default: break;
+        }
+    }
     switch (event.type) {
         case ble::CentralEventType::ReadResult:
             if (linkActive) protocol_->onRead(event.index, event.data.data(), event.length);
@@ -321,13 +459,22 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
             for (std::size_t index = 0; index < subscriptions_.size() && index < ble::kMaxSubscriptions; ++index) {
                 auto& subscription = subscriptions_[index];
                 if (subscription.state != "pending") continue;
-                const bool subscribed = (event.mask & (1U << index)) != 0;
+                const bool subscribed = (event.mask & (1U << subscriptionIndices_[index])) != 0;
+                if (subscriptionOptional_[index] && !subscribed) continue;
                 subscription.state = subscribed ? "ok" : "failed";
 #ifdef ARDUINO
                 DBG_SERIAL.printf("[BLE] subscribe %s/%s %s: %s\n", subscription.service.toString().c_str(),
                                   subscription.characteristic.toString().c_str(),
                                   subscription.indicate ? "indicate" : "notify", subscribed ? "ok" : "no result");
 #endif
+            }
+            for (std::size_t index = subscriptions_.size(); index-- > 0;) {
+                if (subscriptionOptional_[index] &&
+                    (subscriptions_[index].state == "pending" || subscriptions_[index].reason == "not-found")) {
+                    subscriptions_.erase(subscriptions_.begin() + index);
+                    subscriptionIndices_.erase(subscriptionIndices_.begin() + index);
+                    subscriptionOptional_.erase(subscriptionOptional_.begin() + index);
+                }
             }
             if (protocol_->onConnected(event.mask, now)) {
                 if (advertisedServices_.empty() && !gattServices_.empty()) {
@@ -388,6 +535,7 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
             }
             break;
         case ble::CentralEventType::ScanComplete: break;
+        case ble::CentralEventType::ConnectProgress: break;
     }
 }
 
@@ -397,6 +545,10 @@ void BleInputAdapter::applySubscriptionResult(const ble::CentralEvent& event) {
     std::copy(event.data.begin() + 16, event.data.begin() + 32, status.characteristic.bytes.begin());
     status.indicate = (event.mask & ble::kSubscriptionIndicate) != 0;
     const auto outcome = static_cast<ble::SubscriptionOutcome>(event.reasonCode);
+    auto found = std::find(subscriptionIndices_.begin(), subscriptionIndices_.end(), event.index);
+    if (outcome != ble::SubscriptionOutcome::Overflow && found != subscriptionIndices_.end() &&
+        subscriptionOptional_[found - subscriptionIndices_.begin()] && outcome == ble::SubscriptionOutcome::NotFound)
+        return;
     status.state = outcome == ble::SubscriptionOutcome::Ok ? "ok" : "failed";
     if (outcome != ble::SubscriptionOutcome::Ok) status.reason = ble::subscriptionOutcomeName(outcome);
 #ifdef ARDUINO
@@ -413,12 +565,18 @@ void BleInputAdapter::applySubscriptionResult(const ble::CentralEvent& event) {
     if (outcome == ble::SubscriptionOutcome::Overflow) {
         // One entry stands for every discovered characteristic that did not fit.
         subscriptions_.push_back(std::move(status));
+        subscriptionIndices_.push_back(ble::kMaxSubscriptions);
+        subscriptionOptional_.push_back(false);
         return;
     }
     if (event.index >= ble::kMaxSubscriptions) return;
-    // Fixed plans update their entry; discovery plans grow the list in order.
-    if (event.index >= subscriptions_.size()) subscriptions_.resize(event.index + 1U);
-    subscriptions_[event.index] = std::move(status);
+    if (found == subscriptionIndices_.end()) {
+        subscriptions_.push_back(std::move(status));
+        subscriptionIndices_.push_back(event.index);
+        subscriptionOptional_.push_back(false);
+    } else {
+        subscriptions_[found - subscriptionIndices_.begin()] = std::move(status);
+    }
 }
 
 bool BleInputAdapter::startScan(std::uint32_t durationMs) {
@@ -450,7 +608,16 @@ bool BleInputAdapter::startScan(std::uint32_t durationMs) {
 }
 
 bool BleInputAdapter::stopScan() {
-    if (state_ == LinkState::Connecting) return requestDisconnect();
+    if (state_ == LinkState::Probing && userScan_) {
+        const bool cancelled = requestDisconnect();
+        if (!transport_.stopScan()) {
+            lastError_ = "stop scan request rejected";
+            return false;
+        }
+        userScan_ = false;
+        return cancelled;
+    }
+    if (state_ == LinkState::Connecting || state_ == LinkState::Probing) return requestDisconnect();
     if (!userScan_) return true;
     if (state_ != LinkState::Listening && !transport_.stopScan()) {
         lastError_ = "stop scan request rejected";
@@ -486,6 +653,26 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     const std::uint32_t now = clock_();
     ble::Advertisement advertisement = ble::Advertisement::from(report);
     if (paired_.valid && report.address == paired_.address) {
+        if (!hasPairedAdvertisement_ || now - pairedAdvertisementMs_ >= 2000 ||
+            (state_ == LinkState::Probing && !probeFound_)) {
+            pairedAdvertisement_ = advertisement;
+        } else {
+            pairedAdvertisement_.address = advertisement.address;
+            pairedAdvertisement_.rssi = advertisement.rssi;
+            if (!advertisement.name.empty()) pairedAdvertisement_.name = advertisement.name;
+            if (!advertisement.ftmsServiceData.empty()) pairedAdvertisement_.ftmsServiceData = advertisement.ftmsServiceData;
+            for (const auto& service : advertisement.services)
+                if (!pairedAdvertisement_.hasService(service) && pairedAdvertisement_.services.size() < ble::kMaxAdvertisedServices)
+                    pairedAdvertisement_.services.push_back(service);
+        }
+        pairedAdvertisementMs_ = now;
+        if (!advertisement.ftmsServiceData.empty()) pairedServiceDataMs_ = now;
+        else if (now - pairedServiceDataMs_ >= 2000) pairedAdvertisement_.ftmsServiceData.clear();
+        hasPairedAdvertisement_ = true;
+        if (state_ == LinkState::Probing && !probeFound_) {
+            probeFound_ = true;
+            probeFoundMs_ = now;
+        }
         for (const auto& service : advertisement.services) {
             auto& cached = paired_.advertisedServices;
             if (cached.size() < ble::kMaxAdvertisedServices &&
@@ -531,9 +718,13 @@ void BleInputAdapter::handleScanReport(const ble::ScanReport& report) {
     }
     entry->address.type = report.address.type;
     entry->rssi = report.rssi;
+    if (now - entry->ftmsDataSeenMs >= 2000) entry->ftmsServiceData.clear();
     entry->lastSeenMs = now;
     if (!advertisement.name.empty()) entry->name = advertisement.name;
-    if (!advertisement.ftmsServiceData.empty()) entry->ftmsServiceData = advertisement.ftmsServiceData;
+    if (!advertisement.ftmsServiceData.empty()) {
+        entry->ftmsServiceData = advertisement.ftmsServiceData;
+        entry->ftmsDataSeenMs = now;
+    }
     if (!advertisement.manufacturerData.empty()) entry->manufacturerData = advertisement.manufacturerData;
     for (const auto& service : advertisement.services) {
         bool known = false;

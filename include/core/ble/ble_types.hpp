@@ -107,6 +107,7 @@ struct Subscription {
     Uuid service;
     Uuid characteristic;
     bool indicate = false;  // false: notifications
+    bool ifPresent = false;  // omit absent optional characteristics without a result
 };
 
 struct ReadRequest {
@@ -132,7 +133,7 @@ struct ConnectPlan {
     std::uint8_t readCount = 0;
     std::array<ReadRequest, kMaxReads> reads{};
 
-    bool subscribe(const Uuid& service, const Uuid& characteristic, bool indicate = false);
+    bool subscribe(const Uuid& service, const Uuid& characteristic, bool indicate = false, bool ifPresent = false);
     bool read(const Uuid& service, const Uuid& characteristic);
 };
 

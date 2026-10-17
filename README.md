@@ -438,7 +438,21 @@ an address not in the current scan list; detection without a scan result cannot 
 the saved BLE source again. `save` persists that input toggle.
 
 ### Connection lifecycle and stale data
-- The paired device is connected on boot when BLE input is enabled. Connect attempts time out after 15 s; failures and link loss reconnect with exponential backoff (1 s … 30 s).
+- The paired device is connected on boot when BLE input is enabled. Before each attempt,
+  `searching` probes for its advertisement for up to 3 s unless one was seen less than
+  2 s ago. FTMS Service Data ends the probe immediately; otherwise it waits up to
+  500 ms for a scan response. An absent device backs off with `not-advertising`
+  (wake it, move it closer, or disconnect other apps). Broadcast-only inputs keep listening.
+- Connection setup discovers GATT once, then uses cached services/characteristics.
+  On NimBLE 1.4.3, the public `discoverAttributes()` traversal also caches
+  descriptors and reports discovery errors (the individual vector getters hide them).
+  Discovery/read/subscription progress renews the 15 s inactivity deadline, bounded
+  by 45 s total. Timeouts log elapsed time, phase and result counts. Failures and
+  link loss reconnect with exponential backoff (1 s … 30 s).
+- FTMS subscribes to every machine type advertised in Service Data plus Control
+  Point indications. Without Service Data it reuses the last type mask (RAM only),
+  or subscribes only to FTMS data characteristics present in GATT; absent optional
+  characteristics do not appear as failed subscriptions.
 - If a connected device delivers no data for 5 s, its telemetry is marked stale and invalidated (outputs stop reporting the metrics). If no data arrives for 20 s, the link is dropped and reconnected.
 - Stale treadmill telemetry also disables treadmill controls until fresh data
   restores readiness. The FTMS input handshake never automatically sends

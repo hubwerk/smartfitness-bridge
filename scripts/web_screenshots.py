@@ -332,6 +332,12 @@ def render(browser, output, name, width, height):
     page.keyboard.press("Tab")
     expect(page.locator("#dash")).to_be_focused()
 
+    searching = json.loads(json.dumps(STATUS))
+    searching["input"]["link"] = "searching"
+    sockets[0].send(json.dumps(searching))
+    expect(page.locator("#s-input .pending")).to_have_text("link: searching")
+    check_view(page, "dash", width < 650)
+
     # Status failure rendering is driven by the real WebSocket status contract.
     sockets[0].send(json.dumps(failure_status()))
     expect(page.locator("#s-input .bad")).to_have_text("connection lost")
