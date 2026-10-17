@@ -30,7 +30,6 @@ public:
     static constexpr std::uint32_t kScanWindowNormal = 37;
     static constexpr std::uint32_t kScanWindowHighDuty = 90;
     static constexpr std::uint32_t kScanInterval = 97;
-
     NimbleCentral() = default;
     NimbleCentral(const NimbleCentral&) = delete;
     NimbleCentral& operator=(const NimbleCentral&) = delete;
@@ -78,7 +77,8 @@ private:
     void doWrite(const Cmd& cmd);
     bool cancelled(std::uint32_t session) const { return requestedSession_.load() != session; }
     void pushEvent(smartfitness::ble::CentralEventType type, std::uint32_t session, std::uint8_t index = 0,
-                   std::uint32_t mask = 0, const std::uint8_t* data = nullptr, std::size_t length = 0);
+                   std::uint32_t mask = 0, const std::uint8_t* data = nullptr, std::size_t length = 0,
+                   std::uint16_t reasonCode = 0);
 
     friend struct Impl;
     Impl* impl_ = nullptr;

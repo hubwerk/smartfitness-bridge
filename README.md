@@ -113,10 +113,26 @@ pio run -e crowpanel128   # HMI variant
 ### Optional web debug log
 
 Uncomment `-DDEBUG_WEB` in the `esp32s3dev` environment's `build_flags` in
-`platformio.ini`, then rebuild and flash. The **Debug** tab loads the current log
+`platformio.ini`, then rebuild and flash. This captures queued application logs
+and ESP-IDF logs in the **Debug** tab. The tab loads the current log
 when opened and receives new output over the existing WebSocket (no polling).
 **Logfile herunterladen** downloads `/debug/log` as `debug.log`;
 **Anzeige leeren** only clears the browser display.
+The output includes state changes for BLE input, FTMS/ANT output, bridge source
+and output selection, Wi-Fi, executed API commands, and WebSocket clients; it
+does not log telemetry packets or API request bodies. Arduino-ESP32 2.0.17
+implements task-context `log_x` macros using `log_printf` by default, so the
+DEBUG_WEB-only configuration routes them through ESP-IDF logging for capture.
+The same core's `isr_log_x` macros use `ets_printf` and are not captured; do not
+log from ISRs. NimBLE-Arduino 1.4.3 uses `console_printf` for its Arduino logs
+(rather than ESP-IDF `esp_log`), so those remain on UART; its level is limited
+to warnings/errors to avoid flooding the console.
+
+ESP-IDF logging defaults to **Info** with `DEBUG_WEB`. To change it, uncomment
+`-DDEBUG_WEB_IDF_LEVEL=3` next to `-DDEBUG_WEB` in `platformio.ini` and choose
+1=Error, 2=Warning, 3=Info, 4=Debug or 5=Verbose. Higher levels can fill the
+512 KiB log quickly: rotation discards the previous contents when the next
+batch exceeds the limit, and queue overflow is reported as lost output.
 The central `DBG_SERIAL` output still writes to Serial and additionally buffers
 output for LittleFS `/debug.log`. The file is deleted on every boot and never
 exceeds **512 KiB (524288 bytes)**; when full, the old contents are discarded

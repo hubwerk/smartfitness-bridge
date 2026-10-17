@@ -71,8 +71,12 @@ private:
     std::string lastScanJson_;
     std::string lastConfigJson_;
     std::atomic<bool> wifiScanRequested_{false};
+    std::atomic<bool> stationGotIp_{false};
+    std::atomic<bool> stationDisconnected_{false};
+    std::atomic<int> stationDisconnectReason_{-1};
     WifiScan wifiScan_;
     std::uint32_t lastWifiScanAttemptMs_ = 0;
+    int lastApStationCount_ = -1;
 };
 
 #endif  // ARDUINO

@@ -37,6 +37,7 @@ public:
 
     struct Job {
         std::uint32_t id = 0;
+        std::string endpoint;
         std::vector<Command> commands;
     };
 

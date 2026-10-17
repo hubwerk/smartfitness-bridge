@@ -3,6 +3,7 @@
 
 #include <LittleFS.h>
 #include <esp_partition.h>
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -12,11 +13,16 @@
 #include <cstdio>
 #include <cstring>
 
+#ifndef DEBUG_WEB_IDF_LEVEL
+#define DEBUG_WEB_IDF_LEVEL 3
+#endif
+
 namespace {
 constexpr char kPath[] = "/debug.log";
 constexpr std::size_t kQueueBytes = 8192;
 constexpr std::size_t kBlockBytes = 1024;
 std::uint8_t queue[kQueueBytes];
+std::uint8_t queueToSerial[kQueueBytes];
 std::size_t head = 0;
 std::size_t queued = 0;
 std::uint64_t lost = 0;
@@ -30,6 +36,8 @@ std::uint64_t absoluteEnd = 0;
 bool writable = false;
 bool started = false;
 bool serialOnly = false;
+vprintf_like_t uartVprintf = nullptr;
+thread_local bool inDebugVprintf = false;
 
 class Lock {
 public:
@@ -86,6 +94,52 @@ std::size_t lossMarker(char (&marker)[100], std::uint64_t dropped) {
     return std::snprintf(marker, sizeof(marker),
         "\n[Debug] LOST OUTPUT: %llu byte(s)/ISR call(s)\n",
         static_cast<unsigned long long>(dropped));
+}
+
+std::size_t stripAnsi(char* text, std::size_t size) {
+    std::size_t read = 0;
+    std::size_t written = 0;
+    while (read < size) {
+        if (static_cast<unsigned char>(text[read]) == 0x1b && read + 1 < size && text[read + 1] == '[') {
+            read += 2;
+            while (read < size) {
+                const unsigned char character = static_cast<unsigned char>(text[read++]);
+                if (character >= 0x40 && character <= 0x7e) break;
+            }
+            continue;
+        }
+        text[written++] = text[read++];
+    }
+    return written;
+}
+
+int debugVprintf(const char* format, va_list args) {
+    if (!format || inDebugVprintf) return 0;
+    inDebugVprintf = true;
+
+    va_list uartArgs;
+    va_copy(uartArgs, args);
+    const int uartResult = uartVprintf ? uartVprintf(format, uartArgs) : 0;
+    va_end(uartArgs);
+
+    if (workerTask && xTaskGetCurrentTaskHandle() == workerTask) {
+        inDebugVprintf = false;
+        return uartResult;
+    }
+
+    char buffer[kBlockBytes / 2];
+    va_list logArgs;
+    va_copy(logArgs, args);
+    const int length = std::vsnprintf(buffer, sizeof(buffer), format, logArgs);
+    va_end(logArgs);
+    if (length > 0) {
+        const std::size_t available = std::min(static_cast<std::size_t>(length), sizeof(buffer) - 1);
+        if (static_cast<std::size_t>(length) > available) recordLoss(static_cast<std::size_t>(length) - available);
+        const std::size_t clean = stripAnsi(buffer, available);
+        debugSerial.writeLog(reinterpret_cast<const std::uint8_t*>(buffer), clean);
+    }
+    inDebugVprintf = false;
+    return uartResult;
 }
 
 void useSerialFallback(const char* reason) {
@@ -154,14 +208,21 @@ void worker(void*) {
         vTaskDelay(pdMS_TO_TICKS(20));
         while (remaining) {
             portENTER_CRITICAL(&queueMux);
-            const std::size_t count = std::min(remaining, sizeof(block));
+            std::size_t count = std::min(remaining, sizeof(block));
+            const bool toSerial = queueToSerial[head] != 0;
+            for (std::size_t index = 1; index < count; ++index) {
+                if ((queueToSerial[(head + index) % kQueueBytes] != 0) != toSerial) {
+                    count = index;
+                    break;
+                }
+            }
             const std::size_t first = std::min(count, kQueueBytes - head);
             std::memcpy(block, queue + head, first);
             std::memcpy(block + first, queue, count - first);
             head = (head + count) % kQueueBytes;
             queued -= count;
             portEXIT_CRITICAL(&queueMux);
-            serialWrite(block, count);
+            if (toSerial) serialWrite(block, count);
             append(block, count);
             remaining -= count;
         }
@@ -193,6 +254,27 @@ std::size_t DebugSerial::write(const std::uint8_t* data, std::size_t size) {
     const std::size_t first = std::min(count, kQueueBytes - tail);
     std::memcpy(queue + tail, data, first);
     std::memcpy(queue, data + first, count - first);
+    std::memset(queueToSerial + tail, 1, first);
+    std::memset(queueToSerial, 1, count - first);
+    queued += count;
+    lost += size - count;
+    portEXIT_CRITICAL(&queueMux);
+    if (workerTask) xTaskNotifyGive(workerTask);
+    return count;
+}
+
+std::size_t DebugSerial::writeLog(const std::uint8_t* data, std::size_t size) {
+    if (rejectIsr()) return 0;
+    if (!data || !size) return 0;
+    if (serialOnly) return size;
+    portENTER_CRITICAL(&queueMux);
+    const std::size_t count = std::min(size, kQueueBytes - queued);
+    const std::size_t tail = (head + queued) % kQueueBytes;
+    const std::size_t first = std::min(count, kQueueBytes - tail);
+    std::memcpy(queue + tail, data, first);
+    std::memcpy(queue, data + first, count - first);
+    std::memset(queueToSerial + tail, 0, first);
+    std::memset(queueToSerial, 0, count - first);
     queued += count;
     lost += size - count;
     portEXIT_CRITICAL(&queueMux);
@@ -239,6 +321,8 @@ void begin() {
     if (xTaskCreate(worker, "debug-log", 4096, nullptr, 1, &workerTask) != pdPASS) {
         useSerialFallback("[Debug] logger worker allocation failed; direct Serial fallback\n");
     }
+    uartVprintf = esp_log_set_vprintf(debugVprintf);
+    esp_log_level_set("*", static_cast<esp_log_level_t>(DEBUG_WEB_IDF_LEVEL));
 }
 
 Chunk readChunk(std::uint64_t offset, char* data, std::size_t capacity) {

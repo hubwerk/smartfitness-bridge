@@ -4,28 +4,32 @@
 #include "ftms_output.h"
 
 #include <cmath>
+#ifdef ARDUINO
+#include <Arduino.h>
+#include "debug_serial.h"
+#endif
 
 namespace smartfitness {
 namespace {
 template <typename T>
-std::uint32_t bit(T value) {
+std::uint32_t enumBit(T value) {
     const auto index = static_cast<unsigned int>(value);
     return index < static_cast<unsigned int>(T::Count) ? (1U << index) : 0U;
 }
 }
 
 void TrainerCapabilities::setMetric(Metric metric, bool supported) {
-    if (supported) metrics |= bit(metric);
-    else metrics &= ~bit(metric);
+    if (supported) metrics |= enumBit(metric);
+    else metrics &= ~enumBit(metric);
 }
 
 void TrainerCapabilities::setControl(Control control, bool supported) {
-    if (supported) controls |= bit(control);
-    else controls &= ~bit(control);
+    if (supported) controls |= enumBit(control);
+    else controls &= ~enumBit(control);
 }
 
-bool TrainerCapabilities::supports(Metric metric) const { return (metrics & bit(metric)) != 0; }
-bool TrainerCapabilities::supports(Control control) const { return (controls & bit(control)) != 0; }
+bool TrainerCapabilities::supports(Metric metric) const { return (metrics & enumBit(metric)) != 0; }
+bool TrainerCapabilities::supports(Control control) const { return (controls & enumBit(control)) != 0; }
 
 const MetricSample& TrainerState::sample(Metric metric) const {
     static const MetricSample invalid;
@@ -116,6 +120,12 @@ void BridgeCore::refreshDeviceState() {
 }
 
 void BridgeCore::setTrainerState(const TrainerState& state) {
+#ifdef ARDUINO
+    if (trainer_.connected != state.connected)
+        DBG_SERIAL.printf("[BridgeCore] BLE input %s\n", state.connected ? "connected" : "disconnected");
+    if (trainer_.connected && state.connected && trainer_.profile != state.profile)
+        DBG_SERIAL.printf("[BridgeCore] input profile: %s\n", machineProfileName(state.profile));
+#endif
     if (trainer_.connected != state.connected ||
         trainer_.trainerDetected != state.trainerDetected ||
         trainer_.capabilities.controls != state.capabilities.controls ||

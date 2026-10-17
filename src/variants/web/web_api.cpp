@@ -5,6 +5,10 @@
 #include <cstring>
 
 #include "bridge_controller.h"
+#ifdef ARDUINO
+#include <Arduino.h>
+#include "debug_serial.h"
+#endif
 
 using namespace smartfitness;
 
@@ -319,6 +323,7 @@ ApiResponse ApiExchange::submit(const std::string& endpoint, const std::string& 
     Job job;
     std::string error;
     if (!parseApiRequest(endpoint, body, job.commands, error)) return {400, errorJson(error)};
+    job.endpoint = endpoint;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         job.id = nextId_++;
@@ -382,6 +387,9 @@ std::vector<std::string> ApiExchange::process(BridgeController& ui, std::size_t 
             }
         }
         const std::string json = resultJson(job.id, true, combined);
+#ifdef ARDUINO
+        DBG_SERIAL.printf("[API] %s %s\n", job.endpoint.c_str(), combined.ok ? "succeeded" : "failed");
+#endif
         store(job.id, true, json);
         messages.push_back(json);
     }

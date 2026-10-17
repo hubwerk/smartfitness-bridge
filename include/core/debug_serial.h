@@ -28,6 +28,7 @@ public:
     using Print::write;
     std::size_t write(std::uint8_t byte) override;
     std::size_t write(const std::uint8_t* data, std::size_t size) override;
+    std::size_t writeLog(const std::uint8_t* data, std::size_t size);
     std::size_t printf(const char* format, ...) __attribute__((format(printf, 2, 3)));
 };
 extern DebugSerial debugSerial;
