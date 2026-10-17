@@ -5,6 +5,7 @@
 #ifdef ARDUINO
 
 #include <Arduino.h>
+#include "debug_serial.h"
 
 #include "bridge_controller.h"
 #include "board_crowpanel128.h"
@@ -64,14 +65,14 @@ void begin(BridgeController& controller, const BridgeConfig& config) {
     settings = hmi::CrowPanelHal::loadSettings();
     lv_init();
     if (!hal.begin()) {
-        Serial.println("[HMI] display init failed; Serial console only");
+        DBG_SERIAL.println("[HMI] display init failed; Serial console only");
         return;
     }
     hmi::lcars::init(lv_display_get_default());
 
     hmi::HmiActions actions;
     actions.submit = [](const Command& command) {
-        if (!commands.push(command)) Serial.println("[HMI] command queue full; input dropped");
+        if (!commands.push(command)) DBG_SERIAL.println("[HMI] command queue full; input dropped");
     };
     actions.settingsChanged = applySettings;
     ui.begin(hal.encoder(), settings, actions);
@@ -81,7 +82,7 @@ void begin(BridgeController& controller, const BridgeConfig& config) {
     lv_timer_handler();
     hal.setBrightness(settings.brightness);
     ready = true;
-    Serial.println("[HMI] CrowPanel 1.28\" HMI ready (knob: turn/press/hold, touch: tap/swipe)");
+    DBG_SERIAL.println("[HMI] CrowPanel 1.28\" HMI ready (knob: turn/press/hold, touch: tap/swipe)");
 }
 
 void loop(BridgeController& controller) {
@@ -89,7 +90,7 @@ void loop(BridgeController& controller) {
     Command command;
     while (commands.pop(command)) {
         const CommandResult result = controller.execute(command);
-        Serial.printf("[HMI] %s\n", result.message.c_str());
+        DBG_SERIAL.printf("[HMI] %s\n", result.message.c_str());
         if (command.type == CommandType::FactoryReset && result.ok) {
             hmi::CrowPanelHal::clearSettings();
             applySettings(hmi::HmiSettings{});

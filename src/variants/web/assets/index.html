@@ -48,12 +48,19 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 @media(max-width:1000px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric .v{font-size:49px}.metric:last-child .v{font-size:28px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+/* #ifdef DEBUG_WEB */
+#debug-output{display:block;width:100%;height:55vh;resize:vertical;background:var(--bg);color:var(--fg);border:2px solid var(--violet);padding:12px;font:14px/1.4 monospace;white-space:pre}
+/* #endif */
 </style>
 </head>
 <body>
 <div class="lcars-rail" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
 <header><h1>SmartFitness Bridge</h1><span id="conn" class="pill bad" role="status">offline</span>
-<nav role="tablist" aria-label="Bridge panels"><button id="tab-dash" role="tab" aria-controls="dash" aria-selected="true" tabindex="0" data-tab="dash" class="active">Dashboard</button><button id="tab-dev" role="tab" aria-controls="dev" aria-selected="false" tabindex="-1" data-tab="dev">Devices</button><button id="tab-ctl" role="tab" aria-controls="ctl" aria-selected="false" tabindex="-1" data-tab="ctl">Control</button><button id="tab-set" role="tab" aria-controls="set" aria-selected="false" tabindex="-1" data-tab="set">Settings</button></nav></header>
+<nav role="tablist" aria-label="Bridge panels"><button id="tab-dash" role="tab" aria-controls="dash" aria-selected="true" tabindex="0" data-tab="dash" class="active">Dashboard</button><button id="tab-dev" role="tab" aria-controls="dev" aria-selected="false" tabindex="-1" data-tab="dev">Devices</button><button id="tab-ctl" role="tab" aria-controls="ctl" aria-selected="false" tabindex="-1" data-tab="ctl">Control</button><button id="tab-set" role="tab" aria-controls="set" aria-selected="false" tabindex="-1" data-tab="set">Settings</button>
+<!-- #ifdef DEBUG_WEB -->
+<button id="tab-debug" role="tab" aria-controls="debug" aria-selected="false" tabindex="-1" data-tab="debug">Debug</button>
+<!-- #endif -->
+</nav></header>
 <main>
 <section id="dash" class="active" role="tabpanel" aria-labelledby="tab-dash" tabindex="0">
  <h2>01 / Live telemetry</h2>
@@ -116,6 +123,14 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
  <div class="row"><button class="b service-action" id="btn-save">Save</button><button class="b sec service-action" id="btn-restart">Restart</button><button class="b danger" id="btn-reset">Factory reset</button></div>
  <p class="small">Firmware <span id="fw"></span> · <span id="unsaved"></span></p>
 </section>
+<!-- #ifdef DEBUG_WEB -->
+<section id="debug" role="tabpanel" aria-labelledby="tab-debug" tabindex="0" hidden>
+ <h2>05 / Debug</h2>
+ <div class="card"><label for="debug-output" class="label">Debug-Output · max. 512 KB · gelöscht beim Neustart</label>
+ <textarea id="debug-output" readonly spellcheck="false"></textarea></div>
+ <div class="row"><button class="b" id="btn-debug-download">Logfile herunterladen</button><button class="b sec" id="btn-debug-clear">Anzeige leeren</button><span id="debug-state" class="small" role="status"></span></div>
+</section>
+<!-- #endif -->
 </main>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
@@ -149,7 +164,11 @@ function fullUuid(uuid){const short=/^(?:0x)?([0-9a-f]{4})$/i.exec(uuid);return 
 function fill(node,items){node.replaceChildren(...items)}
 function toast(msg,ok){const t=$("toast");t.textContent=msg;t.className=ok===undefined?"":ok?"ok":"bad";t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",4000)}
 const tabs=Array.from(document.querySelectorAll('nav [role="tab"]'));
-function selectTab(b){tabs.forEach(t=>{const active=t===b;t.classList.toggle("active",active);t.setAttribute("aria-selected",String(active));t.tabIndex=active?0:-1;const panel=$(t.dataset.tab);panel.classList.toggle("active",active);panel.hidden=!active});if(b.dataset.tab==="set")loadConfig()}
+function selectTab(b){tabs.forEach(t=>{const active=t===b;t.classList.toggle("active",active);t.setAttribute("aria-selected",String(active));t.tabIndex=active?0:-1;const panel=$(t.dataset.tab);panel.classList.toggle("active",active);panel.hidden=!active});if(b.dataset.tab==="set")loadConfig();
+// #ifdef DEBUG_WEB
+ if(b.dataset.tab==="debug")loadDebug();
+// #endif
+}
 tabs.forEach((b,index)=>{b.onclick=()=>selectTab(b);b.onkeydown=e=>{let next;if(e.key==="ArrowRight")next=(index+1)%tabs.length;else if(e.key==="ArrowLeft")next=(index+tabs.length-1)%tabs.length;else if(e.key==="Home")next=0;else if(e.key==="End")next=tabs.length-1;else return;e.preventDefault();selectTab(tabs[next]);tabs[next].focus()}});
 async function post(endpoint,body){
  try{const r=await fetch("/api/"+endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
@@ -252,8 +271,43 @@ $("btn-wifi-scan").onclick=async()=>{const b=$("btn-wifi-scan");if(b.getAttribut
 $("btn-restart").onclick=async()=>{if(!confirm("Restart the bridge?"))return;const r=await run("restart");
  if(r&&r.ok&&cfgHttps!==(location.protocol==="https:"))setTimeout(()=>{location.href=(cfgHttps?"https://":"http://")+location.hostname+"/"},8000)};
 $("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?"))run("factory-reset").then(loadConfig)};
+// #ifdef DEBUG_WEB
+let debugEnd=0,debugLoading=false,debugQueue=[],debugQueuedBytes=0,debugOverflow=false;
+const debugDecoder=new TextDecoder();
+function debugText(text,replace=false){const box=$("debug-output");box.value=(replace?text:box.value+text).slice(-512*1024);box.scrollTop=box.scrollHeight}
+function renderDebug(m){
+ if($("debug").hidden)return;
+ if(debugLoading){if(debugQueuedBytes+m.data.length<=512*1024){debugQueue.push(m);debugQueuedBytes+=m.data.length}else debugOverflow=true;return}
+ if(m.end<=debugEnd)return;
+ if(m.start>debugEnd&&!m.reset){loadDebug();return}
+ const bytes=Uint8Array.from(atob(m.data),c=>c.charCodeAt(0)),skip=Math.max(0,debugEnd-m.start),reset=m.reset&&debugEnd<=m.start;
+ if(reset)debugDecoder.decode();
+ debugText(debugDecoder.decode(bytes.subarray(skip),{stream:true}),reset);debugEnd=m.end;
+}
+async function loadDebug(){
+ if(debugLoading)return;debugLoading=true;debugQueue=[];debugQueuedBytes=0;debugOverflow=false;
+ try{const response=await fetch("/debug/log",{cache:"no-store"});if(!response.ok)throw new Error("HTTP "+response.status);
+  const offset=response.headers.get("X-Debug-End"),end=Number(offset);if(offset===null||!Number.isSafeInteger(end)||end<0)throw new Error("invalid log offset");
+  const bytes=new Uint8Array(await response.arrayBuffer());debugDecoder.decode();debugText(debugDecoder.decode(bytes,{stream:true}),true);debugEnd=end;$("debug-state").textContent="";
+ }catch(e){$("debug-state").textContent="Log nicht verfügbar: "+e.message}
+ finally{debugLoading=false;const queued=debugQueue;debugQueue=[];for(const message of queued)renderDebug(message);if(debugOverflow&&!debugLoading)loadDebug()}
+}
+$("btn-debug-clear").onclick=()=>debugText("",true);
+$("btn-debug-download").onclick=async()=>{
+ try{const response=await fetch("/debug/log",{cache:"no-store"});if(!response.ok)throw new Error("HTTP "+response.status);
+  const url=URL.createObjectURL(await response.blob()),link=el("a");link.href=url;link.download="debug.log";document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }catch(e){$("debug-state").textContent="Download fehlgeschlagen: "+e.message}
+};
+// #endif
 function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select,#set button"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m)};
+// #ifdef DEBUG_WEB
+ ws.onopen=()=>{if(!$("debug").hidden)loadDebug()};
+// #endif
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select,#set button"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m);
+// #ifdef DEBUG_WEB
+  if(m.type==="debug")renderDebug(m);
+// #endif
+ };
  ws.onclose=()=>{$("conn").textContent="offline";$("conn").className="pill bad";setTimeout(connectWs,2000)}}
 fetch("/api/status").then(r=>r.json()).then(s=>{if(s.type)renderStatus(s)}).catch(()=>{});
 fetch("/api/scan/results").then(r=>r.json()).then(s=>{if(s.devices)renderScan(s)}).catch(()=>{});

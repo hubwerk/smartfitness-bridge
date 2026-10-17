@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import expect, sync_playwright
+from embed_web_assets import web_content
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -186,7 +187,7 @@ def render(browser, output, name, width, height):
             request_route.abort()
             return
         if url.path == "/":
-            request_route.fulfill(body=ASSET.read_text(), content_type="text/html")
+            request_route.fulfill(body=web_content(), content_type="text/html")
             return
         if request.method == "POST" and url.path == "/api/wifi-scan":
             wifi_scans.append(request.post_data_json)
@@ -232,6 +233,8 @@ def render(browser, output, name, width, height):
     page.goto(ORIGIN)
     page.evaluate("document.fonts.ready")
     expect(page.locator("#m-power")).to_have_text("214")
+    assert page.locator("#tab-debug").count() == 0
+    assert "/debug/log" not in page.content()
     expect(page.locator("#power-gauge")).to_have_attribute("value", "214")
     expect(page.locator("#s-input .ok")).to_have_text("link: ready")
     expect(page.locator("#s-bridge")).to_contain_text("control ready")
@@ -520,6 +523,105 @@ def render(browser, output, name, width, height):
           " errors, font, offline assets, no overflow passed")
 
 
+def check_debug(browser, output, name, width, height):
+    context = browser.new_context(viewport={"width": width, "height": height},
+                                  device_scale_factor=1, reduced_motion="reduce",
+                                  accept_downloads=True)
+    page = context.new_page()
+    sockets, requests, errors = [], [], []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    history = b"[Boot] ready\n"
+    end = len(history)
+    during_load = None
+
+    def push(data, start, reset=False):
+        sockets[0].send(json.dumps({"type": "debug", "start": start,
+                                   "end": start + len(data), "reset": reset,
+                                   "data": base64.b64encode(data).decode()}))
+
+    def websocket(ws):
+        sockets.append(ws)
+        ws.send(json.dumps(STATUS))
+
+    def route(request_route):
+        nonlocal during_load
+        path = urlparse(request_route.request.url).path
+        requests.append(path)
+        if path == "/":
+            request_route.fulfill(body=web_content(True), content_type="text/html")
+        elif path == "/debug/log":
+            if during_load:
+                push(during_load, end)
+                during_load = None
+            request_route.fulfill(body=history, content_type="text/plain; charset=utf-8",
+                                  headers={"X-Debug-End": str(end),
+                                           "Content-Disposition": 'attachment; filename="debug.log"'})
+        else:
+            fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN}
+            assert path in fixtures, f"Unexpected debug request: {path}"
+            request_route.fulfill(json=fixtures[path])
+
+    context.route_web_socket("**/ws", websocket)
+    context.route("**/*", route)
+    page.goto(ORIGIN)
+    expect(page.locator("#m-power")).to_have_text("214")
+    assert "/debug/log" not in requests, "History must load only when opening the tab"
+    during_load = b"[Live] during history request\n"
+    page.locator("#tab-debug").click()
+    box = page.locator("#debug-output")
+    expected = history.decode() + "[Live] during history request\n"
+    expect(box).to_have_value(expected)
+    end = len(expected.encode())
+    page.wait_for_timeout(350)
+    assert requests.count("/debug/log") == 1, "Debug history must not be polled"
+    check_view(page, "debug", width < 650)
+    payload = '<script>window.__unsafe=true</script> ä\n'.encode()
+    push(payload[:-2], end)
+    push(payload[-2:], end + len(payload) - 2)
+    expected += payload.decode()
+    expect(box).to_have_value(expected)
+    assert page.evaluate("window.__unsafe") is None, "Log output must be plain text"
+    push(payload, end)  # duplicate delivery must not append twice
+    expect(box).to_have_value(expected)
+    end += len(payload)
+    # A partial overlap (history completed while a frame was in flight).
+    push(payload + b"overlap\n", end - len(payload))
+    expected += "overlap\n"
+    expect(box).to_have_value(expected)
+    end += len(b"overlap\n")
+    push(b"[Log] rotated\n", end + 100, reset=True)
+    expect(box).to_have_value("[Log] rotated\n")
+    end += 100 + len(b"[Log] rotated\n")
+    # The browser may already have loaded part of the rotated file as history.
+    push(b"[Log] rotated\ncontinued\n", end - len(b"[Log] rotated\n"), reset=True)
+    expect(box).to_have_value("[Log] rotated\ncontinued\n")
+    end += len(b"continued\n")
+    history = b"[Log] recovered after slow client\n"
+    end += len(history) + 100
+    push(b"gap\n", end - 4)
+    expect(box).to_have_value(history.decode())
+    assert requests.count("/debug/log") == 2, "A missed frame must resync once"
+    with page.expect_download() as download:
+        page.locator("#btn-debug-download").click()
+    assert download.value.suggested_filename == "debug.log"
+    assert Path(download.value.path()).read_bytes() == history
+    push(b"line\n" * 150, end)
+    expect(box).to_have_value(history.decode() + "line\n" * 150)
+    assert box.evaluate("e => e.scrollTop + e.clientHeight >= e.scrollHeight - 2")
+    page.screenshot(path=str(output / f"05-debug-{name}.png"), full_page=True)
+    page.locator("#btn-debug-clear").click()
+    expect(box).to_have_value("")
+    push(b"after clear\n", end + 750)
+    expect(box).to_have_value("after clear\n")
+    page.locator("#tab-dash").click()
+    page.locator("#tab-debug").click()
+    expect(box).to_have_value(history.decode())
+    assert not errors, f"Debug browser errors: {errors}"
+    context.close()
+    print(f"{name}: debug gating, history race, push/UTF-8/plain text, deduplication,"
+          " rotation, gap recovery, download, clear, scroll and no polling passed")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", "--output-dir", dest="output_dir", type=Path,
@@ -530,6 +632,10 @@ def main():
     parser.add_argument("--html", "--before-asset", dest="before_asset", type=Path,
                         help="Render only baseline dashboard screenshots from a saved original HTML")
     args = parser.parse_args()
+    normal, debug = web_content(), web_content(True)
+    assert "DEBUG_WEB" not in normal and "DEBUG_WEB" not in debug
+    for marker in ("/debug/log", "debug-output", "renderDebug", "tab-debug"):
+        assert marker not in normal and marker in debug, f"Conditional asset leak: {marker}"
     if not args.before_asset:
         assert not re.search(r"(?:linear|radial|conic)-gradient\(", ASSET.read_text(), re.I), \
             "Gradient syntax is not allowed in the web UI"
@@ -549,6 +655,7 @@ def main():
                 render_before(browser, args.before_asset, args.output_dir, name, width, height)
             else:
                 render(browser, args.output_dir, name, width, height)
+                check_debug(browser, args.output_dir, name, width, height)
         browser.close()
     content = (args.before_asset or ASSET).read_bytes()
     label = "Baseline asset" if args.before_asset else "Web asset"

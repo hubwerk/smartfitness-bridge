@@ -89,7 +89,7 @@ Source layout:
 
 Targets: **ESP32-S3 DevKitC-1 N16R8** (web variant) and **ELECROW CrowPanel 1.28"
 ESP32-S3 Rotary Display** (HMI variant). Both have 16 MB flash and 8 MB octal PSRAM
-and use the Arduino framework, `qio_opi` memory mode and `default_16MB.csv`
+and use the Arduino framework, `qio_opi` memory mode and `partitions_16MB.csv`
 partitions. Use the board's flashing connection (the CrowPanel has one USB-C port).
 
 **Prerequisites:** Python 3.8+, Git, and PlatformIO Core (`pip install -U
@@ -109,6 +109,35 @@ pio run -e crowpanel128   # HMI variant
 - The first build downloads the toolchain, Arduino core, and pinned libraries; allow a few minutes.
 - `scripts/embed_web_assets.py` runs automatically before compiling the web variant; no separate step is needed.
 - Output files are in `.pio/build/<env>/`: `firmware.bin`, `bootloader.bin`, and `partitions.bin`. CI uploads them as `firmware-esp32s3dev` / `firmware-crowpanel128` artifacts.
+
+### Optional web debug log
+
+Uncomment `-DDEBUG_WEB` in the `esp32s3dev` environment's `build_flags` in
+`platformio.ini`, then rebuild and flash. The **Debug** tab loads the current log
+when opened and receives new output over the existing WebSocket (no polling).
+**Logfile herunterladen** downloads `/debug/log` as `debug.log`;
+**Anzeige leeren** only clears the browser display.
+The central `DBG_SERIAL` output still writes to Serial and additionally buffers
+output for LittleFS `/debug.log`. The file is deleted on every boot and never
+exceeds **512 KiB (524288 bytes)**; when full, the old contents are discarded
+before the next batch is written. A dedicated task batches flash writes;
+queue overflow or rejected ISR writes are reported as lost output. Do not call
+formatted `Print` methods from an ISR; keep interrupt handlers free of logging.
+Downloads hold a consistent file snapshot while streaming. A slow download can
+temporarily delay other web requests/live pushes and fill the bounded log queue;
+the control loop never waits on the file lock.
+
+`partitions_16MB.csv` explicitly preserves **all offsets and sizes** from the
+previous Arduino `default_16MB.csv`: two 6400-KiB app slots, unchanged NVS and
+coredump, and a **3456-KiB filesystem** at `0xc90000`. This leaves ample room for
+the log and filesystem metadata. Web assets remain embedded in firmware, so
+they do not consume filesystem space. The web environment selects LittleFS;
+startup checks free space and warns if the full log cannot fit.
+Without `DEBUG_WEB`, no logger, filesystem mounting, debug assets or debug
+endpoint is compiled in; Serial output and the existing flash layout are unchanged.
+CI builds the web firmware both with and without this flag, plus the normal HMI variant.
+Like the existing web interface, the log is available to connected clients;
+enable debugging only on trusted networks and check logs before sharing them.
 
 ### Flash and monitor
 

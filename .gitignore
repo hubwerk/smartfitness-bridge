@@ -3,3 +3,4 @@ include/generated/
 screenshots/
 .cache/
 build/
+__pycache__/
