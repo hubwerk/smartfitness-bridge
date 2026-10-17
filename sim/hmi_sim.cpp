@@ -590,10 +590,10 @@ StatusView bikeStatus() {
     status.input.link = "ready";
     status.input.paired = {true, "aa:00:00:00:00:21", false, "KICKR CORE", "ftms", {}, {}};
     status.input.paired.advertisedServices = {"1826", "1818", "180d"};
-    status.input.paired.subscriptions = {{"1826", "2ad2", "ok", false},
-                                        {"1826", "2ad9", "ok", true},
-                                        {"1818", "2a63", "failed", false},
-                                        {"180d", "2a37", "pending", false}};
+    status.input.paired.subscriptions = {{"1826", "2ad2", "ok", false, ""},
+                                        {"1826", "2ad9", "ok", true, ""},
+                                        {"1818", "2a63", "failed", false, "cccd-failed"},
+                                        {"180d", "2a37", "pending", false, ""}};
     status.ftmsOutput.enabled = true;
     status.ftmsOutput.name = "SmartFitness Bridge";
     status.ftmsOutput.advertising = true;
@@ -624,9 +624,9 @@ StatusView treadmillStatus() {
     status.input.link = "ready";
     status.input.paired = {true, "aa:00:00:00:00:22", false, "WalkingPad", "walkingpad-r1", {}, {}};
     status.input.paired.advertisedServices = {"1826", "180d"};
-    status.input.paired.subscriptions = {{"1826", "2acd", "ok", false},
-                                        {"1826", "2ad9", "failed", true},
-                                        {"180d", "2a37", "pending", false}};
+    status.input.paired.subscriptions = {{"1826", "2acd", "ok", false, ""},
+                                        {"1826", "2ad9", "failed", true, "cccd-failed"},
+                                        {"180d", "2a37", "pending", false, ""}};
     status.ftmsOutput.enabled = true;
     status.ftmsOutput.profile = MachineProfile::Treadmill;
     status.ftmsOutput.name = "SmartFitness Bridge";
