@@ -19,6 +19,8 @@ public:
         ble::ConnectPlan plan;
     };
 
+    static constexpr std::uint32_t kCurrentSession = 0xffffffffU;
+
     bool begin() override { return true; }
     bool startScan(std::uint32_t durationMs, bool duplicates, bool highDuty = false) override {
         ++scanStarts;
@@ -89,6 +91,24 @@ public:
         event.index = index;
         event.setData(data.data(), data.size());
         events.push(event);
+    }
+
+    void pushSubscriptionResult(std::uint8_t index, const ble::Uuid& service, const ble::Uuid& characteristic,
+                                bool indicate, ble::SubscriptionOutcome outcome, std::uint32_t session = kCurrentSession) {
+        ble::CentralEvent event;
+        event.type = ble::CentralEventType::SubscriptionResult;
+        event.session = session == kCurrentSession ? lastSession() : session;
+        event.index = index;
+        event.mask = indicate ? ble::kSubscriptionIndicate : 0U;
+        event.reasonCode = static_cast<std::uint16_t>(outcome);
+        ble::Bytes data(service.bytes.begin(), service.bytes.end());
+        data.insert(data.end(), characteristic.bytes.begin(), characteristic.bytes.end());
+        event.setData(data.data(), data.size());
+        events.push(event);
+    }
+
+    void pushGattService(const ble::Uuid& service) {
+        pushEvent(ble::CentralEventType::GattService, 0, 0, ble::Bytes(service.bytes.begin(), service.bytes.end()));
     }
 
     void advertise(const ble::BleAddress& address, const std::string& name, std::vector<std::uint16_t> services = {},

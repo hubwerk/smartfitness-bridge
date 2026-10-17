@@ -124,6 +124,9 @@ struct ConnectPlan {
     // enumerates GATT. Writes are restricted to these characteristic UUIDs.
     bool discoverNotifications = false;
     std::array<Uuid, 2> discoveryWriteCharacteristics{};
+    // Report the GATT primary services (CentralEventType::GattService) when
+    // no advertised services are known for the device.
+    bool reportServices = false;
     std::uint8_t subscriptionCount = 0;
     std::array<Subscription, kMaxSubscriptions> subscriptions{};
     std::uint8_t readCount = 0;

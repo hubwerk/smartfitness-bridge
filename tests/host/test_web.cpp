@@ -680,9 +680,9 @@ void testJsonViews() {
     view.input.paired.advertisedServices = {"00001826-0000-1000-8000-00805f9b34fb",
                                           "12345678-1234-5678-9abc-def012345678"};
     view.input.paired.subscriptions = {
-        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad2-0000-1000-8000-00805f9b34fb", "ok", false},
-        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad9-0000-1000-8000-00805f9b34fb", "pending", true},
-        {"0000180d-0000-1000-8000-00805f9b34fb", "00002a37-0000-1000-8000-00805f9b34fb", "failed", false}};
+        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad2-0000-1000-8000-00805f9b34fb", "ok", false, ""},
+        {"00001826-0000-1000-8000-00805f9b34fb", "00002ad9-0000-1000-8000-00805f9b34fb", "pending", true, ""},
+        {"0000180d-0000-1000-8000-00805f9b34fb", "00002a37-0000-1000-8000-00805f9b34fb", "failed", false, "not-found"}};
     view.ftmsOutput.services = {{"ftms", "FTMS", true, true, true}, {"cps", "CPS", false, false, false}};
     view.antOutput.channels = {{"fec", "FE-C", 17, true, true}, {"hr", "HR", 120, false, false}};
     view.antOutput.channels[0].available = true;
@@ -698,6 +698,7 @@ void testJsonViews() {
     assert(paired["subscriptions"][0]["state"] == "ok");
     assert(paired["subscriptions"][1]["state"] == "pending" && paired["subscriptions"][1]["indicate"] == true);
     assert(paired["subscriptions"][2]["state"] == "failed");
+    assert(paired["subscriptions"][0]["reason"] == "" && paired["subscriptions"][2]["reason"] == "not-found");
     assert(document["ftmsOutput"]["services"][0]["active"] == true);
     assert(document["ftmsOutput"]["restartRequired"] == true);
     assert(document["ftmsOutput"]["services"][1]["available"] == false);

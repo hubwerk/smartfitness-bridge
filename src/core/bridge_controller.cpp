@@ -457,6 +457,7 @@ StatusView BridgeController::statusView() const {
                 item.characteristic = pairedUuidString(subscription.characteristic);
                 item.state = subscription.state;
                 item.indicate = subscription.indicate;
+                item.reason = subscription.reason;
                 input.paired.subscriptions.push_back(std::move(item));
             }
         }
