@@ -43,6 +43,7 @@ struct ScanResult {
     smartfitness::ble::Bytes manufacturerData;
     std::string detectedAdapter;  // empty when no adapter matches
     std::uint32_t lastSeenMs = 0;
+    std::uint32_t ftmsDataSeenMs = 0;
 };
 
 class BleInputAdapter final : public BtDeviceAdapter {
@@ -51,6 +52,8 @@ public:
 
     struct Timing {
         std::uint32_t connectTimeoutMs = 15000;
+        std::uint32_t connectMaxMs = 45000;
+        std::uint32_t probeMs = 3000;
         std::uint32_t staleMs = 5000;
         // Reconnect when a connected device never delivers data this long.
         std::uint32_t noDataReconnectMs = 20000;
@@ -59,7 +62,7 @@ public:
         std::uint32_t telemetryIntervalMs = 250;
     };
 
-    enum class LinkState : std::uint8_t { Idle, Connecting, Ready, Backoff, Listening };
+    enum class LinkState : std::uint8_t { Idle, Probing, Connecting, Ready, Backoff, Listening };
 
     static constexpr std::size_t kMaxScanResults = 24;
     static constexpr std::uint32_t kDefaultScanMs = 30000;
@@ -122,6 +125,8 @@ public:
 
 private:
     bool startConnection();
+    bool connectAfterProbe();
+    void connectTimedOut(std::uint32_t now);
     // A non-null subscriptionReason marks pending subscriptions as failed
     // and keeps the list visible during the backoff.
     void scheduleReconnect(const std::string& reason, const char* subscriptionReason = nullptr);
@@ -139,6 +144,8 @@ private:
     PairedDevice paired_;
     std::vector<smartfitness::ble::Uuid> advertisedServices_;
     std::vector<BleSubscriptionStatus> subscriptions_;
+    std::vector<std::uint8_t> subscriptionIndices_;
+    std::vector<bool> subscriptionOptional_;
     bool gattServicesRequested_ = false;
     std::vector<smartfitness::ble::Uuid> gattServices_;
     bool autoConnect_ = false;
@@ -146,6 +153,16 @@ private:
     LinkState state_ = LinkState::Idle;
     std::uint32_t session_ = 0;
     std::uint32_t stateSinceMs_ = 0;
+    std::uint32_t progressMs_ = 0;
+    smartfitness::ble::ConnectPhase connectPhase_ = smartfitness::ble::ConnectPhase::Connect;
+    std::uint32_t progressResults_ = 0;
+    std::uint32_t expectedResults_ = 0;
+    smartfitness::ble::Advertisement pairedAdvertisement_;
+    bool hasPairedAdvertisement_ = false;
+    std::uint32_t pairedAdvertisementMs_ = 0;
+    std::uint32_t pairedServiceDataMs_ = 0;
+    bool probeFound_ = false;
+    std::uint32_t probeFoundMs_ = 0;
     std::uint32_t nextAttemptMs_ = 0;
     std::uint32_t backoffMs_ = 0;
     std::uint32_t attempts_ = 0;

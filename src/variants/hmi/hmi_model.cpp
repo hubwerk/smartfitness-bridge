@@ -432,7 +432,7 @@ bool ConfirmSequence::confirm() {
 }
 
 Rgb statusColor(const StatusView& status) {
-    if (status.input.scanning) return {0, 40, 160};
+    if (status.input.scanning || status.input.link == "searching") return {0, 40, 160};
     switch (status.state) {
         case RuntimeState::ControlReady: return {0, 160, 40};
         case RuntimeState::Trainer: return {0, 90, 160};

@@ -671,19 +671,208 @@ struct Harness {
             last = telemetry;
         });
     }
-    void pair(const char* text, const char* adapterId, const char* name = "Device") {
+    void pair(const char* text, const char* adapterId, const char* name = "Device", bool fresh = true) {
         PairedDevice device;
         device.address = address(text);
         device.adapterId = adapterId;
         device.name = name;
         device.valid = true;
         adapter.setPairedDevice(device);
+        if (fresh && !adapter.findResult(device.address)) advertise();
+    }
+    void advertise() {
+        central.advertise(adapter.pairedDevice().address, adapter.pairedDevice().name);
+        adapter.loop();
     }
     void advance(std::uint32_t ms) {
         now += ms;
         adapter.loop();
     }
+    void advanceAdvertising(std::uint32_t ms) {
+        now += ms;
+        advertise();
+    }
 };
+
+void testConnectionProbing() {
+    using State = BleInputAdapter::LinkState;
+    const auto peer = address("aa:00:00:00:00:81");
+    Harness h;
+    h.pair("aa:00:00:00:00:81", "ftms", "Bike", false);
+    assert(h.adapter.scanAndConnect());
+    assert(h.adapter.linkState() == State::Probing);
+    assert(std::string(BleInputAdapter::linkStateName(State::Probing)) == "searching");
+    assert(h.central.connects.empty() && h.central.lastScanDuration == 3000);
+    assert(h.central.probeStarts == 1 && h.central.lastProbeAddress == peer);
+    assert(h.central.lastScanHighDuty && h.central.lastScanDuplicates);
+    h.central.advertise(address("aa:00:00:00:00:82"), "Other", {0x1826}, {}, -50, {1, 0x20, 0});
+    h.advance(2999);
+    assert(h.adapter.linkState() == State::Probing && h.central.connects.empty());
+    h.advance(1);
+    assert(h.adapter.linkState() == State::Backoff && h.adapter.lastError() == "not-advertising");
+    assert(h.central.connects.empty() && !h.central.scanning());
+    h.advance(1000);
+    assert(h.adapter.linkState() == State::Probing && h.central.scanStarts == 2);
+    h.central.advertise(peer, "Bike", {0x1826});
+    h.advance(100);
+    h.advance(499);
+    assert(h.central.connects.empty());
+    h.central.advertise(peer, "", {}, {}, -45, {1, 0x20, 0});
+    h.advance(0);
+    assert(h.adapter.linkState() == State::Connecting && h.central.connects.size() == 1);
+    assert(h.central.connects.back().plan.subscriptionCount == 2);
+    assert(h.adapter.advertisedServices() == std::vector<ble::Uuid>{ble::Uuid::from16(0x1826)});
+    h.adapter.disconnect();
+    // The paired cache survives clearing the user-visible scan list.
+    assert(h.adapter.startScan());
+    const int scans = h.central.scanStarts;
+    assert(h.adapter.scanResults().empty() && h.adapter.scanAndConnect());
+    assert(h.adapter.linkState() == State::Connecting && h.central.scanStarts == scans);
+    h.adapter.disconnect();
+    h.now += 2000;  // freshness is strictly less than two seconds
+    assert(h.adapter.scanAndConnect() && h.adapter.linkState() == State::Probing);
+    h.central.advertise(peer, "", {0x1826});
+    h.advance(0);
+    assert(h.adapter.linkState() == State::Probing);  // stale FTMS data cannot end this probe
+    h.advance(499);
+    assert(h.adapter.linkState() == State::Probing);
+    h.advance(1);
+    assert(h.adapter.linkState() == State::Connecting);
+    // Protocol RAM remembers the last type, but the advertisement cache does not.
+    assert(h.central.connects.back().plan.subscriptionCount == 2);
+}
+
+void testPairedServiceDataFreshness() {
+    Harness h;
+    const auto peer = address("aa:00:00:00:00:91");
+    assert(h.adapter.startScan());
+    h.central.advertise(peer, "Bike", {0x1826}, {}, -55, {1, 0x20, 0});
+    h.advance(0);
+    const auto dataSeen = h.adapter.findResult(peer)->ftmsDataSeenMs;
+    h.advance(1500);
+    h.central.advertise(peer, "Fresh name", {0x1826});
+    h.advance(0);
+    assert(h.adapter.findResult(peer)->ftmsDataSeenMs == dataSeen);
+    h.advance(500);
+    h.pair("aa:00:00:00:00:91", "ftms");
+    assert(h.adapter.scanAndConnect());  // recent response, but service data is already stale
+    assert(h.central.connects.back().plan.subscriptionCount == protocols::FtmsSource::SubCount);
+    h.adapter.disconnect();
+    assert(h.adapter.startScan());
+    h.central.advertise(peer, "Fresh name", {0x1826});
+    h.advance(0);
+    assert(h.adapter.findResult(peer)->ftmsServiceData.empty());
+}
+
+void testProbeScanOwnership() {
+    using State = BleInputAdapter::LinkState;
+    Harness h;
+    h.pair("aa:00:00:00:00:83", "hrs", "HR", false);
+    assert(h.adapter.startScan(30000));
+    assert(h.adapter.scanAndConnect() && h.central.scanStarts == 1);
+    assert(h.central.probeStarts == 0);  // the user's scan is reused, not replaced by a filtered probe
+    assert(h.adapter.scanning() && h.adapter.linkState() == State::Probing);
+    assert(h.adapter.requestDisconnect());
+    assert(h.adapter.scanning() && h.central.scanning());
+    h.advance(5000);
+    assert(h.central.connects.empty() && h.adapter.linkState() == State::Idle);
+    assert(h.adapter.scanAndConnect());
+    h.central.advertise(h.adapter.pairedDevice().address, "HR", {0x180d});
+    h.advance(0);
+    h.advance(500);
+    assert(h.adapter.linkState() == State::Connecting);
+    assert(!h.adapter.scanning() && !h.central.scanning());
+    h.adapter.disconnect();
+    h.now += 2000;
+    assert(h.adapter.scanAndConnect() && h.adapter.linkState() == State::Probing);
+    assert(h.adapter.stopScan());
+    assert(h.adapter.linkState() == State::Idle && !h.central.scanning() && !h.adapter.autoConnect());
+    h.advance(60000);
+    assert(h.central.connects.size() == 1);
+
+    Harness noResponse;
+    noResponse.pair("aa:00:00:00:00:84", "ftms", "Bike", false);
+    assert(noResponse.adapter.scanAndConnect());
+    noResponse.advance(2900);
+    noResponse.advertise();
+    noResponse.advance(100);  // total probe cap wins over the 500ms response grace
+    assert(noResponse.adapter.linkState() == State::Connecting);
+
+    Harness early;
+    early.pair("aa:00:00:00:00:85", "ftms", "Bike", false);
+    assert(early.adapter.scanAndConnect());
+    early.central.advertise(early.adapter.pairedDevice().address, "Bike", {0x1826}, {}, -52, {1, 0x20, 0});
+    early.advance(1);
+    assert(early.adapter.linkState() == State::Connecting && early.central.connects.size() == 1);
+    early.central.pushEvent(ble::CentralEventType::Disconnected);
+    early.advance(0);
+    early.advance(1000);
+    assert(early.adapter.linkState() == State::Connecting && early.central.connects.size() == 2);
+    early.central.pushEvent(ble::CentralEventType::Disconnected);
+    early.advance(0);
+    early.advance(2000);
+    assert(early.adapter.linkState() == State::Probing && early.central.connects.size() == 2);
+}
+
+void testConnectionProgressTimeout() {
+    using State = BleInputAdapter::LinkState;
+    Harness idle;
+    idle.pair("aa:00:00:00:00:86", "hrs");
+    assert(idle.adapter.scanAndConnect());
+    idle.advance(14999);
+    assert(idle.adapter.linkState() == State::Connecting);
+    idle.advance(1);
+    assert(idle.adapter.linkState() == State::Backoff && idle.adapter.lastError() == "connect timeout");
+
+    Harness progress;
+    progress.pair("aa:00:00:00:00:87", "hrs");
+    assert(progress.adapter.scanAndConnect());
+    progress.advance(14000);
+    progress.central.pushProgress(ble::ConnectPhase::Discovery);
+    progress.advance(0);
+    progress.advance(14000);
+    assert(progress.adapter.linkState() == State::Connecting);
+    progress.central.pushEvent(ble::CentralEventType::ReadResult);
+    progress.advance(0);
+    progress.advance(14000);
+    assert(progress.adapter.linkState() == State::Connecting);
+    progress.central.pushGattService(ble::Uuid::from16(0x180d));
+    progress.advance(0);
+    progress.advance(2999);
+    assert(progress.adapter.linkState() == State::Connecting);
+    progress.central.pushProgress(ble::ConnectPhase::Subscribe);
+    progress.advance(1);
+    assert(progress.adapter.linkState() == State::Backoff);  // progress cannot exceed 45s total
+
+    Harness stale;
+    stale.pair("aa:00:00:00:00:88", "hrs");
+    assert(stale.adapter.scanAndConnect());
+    stale.advance(14000);
+    stale.central.pushProgress(ble::ConnectPhase::Discovery, stale.central.lastSession() - 1);
+    stale.advance(0);
+    stale.advance(1000);
+    assert(stale.adapter.linkState() == State::Backoff);
+
+    for (const auto type : {ble::CentralEventType::SubscriptionResult, ble::CentralEventType::WriteEndpoint,
+                            ble::CentralEventType::GattService}) {
+        Harness result;
+        result.pair("aa:00:00:00:00:89", "hrs");
+        assert(result.adapter.scanAndConnect());
+        result.advance(14000);
+        result.central.pushEvent(type);
+        result.advance(0);
+        result.advance(14999);
+        assert(result.adapter.linkState() == State::Connecting);
+        result.advance(1);
+        assert(result.adapter.linkState() == State::Backoff);
+    }
+    Harness lateConnected;
+    lateConnected.pair("aa:00:00:00:00:90", "hrs");
+    assert(lateConnected.adapter.scanAndConnect());
+    lateConnected.central.pushEvent(ble::CentralEventType::Connected, 1);
+    lateConnected.advance(45000);
+    assert(lateConnected.adapter.linkState() == State::Backoff && !lateConnected.adapter.isConnected());
+}
 
 void testPairedServiceDiagnostics() {
     Harness h;
@@ -708,8 +897,8 @@ void testPairedServiceDiagnostics() {
     h.central.pushEvent(ble::CentralEventType::Connected, 0x11);
     h.adapter.loop();
     assert(h.adapter.isConnected());
-    for (std::size_t index = 0; index < plan.subscriptionCount; ++index)
-        assert(h.adapter.subscriptions()[index].state == ((0x11U & (1U << index)) ? "ok" : "failed"));
+    assert(h.adapter.subscriptions().size() == 2);
+    for (const auto& subscription : h.adapter.subscriptions()) assert(subscription.state == "ok");
     h.central.advertise(peer, "", {0x180f});
     h.adapter.loop();
     assert(h.adapter.advertisedServices().size() == 4);
@@ -727,7 +916,7 @@ void testPairedServiceDiagnostics() {
     assert(h.adapter.subscriptions()[0].state == "pending");
     h.central.pushEvent(ble::CentralEventType::Connected, 1);
     h.adapter.loop();
-    assert(h.adapter.subscriptions()[4].state == "failed");
+    assert(h.adapter.subscriptions().size() == 2 && h.adapter.subscriptions()[1].state == "failed");
     h.central.pushEvent(ble::CentralEventType::Disconnected);
     h.adapter.loop();
     assert(h.adapter.subscriptions().empty() && h.adapter.advertisedServices().empty());
@@ -741,6 +930,7 @@ void testPairedServiceDiagnostics() {
     saved.adapterId = "ftms";
     saved.advertisedServices = {ble::Uuid::from16(0x1826)};
     h.adapter.setPairedDevice(saved);
+    h.advertise();
     assert(h.adapter.scanAndConnect());
     assert(h.adapter.advertisedServices() == saved.advertisedServices);
     assert(!h.central.connects.back().plan.reportServices);
@@ -781,7 +971,7 @@ void testSubscriptionResultsFixedPlan() {
     const auto& list = h.adapter.subscriptions();
     assert(list.size() == plan.subscriptionCount);
     assert(list[0].state == "ok" && list[0].reason.empty());
-    assert(list[1].state == "failed" && list[1].reason == "not-found");
+    assert(list[1].state == "pending");  // absent optional entries never report a failure
     assert(list[2].state == "failed" && list[2].reason == "cccd-failed");
     assert(list[3].state == "pending");
     // GATT services are only taken over after a successful connection.
@@ -789,9 +979,9 @@ void testSubscriptionResultsFixedPlan() {
     h.central.pushEvent(ble::CentralEventType::Connected, 0x9);  // bit 3 comes from the mask fallback
     h.adapter.loop();
     assert(h.adapter.isConnected());
-    assert(list[0].state == "ok" && list[1].reason == "not-found" && list[2].state == "failed");
-    assert(list[3].state == "ok");
-    for (std::size_t index = 4; index < list.size(); ++index) assert(list[index].state == "failed");
+    assert(list.size() == 4);
+    assert(list[0].state == "ok" && list[1].reason == "cccd-failed");
+    assert(list[2].state == "ok" && list[3].state == "failed");
     assert(h.adapter.advertisedServices() ==
            (std::vector<ble::Uuid>{ble::Uuid::from16(0x1826), ble::Uuid::from16(0x180a)}));
     assert(h.adapter.pairedDevice().advertisedServices == h.adapter.advertisedServices());
@@ -803,7 +993,8 @@ void testSubscriptionResultsFixedPlan() {
     // A reconnect reuses the known services and does not ask for discovery again.
     h.central.pushEvent(ble::CentralEventType::Disconnected);
     h.adapter.loop();
-    h.advance(2000);
+    h.now += 2000;
+    h.advertise();
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     assert(!h.central.connects.back().plan.reportServices);
     assert(h.adapter.advertisedServices().size() == 2);
@@ -851,7 +1042,8 @@ void testSubscriptionsAfterConnectFailure() {
     for (std::size_t index = 1; index < list.size(); ++index)
         assert(list[index].state == "failed" && list[index].reason == "connect-failed");
     // The next attempt starts again with pending entries.
-    h.advance(2000);
+    h.now += 2000;
+    h.advertise();
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     for (const auto& subscription : h.adapter.subscriptions())
         assert(subscription.state == "pending" && subscription.reason.empty());
@@ -861,14 +1053,16 @@ void testSubscriptionsAfterConnectFailure() {
     for (const auto& subscription : h.adapter.subscriptions())
         assert(subscription.state == "failed" && subscription.reason == "disconnected");
     // Timeout while connecting.
-    h.advance(5000);
+    h.now += 5000;
+    h.advertise();
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     h.advance(16000);
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
     for (const auto& subscription : h.adapter.subscriptions())
         assert(subscription.state == "failed" && subscription.reason == "timeout");
     // Service discovery failure.
-    h.advance(10000);
+    h.now += 10000;
+    h.advertise();
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     h.central.pushEvent(ble::CentralEventType::ConnectFailed, 0, ble::kServiceDiscoveryFailure);
     h.adapter.loop();
@@ -1142,23 +1336,23 @@ void testFtmsLifecycle() {
     assert(h.central.disconnects.back() == session);
     h.advance(999);
     assert(h.central.connects.size() == 1);
-    h.advance(1);
+    h.advanceAdvertising(1);
     assert(h.central.connects.size() == 2 && h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
     h.central.pushEvent(ble::CentralEventType::ConnectFailed);
     h.advance(1);
     assert(h.adapter.nextAttemptInMs() == 2000);
-    h.advance(2000);
+    h.advanceAdvertising(2000);
     assert(h.central.connects.size() == 3);
     h.advance(15001);  // connect timeout
     assert(h.adapter.lastError() == "connect timeout" && h.adapter.nextAttemptInMs() == 4000);
     for (std::uint32_t expected : {8000U, 16000U, 30000U, 30000U}) {
-        h.advance(h.adapter.nextAttemptInMs());
+        h.advanceAdvertising(h.adapter.nextAttemptInMs());
         h.central.pushEvent(ble::CentralEventType::ConnectFailed);
         h.advance(0);
         assert(h.adapter.nextAttemptInMs() == expected);
     }
     // Events from an old session are ignored.
-    h.advance(30000);
+    h.advanceAdvertising(30000);
     ble::CentralEvent late;
     late.type = ble::CentralEventType::Connected;
     late.session = session;
@@ -1185,6 +1379,7 @@ void testFtmsLifecycle() {
     h.adapter.begin();
     assert(h.central.connects.size() == connects);
     h.adapter.setAutoConnect(true);
+    h.advertise();
     h.adapter.begin();
     assert(h.central.connects.size() == connects + 1);
     h.adapter.clearPairedDevice();
@@ -1297,6 +1492,7 @@ void testSessionReplacementAndCancellation() {
     h.advance(60000);
     assert(h.adapter.linkState() == BleInputAdapter::LinkState::Idle);
     assert(!h.adapter.isConnected() && !h.adapter.autoConnect());
+    h.advertise();
     assert(h.adapter.scanAndConnect());
     const std::uint32_t stopped = h.central.lastSession();
     assert(h.adapter.stopScan());
@@ -1468,6 +1664,8 @@ void testCoreIntegration() {
     device.adapterId = "ftms";
     device.valid = true;
     ble.setPairedDevice(device);
+    central.advertise(device.address, "");
+    ble.loop();
     selector.select(InputSelector::Source::Ble);
     core.scanAndConnect();
     const Bytes feature{0x02, 0x44, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00};
@@ -1516,6 +1714,8 @@ void testVendorControlRouting() {
     device.adapterId = "tacx-fec";
     device.valid = true;
     input.setPairedDevice(device);
+    central.advertise(device.address, "");
+    input.loop();
     core.begin();
     core.scanAndConnect();
     central.pushEvent(ble::CentralEventType::Connected, 1);
@@ -1533,6 +1733,8 @@ void testVendorControlRouting() {
     core.disconnect();
     device.adapterId = "concept2-pm5";
     input.setPairedDevice(device);
+    central.advertise(device.address, "");
+    input.loop();
     core.scanAndConnect();
     central.pushEvent(ble::CentralEventType::Connected, 7);
     core.loop();
@@ -1767,6 +1969,10 @@ void testScanLabelHelpers() {
 void runBleInputTests() {
     testBleTypes();
     testPairedServiceDiagnostics();
+    testConnectionProbing();
+    testPairedServiceDataFreshness();
+    testProbeScanOwnership();
+    testConnectionProgressTimeout();
     testSubscriptionResultsFixedPlan();
     testSubscriptionResultsDiscoveryPlan();
     testSubscriptionsAfterConnectFailure();

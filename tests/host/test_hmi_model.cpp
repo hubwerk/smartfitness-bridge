@@ -136,6 +136,8 @@ void testStatusTexts() {
     status.input.paired = {true, "aa:00:00:00:00:21", false, "KICKR", "ftms", {}, {}};
     status.input.link = "ready";
     assert(inputLabel(status) == "KICKR (ftms) ready");
+    status.input.link = "searching";
+    assert(inputLabel(status) == "KICKR (ftms) searching");
     assert(std::string(tr(stateLabel(RuntimeState::ControlReady))) == "Control ready");
     assert(std::string(profileLabel(MachineProfile::Treadmill)) == "Treadmill");
     assert(std::string(ftmsProfileLabel(FtmsOutputProfile::Auto)) == "Auto");
@@ -303,6 +305,9 @@ void testLedAndRefresh() {
     status.state = RuntimeState::ControlReady;
     assert((statusColor(status) == Rgb{0, 160, 40}));
     status.input.scanning = true;
+    assert((statusColor(status) == Rgb{0, 40, 160}));
+    status.input.scanning = false;
+    status.input.link = "searching";
     assert((statusColor(status) == Rgb{0, 40, 160}));
 
     RefreshTimer timer(kStatusRefreshMs);

@@ -5,6 +5,8 @@
 #include "ftms_output.h"
 #include "config_store.h"
 #include "bridge_controller.h"
+#include "protocols/ftms_source.hpp"
+#include "protocols/registry.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -15,6 +17,213 @@ using ftms::Bytes;
 using ftms::ResultCode;
 
 namespace {
+
+std::size_t ftmsSubscription(const ble::ConnectPlan& plan, std::uint16_t characteristic) {
+    for (std::size_t index = 0; index < plan.subscriptionCount; ++index)
+        if (plan.subscriptions[index].characteristic == ble::Uuid::from16(characteristic)) return index;
+    return plan.subscriptionCount;
+}
+
+void testDynamicFtmsPlans() {
+    using Source = protocols::FtmsSource;
+    const std::array<std::uint16_t, 6> characteristics{{
+        ftms::kTreadmillDataUuid, ftms::kCrossTrainerDataUuid, ftms::kStepClimberDataUuid,
+        ftms::kStairClimberDataUuid, ftms::kRowerDataUuid, ftms::kIndoorBikeDataUuid
+    }};
+    const std::array<std::uint16_t, 4> reads{{
+        ftms::kFeatureUuid, ftms::kSupportedResistanceRangeUuid,
+        ftms::kSupportedInclinationRangeUuid, ftms::kSupportedPowerRangeUuid
+    }};
+    // Every nonempty combination, including machines advertising several types.
+    for (unsigned mask = 1; mask <= 0x3f; ++mask) {
+        Source source;
+        ble::Advertisement advertisement;
+        advertisement.ftmsServiceData = {1, static_cast<std::uint8_t>(mask), 0x80};
+        source.onAdvertisement(advertisement, 10);
+        const Source& constantSource = source;
+        const auto plan = constantSource.plan();
+        unsigned expected = 1;  // The control point remains present for every mask.
+        for (std::size_t bit = 0; bit < characteristics.size(); ++bit) {
+            const auto index = ftmsSubscription(plan, characteristics[bit]);
+            if (!(mask & (1U << bit))) {
+                assert(index == plan.subscriptionCount);
+                continue;
+            }
+            ++expected;
+            assert(index < plan.subscriptionCount);
+            assert(!plan.subscriptions[index].indicate && !plan.subscriptions[index].ifPresent);
+            assert(plan.subscriptions[index].service == ble::Uuid::from16(ftms::kServiceUuid));
+        }
+        assert(plan.subscriptionCount == expected);
+        const auto cp = ftmsSubscription(plan, ftms::kControlPointUuid);
+        assert(cp < plan.subscriptionCount && plan.subscriptions[cp].indicate &&
+               !plan.subscriptions[cp].ifPresent);
+        assert(plan.readCount == reads.size());
+        for (std::size_t index = 0; index < reads.size(); ++index)
+            assert(plan.reads[index].characteristic == ble::Uuid::from16(reads[index]));
+
+        source.reset();
+        for (const Bytes& missing : {Bytes{}, Bytes{1, 1}, Bytes{0, 1, 0}, Bytes{1, 0, 0},
+                                    Bytes{1, 0x40, 0x80}}) {
+            advertisement.ftmsServiceData = missing;
+            source.onAdvertisement(advertisement, 20);
+            const auto cached = source.plan();
+            assert(cached.subscriptionCount == plan.subscriptionCount);
+            for (std::size_t index = 0; index < plan.subscriptionCount; ++index) {
+                assert(cached.subscriptions[index].characteristic == plan.subscriptions[index].characteristic);
+                assert(!cached.subscriptions[index].ifPresent);
+            }
+        }
+    }
+}
+
+void testDynamicFtmsNotificationsAndControl() {
+    using Source = protocols::FtmsSource;
+    const std::array<MachineProfile, 6> profiles{{
+        MachineProfile::IndoorBike, MachineProfile::Treadmill, MachineProfile::CrossTrainer,
+        MachineProfile::Rower, MachineProfile::StepClimber, MachineProfile::StairClimber
+    }};
+    const std::array<std::uint8_t, 6> masks{{0x20, 1, 2, 0x10, 4, 8}};
+    const std::array<std::uint16_t, 6> characteristics{{
+        ftms::kIndoorBikeDataUuid, ftms::kTreadmillDataUuid, ftms::kCrossTrainerDataUuid,
+        ftms::kRowerDataUuid, ftms::kStepClimberDataUuid, ftms::kStairClimberDataUuid
+    }};
+    const std::array<Bytes, 6> frames{{{0, 0, 0xC4, 9}, {0, 0, 0xB0, 4},
+                                     {0, 0, 0, 0xE8, 3}, {0, 0, 0x30, 0x10, 0},
+                                     {0, 0, 5, 0, 0x64, 0}, {0, 0, 3, 0}}};
+    const Bytes feature{0, 0, 0, 0, 0x0c, 0, 0, 0};
+    const Bytes granted{0x80, 0, 1};
+    for (std::size_t type = 0; type < profiles.size(); ++type) {
+        Source source;
+        ble::Advertisement advertisement;
+        advertisement.ftmsServiceData = {1, masks[type], 0};
+        source.onAdvertisement(advertisement, 10);
+        const auto plan = source.plan();
+        const auto data = ftmsSubscription(plan, characteristics[type]);
+        const auto cp = ftmsSubscription(plan, ftms::kControlPointUuid);
+        assert(plan.subscriptionCount == 2);
+        source.onRead(Source::ReadFeature, feature.data(), feature.size());
+        assert(source.onConnected((1U << data) | (1U << cp), 20));
+        ble::GattWrite write;
+        assert(source.takeWrite(write) && write.payload() == ftms::encodeRequestControl());
+        source.onNotify(cp, granted.data(), granted.size(), 30);
+        assert(source.controlState() == Source::ControlState::Granted);
+        assert(source.capabilities().supports(Control::Power));
+        if (profiles[type] == MachineProfile::IndoorBike)
+            assert(source.takeWrite(write) && write.payload() == ftms::encodeStartOrResume());
+        assert(!source.takeWrite(write));
+        source.onNotify(data, frames[type].data(), frames[type].size(), 40);
+        assert(source.hasData() && source.profile() == profiles[type] && source.lastDataMs() == 40);
+        source.onNotify(plan.subscriptionCount, frames[type].data(), frames[type].size(), 50);
+        assert(source.lastDataMs() == 40);
+        assert(source.control({Control::Power, 175}, 60));
+        assert(source.takeWrite(write) && write.characteristic == ble::Uuid::from16(ftms::kControlPointUuid) &&
+               write.payload() == ftms::encodeSetTargetPower(175));
+    }
+
+    Source multiple;
+    ble::Advertisement advertisement;
+    advertisement.ftmsServiceData = {1, 0x11, 0};  // Treadmill and rower, no bike.
+    multiple.onAdvertisement(advertisement, 10);
+    const auto plan = multiple.plan();
+    const auto rower = ftmsSubscription(plan, ftms::kRowerDataUuid);
+    const auto treadmill = ftmsSubscription(plan, ftms::kTreadmillDataUuid);
+    assert(plan.subscriptionCount == 3);
+    assert(multiple.onConnected((1U << rower) | (1U << treadmill), 20));
+    multiple.onNotify(rower, frames[3].data(), frames[3].size(), 30);
+    assert(multiple.profile() == MachineProfile::Rower && multiple.hasData());
+    multiple.onNotify(treadmill, frames[1].data(), frames[1].size(), 40);
+    assert(multiple.profile() == MachineProfile::Rower && multiple.lastDataMs() == 30);
+    assert(!multiple.capabilities().supports(Control::Power));
+}
+
+void testFtmsUnknownTypeFallback() {
+    using Source = protocols::FtmsSource;
+    Source source;
+    const auto plan = source.plan();
+    assert(plan.subscriptionCount == Source::SubCount && plan.readCount == Source::ReadCount);
+    for (std::size_t index = 0; index < plan.subscriptionCount; ++index) {
+        const bool cp = plan.subscriptions[index].characteristic == ble::Uuid::from16(ftms::kControlPointUuid);
+        assert(plan.subscriptions[index].ifPresent == !cp);
+        assert(plan.subscriptions[index].indicate == cp);
+    }
+    const auto cp = ftmsSubscription(plan, ftms::kControlPointUuid);
+    assert(!source.onConnected(1U << cp, 10));  // Control point alone is not usable.
+    source.reset();
+    source.plan();
+    const auto step = ftmsSubscription(plan, ftms::kStepClimberDataUuid);
+    // Absent optional characteristics do not compact notification/result indices.
+    assert(step > 1);
+    assert(source.onConnected(1U << step, 20));
+    const Bytes frame{0, 0, 5, 0, 0x64, 0};
+    source.onNotify(step, frame.data(), frame.size(), 30);
+    assert(source.profile() == MachineProfile::StepClimber && source.hasData());
+    assert(source.sample()[Metric::StepCount].valid);
+
+    Source::Options readOnlyOptions;
+    readOnlyOptions.allowControl = false;
+    Source readOnly(readOnlyOptions);
+    ble::Advertisement advertisement;
+    advertisement.ftmsServiceData = {1, 0x20, 0};
+    readOnly.onAdvertisement(advertisement, 10);
+    const auto bikePlan = readOnly.plan();
+    assert(bikePlan.subscriptionCount == 2 && bikePlan.readCount == Source::ReadCount);
+    assert(bikePlan.subscriptions[1].indicate);
+    assert(readOnly.onConnected(3, 20) && readOnly.pendingWrites() == 0);
+}
+
+void testFtmsMappingAfterReset() {
+    using Source = protocols::FtmsSource;
+    Source source;
+    const Source& constantSource = source;
+    const Bytes feature{0, 0, 0, 0, 0x0c, 0, 0, 0};
+    const Bytes granted{0x80, 0, 1};
+    for (bool bike : {true, false, true}) {
+        source.reset();
+        ble::Advertisement advertisement;
+        advertisement.ftmsServiceData = {1, static_cast<std::uint8_t>(bike ? 0x20 : 4), 0};
+        source.onAdvertisement(advertisement, 10);
+        for (bool reconnect : {false, true}) {
+            if (reconnect) {
+                source.reset();
+                source.onAdvertisement(ble::Advertisement{}, 20);
+            }
+            const auto plan = constantSource.plan();
+            assert(plan.subscriptionCount == 2);
+            const auto data = ftmsSubscription(plan, bike ? ftms::kIndoorBikeDataUuid : ftms::kStepClimberDataUuid);
+            const auto cp = ftmsSubscription(plan, ftms::kControlPointUuid);
+            assert(cp == (bike ? 1U : 0U) && data == (bike ? 0U : 1U));
+            source.onRead(Source::ReadFeature, feature.data(), feature.size());
+            assert(source.onConnected(3, 30));
+            source.onNotify(cp, granted.data(), granted.size(), 40);
+            assert(source.controlState() == Source::ControlState::Granted);
+            const Bytes frame = bike ? Bytes{0, 0, 0xC4, 9} : Bytes{0, 0, 5, 0, 0x64, 0};
+            source.onNotify(data, frame.data(), frame.size(), 50);
+            assert(source.hasData());
+            assert(source.profile() == (bike ? MachineProfile::IndoorBike : MachineProfile::StepClimber));
+            assert(source.sample()[bike ? Metric::Speed : Metric::StepCount].valid);
+        }
+    }
+}
+
+void testFtmsBikeOnlyWrapperPlan() {
+    auto source = protocols::createProtocol("schwinn-ic4");
+    assert(source && std::string(source->id()) == "schwinn-ic4");
+    for (unsigned mask : {0U, 1U, 0x20U, 0x3fU}) {
+        source->reset();
+        ble::Advertisement advertisement;
+        advertisement.ftmsServiceData = {1, static_cast<std::uint8_t>(mask), 0};
+        source->onAdvertisement(advertisement, 10);
+        const auto plan = source->plan();
+        assert(plan.subscriptionCount == 1 && plan.readCount == 0);
+        assert(plan.subscriptions[0].characteristic == ble::Uuid::from16(ftms::kIndoorBikeDataUuid));
+        assert(!plan.subscriptions[0].indicate && !plan.subscriptions[0].ifPresent);
+        assert(source->onConnected(1, 20) && source->pendingWrites() == 0);
+        const Bytes frame{0, 0, 0xC4, 9};
+        source->onNotify(0, frame.data(), frame.size(), 30);
+        assert(source->hasData() && source->profile() == MachineProfile::IndoorBike);
+    }
+}
 
 void testSensorEncoders() {
     ble::SensorEncoder encoder;
@@ -1083,6 +1292,11 @@ void testProfileControlsAndFeatures() {
 }  // namespace
 
 void runFtmsTests() {
+    testDynamicFtmsPlans();
+    testDynamicFtmsNotificationsAndControl();
+    testFtmsUnknownTypeFallback();
+    testFtmsMappingAfterReset();
+    testFtmsBikeOnlyWrapperPlan();
     testSensorEncoders();
     testSyntheticRevolutions();
     testBleServiceSelection();

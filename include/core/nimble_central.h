@@ -36,6 +36,7 @@ public:
 
     bool begin() override;
     bool startScan(std::uint32_t durationMs, bool duplicates, bool highDuty = false) override;
+    bool startProbe(const smartfitness::ble::BleAddress& address, std::uint32_t durationMs) override;
     bool stopScan() override;
     bool scanning() const override { return scanning_.load(); }
     bool connect(std::uint32_t session, const smartfitness::ble::BleAddress& address,
@@ -63,6 +64,7 @@ private:
         std::uint32_t durationMs = 0;
         bool duplicates = false;
         bool highDuty = false;
+        bool probe = false;
         smartfitness::ble::BleAddress address;
         smartfitness::ble::ConnectPlan plan;
         smartfitness::ble::GattWrite write;
@@ -72,6 +74,8 @@ private:
     void worker();
     bool send(const Cmd& cmd);
     void doStartScan(const Cmd& cmd);
+    bool queueScan(std::uint32_t durationMs, bool duplicates, bool highDuty,
+                   const smartfitness::ble::BleAddress* target);
     void doConnect(const Cmd& cmd);
     void doDisconnect();
     void doWrite(const Cmd& cmd);

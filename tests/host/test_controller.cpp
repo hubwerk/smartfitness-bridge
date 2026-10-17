@@ -250,14 +250,15 @@ void testPairedServiceAndSubscriptionViews() {
         sawIndication = sawIndication || view.indicate;
     }
     assert(sawIndication);
-    const auto& planned = rig.central.connects.back().plan.subscriptions[1];
-    rig.central.pushSubscriptionResult(1, planned.service, planned.characteristic, planned.indicate,
+    const auto& planned = rig.central.connects.back().plan.subscriptions[4];
+    rig.central.pushSubscriptionResult(4, planned.service, planned.characteristic, planned.indicate,
                                        ble::SubscriptionOutcome::NotFound);
     rig.central.pushEvent(ble::CentralEventType::Connected, 1);
     rig.core.loop();
     paired = rig.controller.statusView().input.paired;
     assert(paired.subscriptions[0].state == "ok" && paired.subscriptions[0].reason.empty());
     assert(paired.subscriptions[1].reason == "not-found");
+    assert(paired.subscriptions.size() == 2);  // absent optional data UUIDs stay hidden
     for (std::size_t i = 1; i < paired.subscriptions.size(); ++i)
         assert(paired.subscriptions[i].state == "failed");
     assert(rig.config.config().pairedAdvertisedServices == paired.advertisedServices);

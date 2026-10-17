@@ -8,6 +8,8 @@
 #include "protocols/source_protocol.hpp"
 #include "ftms/ftms_codec.hpp"
 
+#include <array>
+
 namespace smartfitness {
 namespace protocols {
 
@@ -39,8 +41,8 @@ public:
     const ftms::Features& features() const { return features_; }
     const ftms::SupportedRange& resistanceRange() const { return resistanceRange_; }
 
-    // Subscription and read indices used by plan().
-    // Step/Stair Climber follow the Control Point so earlier indices stay stable.
+    // Characteristic identities (and the indices in the unknown-type fallback
+    // plan). Advertised-type plans omit unselected data characteristics.
     enum Subscription : std::uint8_t {
         SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubStepClimber, SubStairClimber, SubCount
     };
@@ -52,6 +54,7 @@ public:
     static constexpr std::uint8_t kControlAttempts = 3;
 
 private:
+    Subscription subscriptionAt(std::size_t index) const;
     void requestControl(std::uint32_t nowMs);
     void handleResponse(const std::uint8_t* data, std::size_t length);
     bool sendControl(const ftms::Bytes& payload);
@@ -62,6 +65,11 @@ private:
     MachineProfile profile_ = MachineProfile::IndoorBike;
     MachineProfile advertisedProfile_ = MachineProfile::IndoorBike;
     bool advertisedProfileValid_ = false;
+    std::uint8_t lastMachineTypes_ = 0;
+    mutable std::array<Subscription, SubCount> subscriptions_{{
+        SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubStepClimber, SubStairClimber
+    }};
+    mutable std::size_t subscriptionCount_ = SubCount;
     std::uint32_t dataSubscribedMask_ = 0;
     bool dataProfileSelected_ = false;
     ftms::Features features_;

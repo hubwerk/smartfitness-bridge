@@ -26,6 +26,18 @@ bool isDataSubscription(std::size_t index) {
     return index < FtmsSource::SubCount && (FtmsSource::kDataSubscriptions & (1U << index)) != 0;
 }
 
+unsigned machineType(std::size_t subscription) {
+    switch (subscription) {
+        case FtmsSource::SubBike: return 1U << 5;
+        case FtmsSource::SubTreadmill: return 1U << 0;
+        case FtmsSource::SubCrossTrainer: return 1U << 1;
+        case FtmsSource::SubStepClimber: return 1U << 2;
+        case FtmsSource::SubStairClimber: return 1U << 3;
+        case FtmsSource::SubRower: return 1U << 4;
+        default: return 0;
+    }
+}
+
 const char* resultName(ftms::ResultCode code) {
     switch (code) {
         case ftms::ResultCode::Success: return "success";
@@ -44,16 +56,21 @@ FtmsSource::FtmsSource(const Options& options) : options_(options) {}
 
 ble::ConnectPlan FtmsSource::plan() const {
     ble::ConnectPlan plan;
-    plan.subscribe(kService, uuid16(ftms::kIndoorBikeDataUuid));
+    subscriptionCount_ = 0;
+    const std::uint16_t characteristics[SubCount] = {
+        ftms::kIndoorBikeDataUuid, ftms::kTreadmillDataUuid, ftms::kCrossTrainerDataUuid,
+        ftms::kRowerDataUuid, ftms::kControlPointUuid, ftms::kStepClimberDataUuid, ftms::kStairClimberDataUuid
+    };
+    for (std::size_t identity = SubBike; identity < SubCount; ++identity) {
+        if (options_.bikeDataOnly && identity != SubBike) continue;
+        const bool data = isDataSubscription(identity);
+        if (data && !options_.bikeDataOnly && lastMachineTypes_ &&
+            !(lastMachineTypes_ & machineType(identity))) continue;
+        subscriptions_[subscriptionCount_++] = static_cast<Subscription>(identity);
+        plan.subscribe(kService, uuid16(characteristics[identity]), identity == SubControlPoint,
+                       data && !options_.bikeDataOnly && !lastMachineTypes_);
+    }
     if (options_.bikeDataOnly) return plan;
-    plan.subscribe(kService, uuid16(ftms::kTreadmillDataUuid));
-    plan.subscribe(kService, uuid16(ftms::kCrossTrainerDataUuid));
-    plan.subscribe(kService, uuid16(ftms::kRowerDataUuid));
-    // Always subscribed (even read-only) so the following indices stay fixed;
-    // responses are ignored unless control is allowed.
-    plan.subscribe(kService, kControlPoint, true);
-    plan.subscribe(kService, uuid16(ftms::kStepClimberDataUuid));
-    plan.subscribe(kService, uuid16(ftms::kStairClimberDataUuid));
     plan.read(kService, uuid16(ftms::kFeatureUuid));
     plan.read(kService, uuid16(ftms::kSupportedResistanceRangeUuid));
     plan.read(kService, uuid16(ftms::kSupportedInclinationRangeUuid));
@@ -61,10 +78,17 @@ ble::ConnectPlan FtmsSource::plan() const {
     return plan;
 }
 
+FtmsSource::Subscription FtmsSource::subscriptionAt(std::size_t index) const {
+    return index < subscriptionCount_ ? subscriptions_[index] : SubCount;
+}
+
 void FtmsSource::reset() {
     SourceProtocol::reset();
     profile_ = MachineProfile::IndoorBike;
     advertisedProfileValid_ = false;
+    subscriptionCount_ = options_.bikeDataOnly ? 1 : SubCount;
+    for (std::size_t index = 0; index < SubCount; ++index)
+        subscriptions_[index] = static_cast<Subscription>(index);
     dataSubscribedMask_ = 0;
     dataProfileSelected_ = false;
     features_ = {};
@@ -85,13 +109,15 @@ void FtmsSource::onAdvertisement(const ble::Advertisement& advertisement, std::u
                            (static_cast<unsigned>(advertisement.ftmsServiceData[2]) << 8);
     // FTMS service data: flags, then the little-endian Fitness Machine Type.
     const unsigned supported = types & 0x3FU;
-    if (!supported || (supported & (supported - 1U))) return;
+    if (!supported) return;
+    lastMachineTypes_ = static_cast<std::uint8_t>(supported);
+    advertisedProfileValid_ = (supported & (supported - 1U)) == 0;
+    if (!advertisedProfileValid_) return;
     advertisedProfile_ = supported & (1U << 0) ? MachineProfile::Treadmill :
                          supported & (1U << 1) ? MachineProfile::CrossTrainer :
                          supported & (1U << 2) ? MachineProfile::StepClimber :
                          supported & (1U << 3) ? MachineProfile::StairClimber :
                          supported & (1U << 4) ? MachineProfile::Rower : MachineProfile::IndoorBike;
-    advertisedProfileValid_ = true;
     for (std::size_t index = SubBike; index < SubCount; ++index) {
         if (isDataSubscription(index) && (dataSubscribedMask_ & (1U << index)) &&
             subscriptionProfile(index) == advertisedProfile_) {
@@ -115,12 +141,14 @@ void FtmsSource::onRead(std::size_t index, const std::uint8_t* data, std::size_t
 }
 
 bool FtmsSource::onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) {
-    const std::uint32_t dataMask = kDataSubscriptions;
-    if ((subscribedMask & dataMask) == 0) {
+    std::uint32_t identities = 0;
+    for (std::size_t index = 0; index < subscriptionCount_; ++index)
+        if (subscribedMask & (1U << index)) identities |= 1U << subscriptionAt(index);
+    if ((identities & kDataSubscriptions) == 0) {
         setError("no FTMS data characteristic");
         return false;
     }
-    dataSubscribedMask_ = subscribedMask & dataMask;
+    dataSubscribedMask_ = identities & kDataSubscriptions;
     if (options_.bikeDataOnly) dataSubscribedMask_ &= 1U << SubBike;
     if (!dataSubscribedMask_) {
         setError("no FTMS bike data characteristic");
@@ -142,7 +170,7 @@ bool FtmsSource::onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) 
             }
     }
     controlPointSubscribed_ = options_.allowControl && !options_.bikeDataOnly &&
-                              (subscribedMask & (1U << SubControlPoint)) != 0;
+                              (identities & (1U << SubControlPoint)) != 0;
     const std::uint32_t controllable = ftms::kTargetPower | ftms::kTargetResistance | ftms::kTargetInclination |
                                        ftms::kTargetIndoorBikeSimulation | ftms::kTargetSpeed;
     if (controlPointSubscribed_ && featuresRead_ && (features_.targets & controllable)) requestControl(nowMs);
@@ -208,9 +236,10 @@ void FtmsSource::apply(const ftms::MachineData& data, std::uint32_t nowMs) {
 }
 
 void FtmsSource::onNotify(std::size_t index, const std::uint8_t* data, std::size_t length, std::uint32_t nowMs) {
+    const auto identity = subscriptionAt(index);
     ftms::MachineData decoded;
     bool ok = false;
-    switch (index) {
+    switch (identity) {
         case SubBike: ok = ftms::decodeIndoorBikeData(data, length, decoded); break;
         case SubTreadmill: ok = ftms::decodeTreadmillData(data, length, decoded); break;
         case SubCrossTrainer: ok = ftms::decodeCrossTrainerData(data, length, decoded); break;
@@ -223,10 +252,10 @@ void FtmsSource::onNotify(std::size_t index, const std::uint8_t* data, std::size
         default: return;
     }
     if (ok) {
-        if (options_.bikeDataOnly && index != SubBike) return;
-        if (dataSubscribedMask_ && !(dataSubscribedMask_ & (1U << index))) return;
-        if (dataProfileSelected_ && subscriptionProfile(index) != profile_) return;
-        profile_ = subscriptionProfile(index);
+        if (options_.bikeDataOnly && identity != SubBike) return;
+        if (dataSubscribedMask_ && !(dataSubscribedMask_ & (1U << identity))) return;
+        if (dataProfileSelected_ && subscriptionProfile(identity) != profile_) return;
+        profile_ = subscriptionProfile(identity);
         dataProfileSelected_ = true;
         apply(decoded, nowMs);
     }

@@ -204,9 +204,9 @@ GattWrite GattWrite::make(const Uuid& service, const Uuid& characteristic, const
     return write;
 }
 
-bool ConnectPlan::subscribe(const Uuid& service, const Uuid& characteristic, bool indicate) {
+bool ConnectPlan::subscribe(const Uuid& service, const Uuid& characteristic, bool indicate, bool ifPresent) {
     if (subscriptionCount == subscriptions.size()) return false;
-    subscriptions[subscriptionCount++] = {service, characteristic, indicate};
+    subscriptions[subscriptionCount++] = {service, characteristic, indicate, ifPresent};
     return true;
 }
 

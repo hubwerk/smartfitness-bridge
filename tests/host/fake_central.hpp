@@ -31,6 +31,11 @@ public:
         lastScanHighDuty = highDuty;
         return true;
     }
+    bool startProbe(const ble::BleAddress& address, std::uint32_t durationMs) override {
+        ++probeStarts;
+        lastProbeAddress = address;
+        return startScan(durationMs, true, true);
+    }
     bool stopScan() override {
         ++scanStops;
         const std::uint32_t pending = pendingConnection.cancel();
@@ -111,14 +116,23 @@ public:
         pushEvent(ble::CentralEventType::GattService, 0, 0, ble::Bytes(service.bytes.begin(), service.bytes.end()));
     }
 
+    void pushProgress(ble::ConnectPhase phase, std::uint32_t session = kCurrentSession) {
+        ble::CentralEvent event;
+        event.type = ble::CentralEventType::ConnectProgress;
+        event.session = session == kCurrentSession ? lastSession() : session;
+        event.index = static_cast<std::uint8_t>(phase);
+        events.push(event);
+    }
+
     void advertise(const ble::BleAddress& address, const std::string& name, std::vector<std::uint16_t> services = {},
-                   const ble::Bytes& manufacturer = {}, int rssi = -60) {
+                   const ble::Bytes& manufacturer = {}, int rssi = -60, const ble::Bytes& ftmsData = {}) {
         ble::ScanReport report;
         report.address = address;
         report.setName(name);
         report.rssi = static_cast<std::int8_t>(rssi);
         for (auto service : services) report.addService(ble::Uuid::from16(service));
         report.setManufacturerData(manufacturer.data(), manufacturer.size());
+        report.setFtmsServiceData(ftmsData.data(), ftmsData.size());
         reports.push_back(report);
     }
 
@@ -129,6 +143,8 @@ public:
     bool acceptWrite = true;
     bool scanning_ = false;
     int scanStarts = 0;
+    int probeStarts = 0;
+    ble::BleAddress lastProbeAddress;
     int scanStops = 0;
     std::uint32_t lastScanDuration = 0;
     bool lastScanDuplicates = false;

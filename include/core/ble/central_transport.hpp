@@ -30,6 +30,7 @@ enum class SubscriptionOutcome : std::uint8_t {
     Overflow      // discovered beyond kMaxSubscriptions; index = number skipped
 };
 constexpr std::uint32_t kSubscriptionIndicate = 1U;  // SubscriptionResult mask bit
+enum class ConnectPhase : std::uint8_t { Connect, Discovery, Read, Subscribe };
 
 enum class CentralEventType : std::uint8_t {
     Connected,      // mask = subscriptions that succeeded
@@ -48,7 +49,8 @@ enum class CentralEventType : std::uint8_t {
     SubscriptionResult,
     // Before Connected when ConnectPlan::reportServices: one GATT primary
     // service UUID (16 bytes) per event.
-    GattService
+    GattService,
+    ConnectProgress  // index = ConnectPhase, before a blocking connect step
 };
 
 struct CentralEvent {
@@ -112,6 +114,10 @@ public:
     // every advertisement is reported (needed for broadcast-only devices).
     // highDuty uses a larger scan window during user-initiated pairing scans.
     virtual bool startScan(std::uint32_t durationMs, bool duplicates, bool highDuty = false) = 0;
+    // High-duty reconnect scan; firmware filters reports to the paired address.
+    virtual bool startProbe(const BleAddress&, std::uint32_t durationMs) {
+        return startScan(durationMs, true, true);
+    }
     // Also cancels a pending connection, but never closes a Ready link.
     // False reports enqueue failure even when out-of-band cancellation ran.
     virtual bool stopScan() = 0;
