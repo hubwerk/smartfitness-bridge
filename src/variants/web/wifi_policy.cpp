@@ -42,9 +42,11 @@ WifiMode WifiPolicy::update(bool stationConnected, int apStations, std::uint32_t
     return mode_;
 }
 
-bool WifiScan::start(std::uint32_t nowMs) {
+bool WifiScan::start(std::uint32_t nowMs, bool singlePass) {
     if (scanning_) return false;
     scanning_ = true;
+    singlePass_ = singlePass;
+    passCompleted_ = false;
     startedMs_ = nowMs;
     networks_.clear();
     return true;
