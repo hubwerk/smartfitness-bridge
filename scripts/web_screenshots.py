@@ -160,6 +160,61 @@ def check_view(page, panel, mobile):
     assert page.evaluate(
         "document.documentElement.scrollWidth <= window.innerWidth"
     ), f"Horizontal overflow in {'mobile' if mobile else 'desktop'} {panel}"
+    legends = {
+        "Web connection": ["Web interface online", "Web interface offline"],
+        "Bridge connection": [
+            "Connected / ready / active", "Disconnected / error",
+            "Retry backoff / stale data / missing ANT+ stick",
+            "Connecting / scanning / advertising / inactive / info"],
+        "Bluetooth service": ["Advertised service", "Subscribed / OK",
+                              "Pending / none reported", "Subscription failed"],
+        "Bluetooth scan": ["Unrelated device / unnamed device"],
+        "Control result": ["Command accepted", "Command failed / disconnected / rejected"],
+        "Output service": ["Service active / channel open / channel capacity",
+                           "Pending / off", "Failed / error / duplicate power warning"],
+    }
+    names = ["Web connection"] + {
+        "dash": ["Bridge connection"], "dev": ["Bluetooth service", "Bluetooth scan"],
+        "ctl": ["Control result"], "set": ["Output service"], "debug": [],
+    }[panel]
+    expect(page.locator(".status-legend:visible")).to_have_count(len(names))
+    for name in names:
+        legend = page.get_by_role("list", name=f"{name} color legend", exact=True)
+        expect(legend).to_be_visible()
+        expect(legend.locator("li")).to_have_text(legends[name])
+        expect(legend.locator('.legend-swatch[aria-hidden="true"]')).to_have_count(
+            len(legends[name]))
+
+
+def check_legend_colors(page):
+    references = [
+        (".pill.ok", "#conn", "backgroundColor"),
+        (".pill.bad", "#s-input .bad", "backgroundColor"),
+        (".pill.warn", "#s-input .warn", "backgroundColor"),
+        (".pill.pending", "#paired-subscriptions .pending", "backgroundColor"),
+        (".pill.sensor", "#paired-advertised .sensor", "backgroundColor"),
+        (".gray", "#scan-body .gray", "color"),
+        (".pill:not(.ok):not(.bad):not(.warn):not(.pending):not(.sensor)",
+         "#s-input .pill", "backgroundColor"),
+    ]
+    # A theme change must affect real indicators and legend samples together.
+    for theme in ({}, {"--ok": "#123456", "--bad": "#654321", "--warn": "#abcdef",
+                       "--tan": "#fedcba", "--violet": "#456789"}):
+        page.evaluate("""theme => {
+            for (const [key, value] of Object.entries(theme))
+                document.documentElement.style.setProperty(key, value);
+        }""", theme)
+        for selector, reference, prop in references:
+            color = page.locator(reference).first.evaluate(
+                "(e, prop) => getComputedStyle(e)[prop]", prop)
+            assert page.locator(".status-legend .legend-swatch" + selector).evaluate_all(
+                "(elements, color) => elements.length > 0 && elements.every("
+                "e => getComputedStyle(e).backgroundColor === color)", color
+            ), f"Legend color mismatch for {selector}"
+    page.evaluate("""() => {
+        for (const key of ['--ok', '--bad', '--warn', '--tan', '--violet'])
+            document.documentElement.style.removeProperty(key);
+    }""")
 
 
 def render(browser, output, name, width, height):
@@ -287,6 +342,7 @@ def render(browser, output, name, width, height):
     expect(page.locator("#ctl-state")).to_contain_text("control not available")
     assert page.locator("#s-input .bad").evaluate(
         "e => getComputedStyle(e).backgroundColor") == "rgb(204, 68, 68)"
+    check_legend_colors(page)
 
     panel_names = {"dash": "dashboard", "dev": "devices", "ctl": "control", "set": "settings"}
     for number, panel in enumerate(panel_names, start=1 if name == "desktop" else 5):
@@ -333,6 +389,10 @@ def render(browser, output, name, width, height):
             assert commands[-1] == ("control", {"control": "power", "value": 999})
             assert page.locator("#ctl-result").evaluate(
                 "e => getComputedStyle(e).backgroundColor") == "rgb(204, 68, 68)"
+            assert page.locator("#ctl-result").evaluate(
+                "e => getComputedStyle(e).backgroundColor") == page.locator(
+                    "#ctl .legend-swatch.bad").evaluate(
+                        "e => getComputedStyle(e).backgroundColor")
         elif panel == "set":
             expect(page.locator("#c-ftmsName")).to_have_value("SmartFitness")
             expect(page.locator("#c-wifiPassword")).to_have_value("")
