@@ -119,6 +119,9 @@ private:
     bool dirty_ = true;
     bool antEnabled_ = false;
     bool ftmsEnabled_ = false;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    std::uint32_t debugTelemetryMs_ = 0;
+#endif
 };
 
 }  // namespace smartfitness

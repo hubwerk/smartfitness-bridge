@@ -37,7 +37,10 @@ inline int workerIterations = 0;
 struct StopWorker {};
 inline void (*task)(void*) = nullptr;
 inline void* currentTask = nullptr;
+inline std::uint32_t now = 0;
 }  // namespace fake
+
+inline unsigned long millis() { return fake::now; }
 
 class Print {
 public:

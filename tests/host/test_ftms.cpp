@@ -1,3 +1,162 @@
+#if defined(SF_TEST_FTMS_DIAGNOSTICS)
+#include "debug_log.h"
+#include "protocols/ftms_source.hpp"
+#include "protocols/registry.hpp"
+
+#include <cassert>
+#include <cstdarg>
+#include <cstdio>
+#include <string>
+
+namespace {
+std::string diagnostics;
+bool logged(const char* text) { return diagnostics.find(text) != std::string::npos; }
+}
+
+DebugSerial debugSerial;
+std::size_t DebugSerial::write(std::uint8_t byte) { return write(&byte, 1); }
+std::size_t DebugSerial::write(const std::uint8_t* data, std::size_t size) {
+    diagnostics.append(reinterpret_cast<const char*>(data), size);
+    return size;
+}
+std::size_t DebugSerial::printf(const char* format, ...) {
+    char line[512];
+    va_list args;
+    va_start(args, format);
+    const int count = std::vsnprintf(line, sizeof(line), format, args);
+    va_end(args);
+    assert(count >= 0 && static_cast<std::size_t>(count) < sizeof(line));
+    return write(reinterpret_cast<const std::uint8_t*>(line), static_cast<std::size_t>(count));
+}
+
+namespace smartfitness {
+namespace protocols {
+const ProtocolInfo* findProtocol(const std::string&) { return nullptr; }
+}
+}
+
+int main() {
+    using namespace smartfitness;
+    using Source = protocols::FtmsSource;
+    static_assert(Source::SubControlPoint == 4 && Source::SubStairClimber == 6, "stable identities");
+    Source source;
+    const auto plan = source.plan();
+    assert(plan.subscriptionCount == 8);
+    const auto& status = plan.subscriptions[7];
+    assert(status.characteristic == ble::Uuid::from16(ftms::kMachineStatusUuid));
+    assert(status.ifPresent && !status.indicate);
+    assert(!source.onConnected(1U << 7, 0));
+    source.reset();
+    assert(source.onConnected((1U << Source::SubBike) | (1U << 7), 1));
+    const ftms::Bytes statusFrame{0x08, 0xC8, 0};
+    source.onNotify(7, statusFrame.data(), statusFrame.size(), 2);
+    assert(logged("[FTMS-STATUS]") && !source.hasData());
+    source.onNotify(7, nullptr, 3, 2);
+    assert(logged("malformed: missing opcode"));
+
+    ftms::IndoorBikeData bike;
+    bike.instantaneousSpeed = 2500;
+    bike.instantaneousPower = 200;
+    bike.heartRate = 130;
+    bike.totalEnergy = ftms::kEnergyNotAvailable16;
+    auto frame = ftms::encodeIndoorBikeData(bike);
+    diagnostics.clear();
+    source.onNotify(Source::SubBike, frame.data(), frame.size(), 3);
+    assert(logged("[FTMS-IN] bike flags=0x000340 more=0"));
+    assert(logged("speed=25.000") && logged("power=200.000") && logged("heartRate=130.000"));
+    assert(!logged("cadence=") && !logged("totalEnergy=") && !logged("energyPerHour="));
+    assert(source.hasData() && source.lastDataMs() == 3);
+    diagnostics.clear();
+    source.onNotify(Source::SubBike, frame.data(), frame.size() - 1, 4);
+    assert(logged("truncated/invalid payload") && !logged("speed=") && source.lastDataMs() == 3);
+    const ftms::Bytes continuation{1, 0};
+    diagnostics.clear();
+    source.onNotify(Source::SubBike, continuation.data(), continuation.size(), 5);
+    assert(logged("more=1") && !logged("speed=") && source.sample().speed.valid);
+    const ftms::Bytes treadmill{0, 0, 0xB0, 4};
+    source.onNotify(Source::SubTreadmill, treadmill.data(), treadmill.size(), 6);
+    assert(logged("dropped: unsubscribed"));
+    source.onNotify(99, nullptr, 0, 6);
+    assert(logged("unknown subscription"));
+
+    Source::Options options;
+    options.allowControl = false;
+    Source readOnly(options);
+    const ftms::Bytes rejected{0x80, 0x05, 0x04};
+    diagnostics.clear();
+    readOnly.onNotify(Source::SubControlPoint, rejected.data(), rejected.size(), 7);
+    assert(logged("Set Target Power op=0x05 result=0x04 (operation failed)"));
+    assert(logged("control disabled") && readOnly.lastError().empty());
+    readOnly.onNotify(Source::SubControlPoint, nullptr, 4, 8);
+    assert(logged("response malformed"));
+
+    Source control;
+    const ftms::Bytes feature{0, 0, 0, 0, 0x0c, 0, 0, 0};
+    control.onRead(Source::ReadFeature, feature.data(), feature.size());
+    diagnostics.clear();
+    assert(control.onConnected((1U << Source::SubBike) | (1U << Source::SubControlPoint), 10));
+    assert(logged("state unavailable -> requesting") && logged("send Request Control op=0x00"));
+    control.tick(3010);
+    assert(logged("timeout Request Control attempt=1/3 retry") && logged("attempt=2/3"));
+    control.tick(6010);
+    control.tick(9010);
+    assert(logged("exhausted") && logged("state requesting -> denied"));
+    assert(control.controlState() == Source::ControlState::Denied && control.pendingWrites() == 3);
+    control.reset();
+    assert(logged("state denied -> unavailable"));
+    control.onRead(Source::ReadFeature, feature.data(), feature.size());
+    assert(control.onConnected((1U << Source::SubBike) | (1U << Source::SubControlPoint), 10));
+    const ftms::Bytes granted{0x80, 0, 1};
+    control.onNotify(Source::SubControlPoint, granted.data(), granted.size(), 11);
+    assert(logged("state requesting -> granted") && logged("send Start/Resume op=0x07"));
+    assert(control.control({Control::Power, 200}, 12));
+    assert(logged("send Set Target Power op=0x05 params=c8 00 queued"));
+
+    const std::array<Source::Subscription, 6> identities{{
+        Source::SubBike, Source::SubTreadmill, Source::SubCrossTrainer,
+        Source::SubRower, Source::SubStepClimber, Source::SubStairClimber
+    }};
+    TrainerState state;
+    for (std::size_t index = 0; index < kMetricCount; ++index)
+        state.telemetry[index] = {static_cast<float>(index + 1), true};
+    for (std::size_t type = 0; type < identities.size(); ++type) {
+        const auto profile = static_cast<MachineProfile>(type);
+        const auto record = ftms::encodeMachineData(profile, state);
+        ftms::MachineData decoded;
+        assert(ftms::decodeMachineData(profile, record.data(), record.size(), decoded));
+        Source machine;
+        assert(machine.onConnected(1U << identities[type], 0));
+        diagnostics.clear();
+        machine.onNotify(identities[type], record.data(), record.size(), 1);
+        assert(logged((std::string("[FTMS-IN] ") + machineProfileName(profile) + " flags=0x").c_str()));
+        for (std::size_t index = 0; index < kMetricCount; ++index) {
+            const auto metric = static_cast<Metric>(index);
+            const auto field = std::string(" ") + metricKey(metric) + "=";
+            assert(logged(field.c_str()) == decoded[metric].valid);
+        }
+    }
+
+    Source multiple;
+    assert(multiple.onConnected((1U << Source::SubBike) | (1U << Source::SubTreadmill), 0));
+    multiple.onNotify(Source::SubBike, frame.data(), frame.size(), 1);
+    diagnostics.clear();
+    multiple.onNotify(Source::SubTreadmill, treadmill.data(), treadmill.size(), 2);
+    assert(logged("dropped: profile mismatch") && multiple.lastDataMs() == 1);
+
+    Source dynamic;
+    ble::Advertisement advertisement;
+    advertisement.ftmsServiceData = {1, 4, 0};  // Step climber: CP precedes data.
+    dynamic.onAdvertisement(advertisement, 0);
+    const auto dynamicPlan = dynamic.plan();
+    assert(dynamicPlan.subscriptionCount == 3);
+    assert(dynamicPlan.subscriptions[0].characteristic == ble::Uuid::from16(ftms::kControlPointUuid));
+    assert(dynamicPlan.subscriptions[1].characteristic == ble::Uuid::from16(ftms::kStepClimberDataUuid));
+    assert(dynamicPlan.subscriptions[2].characteristic == ble::Uuid::from16(ftms::kMachineStatusUuid));
+    assert(dynamic.onConnected((1U << 1) | (1U << 2), 0));
+    dynamic.onNotify(2, statusFrame.data(), statusFrame.size(), 1);
+    assert(!dynamic.hasData() && dynamic.profile() == MachineProfile::StepClimber);
+}
+#else
 #include "bridge/bridge_core.hpp"
 #include "ftms/ftms_codec.hpp"
 #include "bt_device_adapter.h"
@@ -1315,3 +1474,4 @@ void runFtmsTests() {
     testFtmsOutputControlFlow();
     testFtmsNameAndConsole();
 }
+#endif

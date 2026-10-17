@@ -14,6 +14,9 @@ public:
     virtual void disconnect() = 0;
     virtual bool isConnected() const = 0;
     virtual bool trainerDetected() const = 0;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    virtual bool debugStale() const { return false; }
+#endif
     virtual smartfitness::MachineProfile profile() const { return smartfitness::MachineProfile::IndoorBike; }
 
     virtual FitnessTelemetry telemetry() const = 0;

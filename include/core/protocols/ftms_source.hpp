@@ -44,7 +44,11 @@ public:
     // Characteristic identities (and the indices in the unknown-type fallback
     // plan). Advertised-type plans omit unselected data characteristics.
     enum Subscription : std::uint8_t {
-        SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubStepClimber, SubStairClimber, SubCount
+        SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubStepClimber, SubStairClimber,
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+        SubMachineStatus,
+#endif
+        SubCount
     };
     static constexpr std::uint32_t kDataSubscriptions = (1U << SubBike) | (1U << SubTreadmill) |
         (1U << SubCrossTrainer) | (1U << SubRower) | (1U << SubStepClimber) | (1U << SubStairClimber);
@@ -56,6 +60,7 @@ public:
 private:
     Subscription subscriptionAt(std::size_t index) const;
     void requestControl(std::uint32_t nowMs);
+    void setControlState(ControlState state);
     void handleResponse(const std::uint8_t* data, std::size_t length);
     bool sendControl(const ftms::Bytes& payload);
     void apply(const ftms::MachineData& data, std::uint32_t nowMs);
@@ -68,6 +73,9 @@ private:
     std::uint8_t lastMachineTypes_ = 0;
     mutable std::array<Subscription, SubCount> subscriptions_{{
         SubBike, SubTreadmill, SubCrossTrainer, SubRower, SubControlPoint, SubStepClimber, SubStairClimber
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+        , SubMachineStatus
+#endif
     }};
     mutable std::size_t subscriptionCount_ = SubCount;
     std::uint32_t dataSubscribedMask_ = 0;

@@ -4,6 +4,7 @@
 #include "ftms_output.h"
 
 #include <cmath>
+#include "debug_log.h"
 #ifdef ARDUINO
 #include <Arduino.h>
 #include "debug_serial.h"
@@ -89,6 +90,18 @@ void BridgeCore::loop() {
     antEnabled_ = antEnabled;
     ftmsEnabled_ = ftmsEnabled;
     if (dirty_) publish();
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    const std::uint32_t now = millis();
+    if (now - debugTelemetryMs_ >= 1000) {
+        debugTelemetryMs_ = now;
+        SF_DEBUG_LOG("[BridgeCore] telemetry: speed=%s cadence=%s power=%s hr=%s (stale=%u)\n",
+                     debuglog::Value(telemetry_.metric(Metric::Speed)).c_str(),
+                     debuglog::Value(telemetry_.metric(Metric::Cadence)).c_str(),
+                     debuglog::Value(telemetry_.metric(Metric::Power)).c_str(),
+                     debuglog::Value(telemetry_.metric(Metric::HeartRate)).c_str(),
+                     device_ && device_->debugStale() ? 1U : 0U);
+    }
+#endif
     if (ant_ && ant_->enabled()) ant_->loop();
     if (ftms_ && ftms_->enabled()) ftms_->loop();
 }

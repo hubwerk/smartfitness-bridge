@@ -119,14 +119,50 @@ when opened and receives new output over the existing WebSocket (no polling).
 **Logfile herunterladen** downloads `/debug/log` as `debug.log`;
 **Anzeige leeren** only clears the browser display.
 The output includes state changes for BLE input, FTMS/ANT output, bridge source
-and output selection, Wi-Fi, executed API commands, and WebSocket clients; it
-does not log telemetry packets or API request bodies. Arduino-ESP32 2.0.17
+and output selection, Wi-Fi, executed API commands, and WebSocket clients.
+With `DEBUG_WEB`, every BLE input notification/indication is logged in the main
+loop (all input protocols, without sampling), including ignored events and their
+reason. API request bodies are not logged. Arduino-ESP32 2.0.17
 implements task-context `log_x` macros using `log_printf` by default, so the
 DEBUG_WEB-only configuration routes them through ESP-IDF logging for capture.
 The same core's `isr_log_x` macros use `ets_printf` and are not captured; do not
 log from ISRs. NimBLE-Arduino 1.4.3 uses `console_printf` for its Arduino logs
 (rather than ESP-IDF `esp_log`), so those remain on UART; its level is limited
 to warnings/errors to avoid flooding the console.
+
+BLE diagnostics use these prefixes in both the Debug tab and LittleFS
+`/debug.log` (download via `/debug/log`):
+
+```text
+[BLE-IN] #42 +3200 0x1826/0x2ad2 notify len=8: 44 00 90 01 a0 00 96 00
+[BLE-READ] 0x1826/0x2acc len=8: 00 00 00 00 08 00 00 00
+[BLE-OUT] 0x1826/0x2ad9 with response len=1: 00
+[FTMS-IN] bike flags=0x0044 more=0 speed=4.00 cadence=80.00 power=150.00
+[FTMS-CP] response to Request Control (0x00): success
+[BLE-IN] stats: notifications=20/5s, dropped(events=0, notifications=0, lifecycle=0), lastData=100 ms ago, stale=0
+[BridgeCore] telemetry: speed=4.00 cadence=80.00 power=150.00 hr=- (stale=0)
+```
+
+`[BLE-IN]` includes a packet number and milliseconds since connection; unknown
+characteristics use `idx=N`. Ignored events carry `(ignored: reason)`.
+`[BLE-OUT]` also reports `WriteFailed`. Hex output uses a fixed buffer with at
+most 64 payload bytes; `…(+N)` indicates omitted bytes (the length remains the
+original received length). `[FTMS-IN]` shows only fields present in that packet,
+or `decode=failed` / `dropped` with a reason. `[FTMS-CP]` reports commands,
+responses, state changes, timeouts and retries. Fitness Machine Status `0x2ADA`
+is optionally subscribed only in debug firmware and logged raw; it does not
+count as a data characteristic for connection acceptance.
+
+Statistics are emitted every five seconds while connected; drop counters are
+transport lifetime totals and `lastData` is the age of the last accepted sample
+(time since connection if none has arrived). Stale/fresh transitions are logged.
+The bridge logs its outgoing telemetry once per second; `-` means unavailable.
+The 16 KiB producer queue provides headroom for the expected 200–300 payload
+bytes/s plus decoded output. No bounded queue can guarantee lossless logging
+during arbitrarily long blocked downloads or overload: check `LOST OUTPUT` and
+the BLE drop counters when diagnosing missing packets.
+All these diagnostics, formatters and additional subscriptions compile out
+unless both `ARDUINO` and `DEBUG_WEB` are defined; normal host tests are unchanged.
 
 ESP-IDF logging defaults to **Info** with `DEBUG_WEB`. To change it, uncomment
 `-DDEBUG_WEB_IDF_LEVEL=3` next to `-DDEBUG_WEB` in `platformio.ini` and choose

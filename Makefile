@@ -24,9 +24,9 @@ CORE_TEST_BINARY = /tmp/smartfitness-core-only-test
 HOST_TEST_BINARY = /tmp/smartfitness-core-test
 DEBUG_TEST_BINARY = /tmp/smartfitness-debug-test
 
-.PHONY: host-tests host-tests-core host-tests-all host-tests-debug variant-guard hmi-sim hmi-screenshots
+.PHONY: host-tests host-tests-core host-tests-all host-tests-debug host-tests-ftms-debug variant-guard hmi-sim hmi-screenshots
 
-host-tests: host-tests-core host-tests-all host-tests-debug variant-guard
+host-tests: host-tests-core host-tests-all host-tests-debug host-tests-ftms-debug variant-guard
 
 # include/variant.h must accept exactly one of SF_VARIANT_WEB / SF_VARIANT_HMI.
 variant-guard:
@@ -50,8 +50,20 @@ host-tests-all:
 
 host-tests-debug:
 	$(CXX) $(CXXFLAGS) -DDEBUG_WEB -DARDUINO -Iinclude/core -Itests/host/debug_serial_fakes \
-		tests/host/test_debug_serial.cpp -o $(DEBUG_TEST_BINARY)
+		-Itests/host tests/host/test_debug_serial.cpp tests/host/test_debug_ble.cpp \
+		src/core/ble_input_adapter.cpp src/core/ble_types.cpp src/core/bt_device_adapter.cpp \
+		src/core/bridge_core.cpp src/core/bridge_output.cpp \
+		src/core/scan_label.cpp src/core/source_protocol.cpp src/core/ftms_source.cpp \
+		src/core/ftms_codec.cpp -o $(DEBUG_TEST_BINARY)
 	$(DEBUG_TEST_BINARY)
+
+host-tests-ftms-debug:
+	$(CXX) $(CXXFLAGS) -DDEBUG_WEB -DARDUINO -DSF_TEST_FTMS_DIAGNOSTICS \
+		-Iinclude/core -Itests/host/debug_serial_fakes tests/host/test_ftms.cpp \
+		src/core/ble_types.cpp src/core/ftms_codec.cpp src/core/ftms_source.cpp src/core/source_protocol.cpp \
+		src/core/bridge_core.cpp src/core/bridge_output.cpp src/core/bt_device_adapter.cpp \
+		-o /tmp/smartfitness-ftms-debug-test
+	/tmp/smartfitness-ftms-debug-test
 
 # LVGL host simulator: renders every HMI screen from fake view-model data
 # into PNG files (no display needed). Requires an LVGL v9.2.2 checkout:
