@@ -201,7 +201,7 @@ bool BleInputAdapter::connectAfterProbe() {
     }
     if (hasPairedAdvertisement_ && now - pairedAdvertisementMs_ < 2000) {
         static const char* const names[] = {
-            "treadmill", "cross-trainer", "step-climber", "stair-climber", "rower", "bike"
+            "treadmill", "cross-trainer", "step-climber", "stair-climber", "rower", "indoor-bike"
         };
         std::string types;
         if (validFtmsData(pairedAdvertisement_)) {
@@ -311,7 +311,7 @@ std::uint32_t BleInputAdapter::nextAttemptInMs() const {
 
 void BleInputAdapter::connectTimedOut(std::uint32_t now) {
 #ifdef ARDUINO
-    DBG_SERIAL.printf("[BLE] connect timeout elapsed=%u phase=%s results=%u/%u\n",
+    DBG_SERIAL.printf("[BLE] connect timeout after %u ms (phase=%s, results=%u/%u)\n",
                       static_cast<unsigned>(now - stateSinceMs_), phaseName(connectPhase_),
                       static_cast<unsigned>(progressResults_), static_cast<unsigned>(expectedResults_));
 #else
@@ -590,7 +590,7 @@ bool BleInputAdapter::startScan(std::uint32_t durationMs) {
     userScan_ = true;
     scanUntilMs_ = clock_() + durationMs;
     // While listening to a broadcast device the continuous scan is reused.
-    if (state_ == LinkState::Listening || state_ == LinkState::Probing) {
+    if (state_ == LinkState::Listening) {
 #ifdef ARDUINO
         DBG_SERIAL.println("[BLE] scan started (reusing broadcast scan)");
 #endif

@@ -844,6 +844,24 @@ void testProbeScanOwnership() {
     stoppedUserScan.central.acceptStop = true;
     assert(stoppedUserScan.adapter.stopScan());
     assert(!stoppedUserScan.adapter.scanning() && !stoppedUserScan.central.scanning());
+
+    Harness promoted;
+    promoted.pair("aa:00:00:00:00:94", "hrs", "HR", false);
+    assert(promoted.adapter.scanAndConnect() && promoted.central.probeStarts == 1);
+    promoted.advance(500);
+    assert(promoted.adapter.startScan(30000));
+    assert(promoted.adapter.linkState() == State::Probing && promoted.adapter.scanning());
+    assert(promoted.central.scanStarts == 2 && promoted.central.probeStarts == 1);
+    assert(promoted.central.lastScanDuration == 30000);
+    assert(promoted.central.lastScanDuplicates && promoted.central.lastScanHighDuty);
+    promoted.central.advertise(address("aa:00:00:00:00:95"), "Other", {0x180d});
+    promoted.advance(2500);
+    assert(promoted.adapter.linkState() == State::Backoff && promoted.adapter.lastError() == "not-advertising");
+    assert(promoted.adapter.scanning() && promoted.central.scanning());  // original probe deadline remains unchanged
+    assert(promoted.adapter.scanResults().size() == 1 && promoted.central.connects.empty());
+    promoted.adapter.disconnect();
+    assert(promoted.adapter.scanning() && promoted.central.scanning());
+    assert(promoted.adapter.stopScan() && !promoted.central.scanning());
 }
 
 void testConnectionProgressTimeout() {
