@@ -349,7 +349,8 @@ void BleInputAdapter::loop() {
                 connectAfterProbe();
             } else if (now - stateSinceMs_ >= timing_.probeMs) {
 #ifdef ARDUINO
-                DBG_SERIAL.println("[BLE] paired device not advertising");
+                DBG_SERIAL.printf("[BLE] %s not advertising (asleep, out of range or connected to another app)\n",
+                                  paired_.address.toString().c_str());
 #endif
                 scheduleReconnect("not-advertising");
             } else if (!transport_.scanning() &&
@@ -607,6 +608,15 @@ bool BleInputAdapter::startScan(std::uint32_t durationMs) {
 }
 
 bool BleInputAdapter::stopScan() {
+    if (state_ == LinkState::Probing && userScan_) {
+        const bool cancelled = requestDisconnect();
+        if (!transport_.stopScan()) {
+            lastError_ = "stop scan request rejected";
+            return false;
+        }
+        userScan_ = false;
+        return cancelled;
+    }
     if (state_ == LinkState::Connecting || state_ == LinkState::Probing) return requestDisconnect();
     if (!userScan_) return true;
     if (state_ != LinkState::Listening && !transport_.stopScan()) {

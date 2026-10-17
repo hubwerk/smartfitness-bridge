@@ -812,6 +812,38 @@ void testProbeScanOwnership() {
     early.advance(0);
     early.advance(2000);
     assert(early.adapter.linkState() == State::Probing && early.central.connects.size() == 2);
+
+    Harness expiringScan;
+    expiringScan.pair("aa:00:00:00:00:92", "hrs", "HR", false);
+    assert(expiringScan.adapter.startScan(1000));
+    assert(expiringScan.adapter.scanAndConnect() && expiringScan.central.probeStarts == 0);
+    expiringScan.central.pushEvent(ble::CentralEventType::ScanComplete);
+    expiringScan.advance(1000);
+    assert(!expiringScan.adapter.scanning() && expiringScan.central.probeStarts == 1);
+    assert(expiringScan.central.lastProbeAddress == expiringScan.adapter.pairedDevice().address);
+    assert(expiringScan.central.lastScanDuration == 2000);
+    expiringScan.advance(2000);
+    assert(expiringScan.adapter.linkState() == State::Backoff && !expiringScan.central.scanning());
+    assert(expiringScan.adapter.lastError() == "not-advertising" && expiringScan.central.connects.empty());
+
+    Harness stoppedUserScan;
+    stoppedUserScan.pair("aa:00:00:00:00:93", "hrs", "HR", false);
+    assert(stoppedUserScan.adapter.startScan());
+    assert(stoppedUserScan.adapter.scanAndConnect());
+    assert(stoppedUserScan.adapter.stopScan());
+    assert(!stoppedUserScan.adapter.scanning() && !stoppedUserScan.central.scanning());
+    assert(stoppedUserScan.adapter.linkState() == State::Idle && !stoppedUserScan.adapter.autoConnect());
+    stoppedUserScan.advance(60000);
+    assert(stoppedUserScan.central.connects.empty());
+
+    assert(stoppedUserScan.adapter.startScan() && stoppedUserScan.adapter.scanAndConnect());
+    stoppedUserScan.central.acceptStop = false;
+    assert(!stoppedUserScan.adapter.stopScan());
+    assert(stoppedUserScan.adapter.linkState() == State::Idle && !stoppedUserScan.adapter.autoConnect());
+    assert(stoppedUserScan.adapter.scanning() && stoppedUserScan.central.scanning());
+    stoppedUserScan.central.acceptStop = true;
+    assert(stoppedUserScan.adapter.stopScan());
+    assert(!stoppedUserScan.adapter.scanning() && !stoppedUserScan.central.scanning());
 }
 
 void testConnectionProgressTimeout() {
