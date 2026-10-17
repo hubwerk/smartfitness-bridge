@@ -80,13 +80,13 @@ const char* controlStateName(FtmsSource::ControlState state) {
 void logResponse(const std::uint8_t* data, std::size_t length) {
     ftms::ControlPointResponse response;
     if (!ftms::decodeControlPointResponse(data, length, response)) {
-        SF_DEBUG_LOG("[FTMS-CP] response malformed (truncated/invalid payload) len=%u raw=%s\n",
+        SF_DEBUG_LOG("[FTMS-CP] response malformed decode=failed (truncated/invalid payload) len=%u raw=%s\n",
                      static_cast<unsigned>(length), debuglog::Hex(data, data ? length : 0).c_str());
         return;
     }
-    SF_DEBUG_LOG("[FTMS-CP] response %s op=0x%02x result=0x%02x (%s)\n",
+    SF_DEBUG_LOG("[FTMS-CP] response to %s (0x%02x): %s result=0x%02x\n",
                  opcodeName(response.requestOpcode), static_cast<unsigned>(response.requestOpcode),
-                 static_cast<unsigned>(response.result), resultName(response.result));
+                 resultName(response.result), static_cast<unsigned>(response.result));
 }
 
 void logMachineData(std::size_t identity, const std::uint8_t* data, std::size_t length,
@@ -94,22 +94,41 @@ void logMachineData(std::size_t identity, const std::uint8_t* data, std::size_t 
     const auto* name = machineProfileName(subscriptionProfile(identity));
     const std::size_t flagBytes = identity == FtmsSource::SubCrossTrainer ? 3 : 2;
     if (!data || length < flagBytes) {
-        SF_DEBUG_LOG("[FTMS-IN] %s decode failed: truncated/invalid payload (flags missing) len=%u\n",
+        SF_DEBUG_LOG("[FTMS-IN] %s decode=failed: truncated/invalid payload (flags missing) len=%u\n",
                      name, static_cast<unsigned>(length));
         return;
     }
     unsigned flags = data[0] | (static_cast<unsigned>(data[1]) << 8);
     if (flagBytes == 3) flags |= static_cast<unsigned>(data[2]) << 16;
-    SF_DEBUG_LOG("[FTMS-IN] %s flags=0x%06x more=%u len=%u%s\n", name, flags, flags & 1U,
-                 static_cast<unsigned>(length), ok ? "" : " decode failed: truncated/invalid payload");
-    if (!ok) return;
-    // Separate bounded lines avoid losing fields to the web log's line limit.
+    if (!ok) {
+        SF_DEBUG_LOG("[FTMS-IN] %s flags=0x%06x more=%u len=%u decode=failed: truncated/invalid payload\n",
+                     name, flags, flags & 1U, static_cast<unsigned>(length));
+        return;
+    }
+    const char* direction = identity == FtmsSource::SubCrossTrainer
+        ? (flags & (1U << 15) ? " movementBackward=1" : " movementBackward=0") : "";
+    char line[1024];
+    std::size_t used = static_cast<std::size_t>(std::snprintf(
+        line, sizeof(line), "[FTMS-IN] %s flags=0x%06x more=%u len=%u%s",
+        name, flags, flags & 1U, static_cast<unsigned>(length), direction));
     for (std::size_t index = 0; index < kMetricCount; ++index) {
         const auto metric = static_cast<Metric>(index);
-        if (decoded[metric].valid)
-            SF_DEBUG_LOG("[FTMS-IN] %s %s=%.3f\n", name, metricKey(metric),
-                         static_cast<double>(decoded[metric].value));
+        if (!decoded[metric].valid) continue;
+        // Reserve the newline and terminator within DebugSerial.printf's 1024-byte limit.
+        const std::size_t available = sizeof(line) - used - 1;
+        int count = std::snprintf(line + used, available, " %s=%.2f", metricKey(metric),
+                                  static_cast<double>(decoded[metric].value));
+        if (static_cast<std::size_t>(count) >= available) {
+            line[used] = '\0';
+            SF_DEBUG_LOG("%s\n", line);
+            used = static_cast<std::size_t>(std::snprintf(
+                line, sizeof(line), "[FTMS-IN] %s continuation flags=0x%06x more=%u", name, flags, flags & 1U));
+            count = std::snprintf(line + used, sizeof(line) - used - 1, " %s=%.2f", metricKey(metric),
+                                  static_cast<double>(decoded[metric].value));
+        }
+        used += static_cast<std::size_t>(count);
     }
+    SF_DEBUG_LOG("%s\n", line);
 }
 #endif
 
@@ -349,9 +368,6 @@ void FtmsSource::onNotify(std::size_t index, const std::uint8_t* data, std::size
             return;
 #if defined(ARDUINO) && defined(DEBUG_WEB)
         case SubMachineStatus:
-            SF_DEBUG_LOG("[FTMS-STATUS] len=%u raw=%s%s\n", static_cast<unsigned>(length),
-                         debuglog::Hex(data, data ? length : 0).c_str(),
-                         !data || !length ? " malformed: missing opcode" : "");
             return;
 #endif
         default:

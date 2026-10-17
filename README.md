@@ -137,8 +137,8 @@ BLE diagnostics use these prefixes in both the Debug tab and LittleFS
 [BLE-IN] #42 +3200 0x1826/0x2ad2 notify len=8: 44 00 90 01 a0 00 96 00
 [BLE-READ] 0x1826/0x2acc len=8: 00 00 00 00 08 00 00 00
 [BLE-OUT] 0x1826/0x2ad9 with response len=1: 00
-[FTMS-IN] bike flags=0x0044 more=0 speed=4.00 cadence=80.00 power=150.00
-[FTMS-CP] response to Request Control (0x00): success
+[FTMS-IN] bike flags=0x000044 more=0 len=8 speed=4.00 cadence=80.00 power=150.00
+[FTMS-CP] response to Request Control (0x00): success result=0x01
 [BLE-IN] stats: notifications=20/5s, dropped(events=0, notifications=0, lifecycle=0), lastData=100 ms ago, stale=0
 [BridgeCore] telemetry: speed=4.00 cadence=80.00 power=150.00 hr=- (stale=0)
 ```

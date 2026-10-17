@@ -13,6 +13,7 @@ using namespace smartfitness;
 namespace smartfitness::protocols {
 std::unique_ptr<SourceProtocol> createProtocol(const std::string&) { return std::make_unique<FtmsSource>(); }
 const ProtocolInfo* detectProtocol(const ble::Advertisement&) { return nullptr; }
+const ProtocolInfo* findProtocol(const std::string&) { return nullptr; }
 }  // namespace smartfitness::protocols
 
 void testDebugBle() {
@@ -33,10 +34,11 @@ void testDebugBle() {
     assert(ble::BleAddress::parse("01:02:03:04:05:06", paired.address));
     paired.adapterId = "ftms";
     paired.valid = true;
+    input.setPairedDevice(paired);
     central.advertise(paired.address, "KICKR", {0x1826}, {}, -65, {1, 32, 0});
     input.loop();
-    input.setPairedDevice(paired);
     assert(input.scanAndConnect());
+    assert(!central.connects.empty());
     const auto& plan = central.connects.back().plan;
     assert(plan.subscriptionCount == 3);
     assert(plan.subscriptions[2].characteristic == ble::Uuid::from16(0x2ada));
@@ -79,10 +81,11 @@ void testDebugBle() {
     // Optional missing characteristics compact the UI list, not event indices.
     testing::FakeCentral fallbackCentral;
     BleInputAdapter fallback(fallbackCentral, [] { return fake::now; });
+    fallback.setPairedDevice(paired);
     fallbackCentral.advertise(paired.address, "KICKR", {0x1826});
     fallback.loop();
-    fallback.setPairedDevice(paired);
     assert(fallback.scanAndConnect());
+    assert(!fallbackCentral.connects.empty());
     assert(fallbackCentral.connects.back().plan.subscriptionCount == 8);
     fallbackCentral.pushEvent(ble::CentralEventType::Connected, (1U << 0) | (1U << 4) | (1U << 7));
     fallback.loop();

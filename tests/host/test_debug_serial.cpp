@@ -206,26 +206,27 @@ void testRotationAndFailure() {
     reset();
     debugweb::begin();
     const std::string block(kQueueBytes, 'r');
-    for (unsigned i = 0; i < 65; ++i) {
+    const std::size_t blocks = debugweb::kMaxLogBytes / kQueueBytes + 1;
+    for (std::size_t i = 0; i < blocks; ++i) {
         assert(writeText(block) == block.size());
         pump();
         assert(fake::file.size() <= debugweb::kMaxLogBytes);
     }
     assert(fake::maxSize == debugweb::kMaxLogBytes);
     assert(absoluteStart == debugweb::kMaxLogBytes);
-    assert(absoluteEnd == 65 * kQueueBytes && fake::file == block);
+    assert(absoluteEnd == blocks * kQueueBytes && fake::file == block);
     char data[8];
     const auto stale = debugweb::readChunk(0, data, sizeof(data));
     assert(stale.reset && stale.start == absoluteStart && stale.end == absoluteStart + sizeof(data));
     Snapshot snapshot;
     assert(debugweb::streamLog(sink, &snapshot));
-    assert(snapshot.end == absoluteEnd && snapshot.text == block && snapshot.calls == 9);
+    assert(snapshot.end == absoluteEnd && snapshot.text == block && snapshot.calls == 1 + kQueueBytes / kBlockBytes);
 
     fake::writeLimit = 2;
     writeText("lost to flash");
     pump();
     assert(Serial.output.find("persistent output lost") != std::string::npos);
-    assert(!writable && absoluteEnd == 65 * kQueueBytes + 2);
+    assert(!writable && absoluteEnd == blocks * kQueueBytes + 2);
 
     reset();
     fake::openFails = true;

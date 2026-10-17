@@ -20,7 +20,7 @@ std::size_t DebugSerial::write(const std::uint8_t* data, std::size_t size) {
     return size;
 }
 std::size_t DebugSerial::printf(const char* format, ...) {
-    char line[512];
+    char line[1024];
     va_list args;
     va_start(args, format);
     const int count = std::vsnprintf(line, sizeof(line), format, args);
@@ -50,9 +50,9 @@ int main() {
     assert(source.onConnected((1U << Source::SubBike) | (1U << 7), 1));
     const ftms::Bytes statusFrame{0x08, 0xC8, 0};
     source.onNotify(7, statusFrame.data(), statusFrame.size(), 2);
-    assert(logged("[FTMS-STATUS]") && !source.hasData());
+    assert(!source.hasData());
     source.onNotify(7, nullptr, 3, 2);
-    assert(logged("malformed: missing opcode"));
+    assert(!source.hasData());
 
     ftms::IndoorBikeData bike;
     bike.instantaneousSpeed = 2500;
@@ -63,12 +63,12 @@ int main() {
     diagnostics.clear();
     source.onNotify(Source::SubBike, frame.data(), frame.size(), 3);
     assert(logged("[FTMS-IN] bike flags=0x000340 more=0"));
-    assert(logged("speed=25.000") && logged("power=200.000") && logged("heartRate=130.000"));
+    assert(logged("speed=25.00 power=200.00 heartRate=130.00\n"));
     assert(!logged("cadence=") && !logged("totalEnergy=") && !logged("energyPerHour="));
     assert(source.hasData() && source.lastDataMs() == 3);
     diagnostics.clear();
     source.onNotify(Source::SubBike, frame.data(), frame.size() - 1, 4);
-    assert(logged("truncated/invalid payload") && !logged("speed=") && source.lastDataMs() == 3);
+    assert(logged("decode=failed: truncated/invalid payload") && !logged("speed=") && source.lastDataMs() == 3);
     const ftms::Bytes continuation{1, 0};
     diagnostics.clear();
     source.onNotify(Source::SubBike, continuation.data(), continuation.size(), 5);
@@ -85,7 +85,7 @@ int main() {
     const ftms::Bytes rejected{0x80, 0x05, 0x04};
     diagnostics.clear();
     readOnly.onNotify(Source::SubControlPoint, rejected.data(), rejected.size(), 7);
-    assert(logged("Set Target Power op=0x05 result=0x04 (operation failed)"));
+    assert(logged("response to Set Target Power (0x05): operation failed result=0x04"));
     assert(logged("control disabled") && readOnly.lastError().empty());
     readOnly.onNotify(Source::SubControlPoint, nullptr, 4, 8);
     assert(logged("response malformed"));
@@ -116,25 +116,43 @@ int main() {
         Source::SubBike, Source::SubTreadmill, Source::SubCrossTrainer,
         Source::SubRower, Source::SubStepClimber, Source::SubStairClimber
     }};
-    TrainerState state;
-    for (std::size_t index = 0; index < kMetricCount; ++index)
-        state.telemetry[index] = {static_cast<float>(index + 1), true};
-    for (std::size_t type = 0; type < identities.size(); ++type) {
-        const auto profile = static_cast<MachineProfile>(type);
-        const auto record = ftms::encodeMachineData(profile, state);
-        ftms::MachineData decoded;
-        assert(ftms::decodeMachineData(profile, record.data(), record.size(), decoded));
-        Source machine;
-        assert(machine.onConnected(1U << identities[type], 0));
-        diagnostics.clear();
-        machine.onNotify(identities[type], record.data(), record.size(), 1);
-        assert(logged((std::string("[FTMS-IN] ") + machineProfileName(profile) + " flags=0x").c_str()));
+    for (float base : {1.0F, 16777215.0F}) {
+        TrainerState state;
         for (std::size_t index = 0; index < kMetricCount; ++index) {
-            const auto metric = static_cast<Metric>(index);
-            const auto field = std::string(" ") + metricKey(metric) + "=";
-            assert(logged(field.c_str()) == decoded[metric].valid);
+            state.telemetry[index] = {base + static_cast<float>(index), true};
+        }
+        for (std::size_t type = 0; type < identities.size(); ++type) {
+            const auto profile = static_cast<MachineProfile>(type);
+            const auto record = ftms::encodeMachineData(profile, state);
+            ftms::MachineData decoded;
+            assert(ftms::decodeMachineData(profile, record.data(), record.size(), decoded));
+            Source machine;
+            assert(machine.onConnected(1U << identities[type], 0));
+            diagnostics.clear();
+            machine.onNotify(identities[type], record.data(), record.size(), 1);
+            assert(logged((std::string("[FTMS-IN] ") + machineProfileName(profile) + " flags=0x").c_str()));
+            if (profile == MachineProfile::CrossTrainer) assert(logged("movementBackward=0"));
+            for (std::size_t index = 0; index < kMetricCount; ++index) {
+                const auto metric = static_cast<Metric>(index);
+                const auto field = std::string(" ") + metricKey(metric) + "=";
+                assert(logged(field.c_str()) == decoded[metric].valid);
+            }
+            for (std::size_t start = 0; start < diagnostics.size();) {
+                const auto end = diagnostics.find('\n', start);
+                assert(end != std::string::npos && end - start < 1023);
+                assert(diagnostics.compare(start, 10, "[FTMS-IN] ") == 0);
+                start = end + 1;
+            }
         }
     }
+    ftms::CrossTrainerData backward;
+    backward.movementBackward = true;
+    const auto backwardRecord = ftms::encodeCrossTrainerData(backward);
+    Source crossTrainer;
+    assert(crossTrainer.onConnected(1U << Source::SubCrossTrainer, 0));
+    diagnostics.clear();
+    crossTrainer.onNotify(Source::SubCrossTrainer, backwardRecord.data(), backwardRecord.size(), 1);
+    assert(logged("movementBackward=1") && !logged("speed="));
 
     Source multiple;
     assert(multiple.onConnected((1U << Source::SubBike) | (1U << Source::SubTreadmill), 0));
