@@ -759,6 +759,21 @@ void testWifiScan() {
     scan.finish();
     assert(!scan.scanning() && !scan.windowOpen(1001));
     assert(scan.start(50000) && scan.networks().empty());  // a new window clears old results
+    scan.passCompleted();
+    assert(scan.windowOpen(50001));  // repeated passes until the window ends
+    scan.finish();
+
+    // Station connected: one pass only, so the web clients keep their connection.
+    assert(scan.start(60000, true));
+    assert(scan.windowOpen(60000));
+    scan.add({"Home", -60, true});
+    scan.passCompleted();
+    assert(!scan.windowOpen(60001) && scan.scanning());
+    assert(scan.networks().size() == 1);
+    scan.finish();
+    assert(scan.start(70000) && scan.windowOpen(70000));  // single-pass state does not stick
+    scan.passCompleted();
+    assert(scan.windowOpen(70001));
 
     ApiExchange api;
     assert(api.snapshot(ApiExchange::Snapshot::WifiScan) == "{}");

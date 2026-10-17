@@ -165,7 +165,7 @@ def render(browser, output, name, width, height):
     context = browser.new_context(viewport={"width": width, "height": height},
                                   device_scale_factor=1, reduced_motion="reduce")
     page = context.new_page()
-    errors, external, commands, sockets, results, wifi_scans = [], [], [], [], {}, []
+    errors, external, commands, sockets, results, wifi_scans, wifi_polls = [], [], [], [], {}, [], []
     config = dict(CONFIG)  # saved settings change what /api/config returns
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.on("websocket", lambda ws: external.append(ws.url)
@@ -191,6 +191,11 @@ def render(browser, output, name, width, height):
         if request.method == "POST" and url.path == "/api/wifi-scan":
             wifi_scans.append(request.post_data_json)
             request_route.fulfill(status=202, json={"scanning": True})
+            return
+        if url.path == "/api/wifi-scan/results" and len(wifi_polls) == 0:
+            # The scan takes the radio off-channel; a dropped poll must not abort it.
+            wifi_polls.append("aborted")
+            request_route.abort()
             return
         if request.method == "POST":
             endpoint = url.path.removeprefix("/api/")
@@ -459,6 +464,7 @@ def render(browser, output, name, width, height):
     expect(wifi_button).to_have_attribute("aria-busy", "false")
     expect(wifi_button.locator(".spin")).to_be_hidden()
     assert wifi_scans == [{}], wifi_scans
+    assert wifi_polls == ["aborted"], wifi_polls
     expect(ssid).to_have_attribute("aria-expanded", "true")
     expect(wifi_list.get_by_role("option")).to_have_count(2)
     expect(wifi_list.get_by_role("option").first).to_have_text("Training roomsecured")

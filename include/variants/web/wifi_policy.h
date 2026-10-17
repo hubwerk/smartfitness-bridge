@@ -48,7 +48,10 @@ private:
 
 // Wi-Fi network scan requested from the web UI: repeated scan passes during
 // a fixed window, merged by SSID (strongest signal wins, hidden networks are
-// skipped). The firmware drives the passes; this class only keeps the state.
+// skipped). While the station is connected a single pass is run instead:
+// every pass takes the radio off the home channel, and back-to-back passes
+// would cut off the web clients reaching the bridge through that network.
+// The firmware drives the passes; this class only keeps the state.
 struct WifiNetwork {
     std::string ssid;
     int rssi = 0;  // dBm
@@ -61,10 +64,15 @@ public:
     static constexpr std::size_t kMaxNetworks = 32;
 
     // Starts a new window and clears previous results; false while one runs.
-    bool start(std::uint32_t nowMs);
+    // singlePass closes the window after the first completed pass.
+    bool start(std::uint32_t nowMs, bool singlePass = false);
     // True while further scan passes may be started.
-    bool windowOpen(std::uint32_t nowMs) const { return scanning_ && nowMs - startedMs_ < kDurationMs; }
+    bool windowOpen(std::uint32_t nowMs) const {
+        return scanning_ && !(singlePass_ && passCompleted_) && nowMs - startedMs_ < kDurationMs;
+    }
     void add(const WifiNetwork& network);
+    // A scan pass finished (successfully, even without results).
+    void passCompleted() { passCompleted_ = true; }
     void finish() { scanning_ = false; }
     bool scanning() const { return scanning_; }
     // Sorted by signal strength, strongest first.
@@ -72,6 +80,8 @@ public:
 
 private:
     bool scanning_ = false;
+    bool singlePass_ = false;
+    bool passCompleted_ = false;
     std::uint32_t startedMs_ = 0;
     std::vector<WifiNetwork> networks_;
 };

@@ -418,9 +418,10 @@ void WebPortal::beginStation() {
 }
 
 void WebPortal::updateWifiScan(std::uint32_t now) {
-    if (wifiScanRequested_.exchange(false) && wifiScan_.start(now)) {
+    const bool connected = WiFi.status() == WL_CONNECTED;
+    if (wifiScanRequested_.exchange(false) && wifiScan_.start(now, connected)) {
         // A station that is still connecting blocks scans; resume it afterwards.
-        if (applied_ != WifiMode::Ap && WiFi.status() != WL_CONNECTED) WiFi.disconnect();
+        if (applied_ != WifiMode::Ap && !connected) WiFi.disconnect();
         WiFi.scanDelete();
         lastWifiScanAttemptMs_ = now - kWifiScanRetryMs;
         api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
@@ -435,7 +436,10 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
                            WiFi.encryptionType(index) != WIFI_AUTH_OPEN});
         api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
     }
-    if (found >= 0) WiFi.scanDelete();
+    if (found >= 0) {
+        WiFi.scanDelete();
+        wifiScan_.passCompleted();
+    }
     if (wifiScan_.windowOpen(now)) {
         if (now - lastWifiScanAttemptMs_ >= kWifiScanRetryMs) {
             lastWifiScanAttemptMs_ = now;

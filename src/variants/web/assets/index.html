@@ -243,7 +243,10 @@ ssid.onclick=()=>wifiOpen(wifiList.hidden);ssid.oninput=()=>wifiOpen(false);ssid
 $("btn-wifi-scan").onclick=async()=>{const b=$("btn-wifi-scan");if(b.getAttribute("aria-busy")==="true")return;b.setAttribute("aria-busy","true");wifiOpen(false);
  try{const r=await fetch("/api/wifi-scan",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
   if(r.status!==202){const j=await r.json().catch(()=>({}));throw new Error(j.error||("HTTP "+r.status))}
-  const end=Date.now()+30000;let s;do{await new Promise(res=>setTimeout(res,1000));s=await(await fetch("/api/wifi-scan/results")).json()}while(s.scanning&&Date.now()<end);
+  // Scanning takes the radio off-channel, so single polls may fail; only the last one counts.
+  const end=Date.now()+30000;let s=null,err;do{await new Promise(res=>setTimeout(res,1000));
+   try{s=await(await fetch("/api/wifi-scan/results")).json();err=null}catch(x){err=x}}while((!s||s.scanning||err)&&Date.now()<end);
+  if(!s)throw err||new Error("no response");
   renderWifi(s.networks||[]);if(wifiNets.length){ssid.focus();wifiOpen(true)}else toast("no Wi-Fi networks found",false)}
  catch(e){toast("Wi-Fi scan failed: "+e.message,false)}finally{b.setAttribute("aria-busy","false")}};
 $("btn-restart").onclick=async()=>{if(!confirm("Restart the bridge?"))return;const r=await run("restart");

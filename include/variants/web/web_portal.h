@@ -15,7 +15,8 @@
 //    BridgeController and publishes fresh snapshots via loop(). WebSocket
 //    broadcasts are queued onto the server task (httpd_queue_work).
 //  * Wi-Fi network scan (POST /api/wifi-scan): the main loop runs async scan
-//    passes for WifiScan::kDurationMs and publishes the merged networks.
+//    passes for WifiScan::kDurationMs (a single pass while the station is
+//    connected) and publishes the merged networks.
 
 #ifdef ARDUINO
 
