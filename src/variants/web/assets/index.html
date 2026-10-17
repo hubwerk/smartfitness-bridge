@@ -12,7 +12,7 @@
 .lcars-rail{position:absolute;left:28px;top:24px;bottom:24px;width:120px;display:flex;flex-direction:column;gap:8px;z-index:-1}.lcars-rail span{display:block;flex-shrink:0}.lcars-rail span:nth-child(1){height:142px;background:var(--acc)}.lcars-rail span:nth-child(2){height:104px;background:var(--tan)}.lcars-rail span:nth-child(3){height:132px;background:var(--muted)}.lcars-rail span:nth-child(4){height:102px;background:var(--violet)}.lcars-rail span:nth-child(5){flex:1;background:var(--light)}
 header{display:flex;align-items:center;gap:16px;position:relative;min-height:100px;border-top:22px solid var(--acc);margin-bottom:24px;flex-wrap:wrap;padding:12px 0}
 header:before{content:"";position:absolute;background:var(--acc);height:22px;width:20px;top:-22px;left:-20px}
-header h1{font-size:38px;font-weight:400;line-height:1.1;text-transform:uppercase;text-align:right;margin:0;flex:1;order:2}header #conn{order:1}nav{display:flex;flex-wrap:wrap;gap:8px;order:3;width:100%}
+header h1{font-size:38px;font-weight:400;line-height:1.1;text-transform:uppercase;text-align:right;margin:0;flex:1;order:2}header .connection-status{order:1}nav{display:flex;flex-wrap:wrap;gap:8px;order:3;width:100%}
 nav button{background:var(--tan);border:0;border-radius:24px;color:#000;padding:8px 22px;font:20px Antonio,"Arial Narrow",sans-serif;text-transform:uppercase;cursor:pointer;min-height:44px}
 nav button:nth-child(2){background:var(--muted)}nav button:nth-child(3){background:var(--violet)}nav button:nth-child(4){background:var(--light)}
 nav button.active{background:var(--acc)}nav button[aria-selected="true"]:before{content:"";display:inline-block;width:8px;height:8px;background:#000;margin-right:8px}
@@ -43,7 +43,8 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 .spin{display:none;width:16px;height:16px;margin-right:8px;vertical-align:-2px;border:3px solid #000;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}[aria-busy="true"] .spin{display:inline-block}@keyframes spin{to{transform:rotate(360deg)}}
 #toast.bad{background:var(--bad)}#toast.ok{background:var(--ok)}.small{font-size:16px;color:var(--fg);overflow-wrap:anywhere}
 .gray{color:#888888}tr.gray td{color:#888888}tr.gray select,tr.gray button.b{opacity:.8}
-#ctl-result:not(:empty){display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:var(--light);color:#000}#ctl-result.bad{background:var(--bad)}
+.status-legend{display:flex;flex-wrap:wrap;gap:6px 16px;list-style:none;padding:0;margin:8px 0 14px;font-size:16px}.status-legend li{display:flex;align-items:center;gap:6px}.status-legend .legend-swatch{display:inline-block;flex-shrink:0;width:12px;height:12px;padding:0;margin:0;border-radius:50%}.legend-swatch.gray{background:currentColor}.connection-status .status-legend{margin:4px 0 0}
+#ctl-result:not(:empty){display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:var(--ok);color:#000}#ctl-result.bad{background:var(--bad)}
 .gauge{display:flex;align-items:center;gap:14px;margin:16px 0 22px;color:var(--light);text-transform:uppercase;font-size:16px}.gauge meter{flex:1;width:100%;height:14px;appearance:none;background:#000;border:2px solid var(--tan)}meter::-webkit-meter-bar{background:#000;border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--acc)}meter::-moz-meter-bar{background:var(--acc)}
 @media(max-width:1000px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.status-grid{grid-template-columns:1fr}}
 @media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric .v{font-size:49px}.metric:last-child .v{font-size:28px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
@@ -55,7 +56,11 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 </head>
 <body>
 <div class="lcars-rail" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
-<header><h1>SmartFitness Bridge</h1><span id="conn" class="pill bad" role="status">offline</span>
+<header><h1>SmartFitness Bridge</h1><div class="connection-status"><span id="conn" class="pill bad" role="status">offline</span>
+<ul class="status-legend" aria-label="Web connection color legend">
+ <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Web interface online</li>
+ <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Web interface offline</li>
+</ul></div>
 <nav role="tablist" aria-label="Bridge panels"><button id="tab-dash" role="tab" aria-controls="dash" aria-selected="true" tabindex="0" data-tab="dash" class="active">Dashboard</button><button id="tab-dev" role="tab" aria-controls="dev" aria-selected="false" tabindex="-1" data-tab="dev">Devices</button><button id="tab-ctl" role="tab" aria-controls="ctl" aria-selected="false" tabindex="-1" data-tab="ctl">Control</button><button id="tab-set" role="tab" aria-controls="set" aria-selected="false" tabindex="-1" data-tab="set">Settings</button>
 <!-- #ifdef DEBUG_WEB -->
 <button id="tab-debug" role="tab" aria-controls="debug" aria-selected="false" tabindex="-1" data-tab="debug">Debug</button>
@@ -80,16 +85,31 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
  <div class="card"><div class="label">Output (Zwift, MyWhoosh, …)</div><div id="s-out"></div></div>
  <div class="card"><div class="label">Network</div><div id="s-net"></div></div>
  </div>
+ <ul class="status-legend" aria-label="Bridge connection color legend">
+  <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Connected / ready / active</li>
+  <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Disconnected / error</li>
+  <li><span class="legend-swatch pill warn" aria-hidden="true"></span>Retry backoff / stale data / missing ANT+ stick</li>
+  <li><span class="legend-swatch pill" aria-hidden="true"></span>Connecting / scanning / advertising / inactive / info</li>
+ </ul>
 </section>
 <section id="dev" role="tabpanel" aria-labelledby="tab-dev" tabindex="0" hidden>
  <h2>02 / Device registry</h2>
  <div class="card"><div class="label">Paired device</div><div id="paired">none</div>
   <div class="label">Advertised services</div><div id="paired-advertised" class="service-pills"></div>
   <div class="label">Subscribed characteristics</div><div id="paired-subscriptions" class="service-pills"></div>
+  <ul class="status-legend" aria-label="Bluetooth service color legend">
+   <li><span class="legend-swatch pill sensor" aria-hidden="true"></span>Advertised service</li>
+   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Subscribed / OK</li>
+   <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Pending / none reported</li>
+   <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Subscription failed</li>
+  </ul>
   <div class="row"><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
  <div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
   <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
   <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
+ <ul class="status-legend" aria-label="Bluetooth scan color legend">
+  <li><span class="legend-swatch gray" aria-hidden="true"></span>Unrelated device / unnamed device</li>
+ </ul>
 </section>
 <section id="ctl" role="tabpanel" aria-labelledby="tab-ctl" tabindex="0" hidden>
  <h2>03 / Trainer control</h2>
@@ -97,6 +117,10 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
   <div class="row"><label for="ctl-kind">Target</label><select id="ctl-kind"><option value="power">Power (W)</option><option value="resistance">Resistance (%)</option><option value="incline">Incline / grade (%)</option><option value="speed">Speed (km/h)</option></select></div>
   <div class="row"><label for="ctl-value">Value</label><input id="ctl-value" type="number" step="any" value="150"><button class="b" id="btn-apply">Apply</button></div>
   <div id="ctl-result" class="small" role="status" aria-live="polite"></div>
+  <ul class="status-legend" aria-label="Control result color legend">
+   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Command accepted</li>
+   <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Command failed / disconnected / rejected</li>
+  </ul>
   <p class="small">Requests pass the bridge safety gate: they are rejected when no trainer is connected, the control is not supported or the value is out of range.</p></div>
 </section>
 <section id="set" role="tabpanel" aria-labelledby="tab-set" tabindex="0" hidden>
@@ -113,6 +137,11 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
   <div id="ant-services" hidden><div class="label">ANT+ output channels</div><div id="c-antServices" class="service-options" role="group" aria-label="ANT+ output channels"></div>
   <div id="ant-service-state" class="service-pills" aria-label="ANT+ channel state"></div>
   <p id="c-antWarning" class="small service-note bad" role="status" hidden>FE-C + Power duplicates power. Pair only one power source in your app.</p></div>
+  <ul class="status-legend" aria-label="Output service color legend">
+  <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Service active / channel open / channel capacity</li>
+  <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Pending / off</li>
+  <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Failed / error / duplicate power warning</li>
+  </ul>
   <div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div></div>
  <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
   <div class="row"><label for="c-wifiSsid">Network (SSID)</label><div class="combo"><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="wifi-list" autocomplete="off"><ul id="wifi-list" role="listbox" aria-label="Wi-Fi networks" hidden></ul></div><button class="b sec" id="btn-wifi-scan" aria-busy="false"><span class="spin" aria-hidden="true"></span>Scan</button></div>
