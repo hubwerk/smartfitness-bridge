@@ -4,6 +4,10 @@
 #include "ftms_output.h"
 
 #include <cmath>
+#ifdef ARDUINO
+#include <Arduino.h>
+#include "debug_serial.h"
+#endif
 
 namespace smartfitness {
 namespace {
@@ -116,6 +120,12 @@ void BridgeCore::refreshDeviceState() {
 }
 
 void BridgeCore::setTrainerState(const TrainerState& state) {
+#ifdef ARDUINO
+    if (trainer_.connected != state.connected)
+        DBG_SERIAL.printf("[BridgeCore] BLE input %s\n", state.connected ? "connected" : "disconnected");
+    if (trainer_.connected && state.connected && trainer_.profile != state.profile)
+        DBG_SERIAL.printf("[BridgeCore] input profile: %s\n", machineProfileName(state.profile));
+#endif
     if (trainer_.connected != state.connected ||
         trainer_.trainerDetected != state.trainerDetected ||
         trainer_.capabilities.controls != state.capabilities.controls ||

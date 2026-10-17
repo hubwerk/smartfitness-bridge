@@ -18,6 +18,8 @@ namespace smartfitness {
 namespace ble {
 
 constexpr std::size_t kMaxEventData = 64;
+constexpr std::uint8_t kConnectFailure = 0;
+constexpr std::uint8_t kServiceDiscoveryFailure = 1;
 
 enum class CentralEventType : std::uint8_t {
     Connected,      // mask = subscriptions that succeeded
@@ -34,6 +36,7 @@ struct CentralEvent {
     CentralEventType type = CentralEventType::ScanComplete;
     std::uint32_t session = 0;
     std::uint8_t index = 0;
+    std::uint16_t reasonCode = 0;
     std::uint32_t mask = 0;
     std::uint8_t length = 0;
     std::array<std::uint8_t, kMaxEventData> data{};

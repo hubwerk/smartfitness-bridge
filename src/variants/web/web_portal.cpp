@@ -147,6 +147,8 @@ struct WebPortal::Impl {
     std::atomic<bool> sending{false};
 #ifdef DEBUG_WEB
     std::uint64_t debugCursor = 0;
+    std::size_t websocketClients = 0;
+    std::uint32_t lastWebSocketLogMs = 0;
     struct LogResponse {
         httpd_req_t* request;
         std::string offset;
@@ -180,9 +182,18 @@ struct WebPortal::Impl {
         std::array<int, kMaxClientSockets> fds{};
         std::size_t count = fds.size();
         if (httpd_get_client_list(server, &count, fds.data()) != ESP_OK) return;
-        bool listening = false;
+        std::size_t listeners = 0;
         for (std::size_t i = 0; i < count; ++i)
-            listening = listening || httpd_ws_get_fd_info(server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET;
+            listeners += httpd_ws_get_fd_info(server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET;
+        const std::uint32_t now = millis();
+        if (listeners != websocketClients && now - lastWebSocketLogMs >= 1000) {
+            websocketClients = listeners;
+            lastWebSocketLogMs = now;
+            DBG_SERIAL.printf("[WebSocket] %s (%u client(s))\n",
+                              websocketClients ? "client connected" : "client disconnected",
+                              static_cast<unsigned>(websocketClients));
+        }
+        const bool listening = listeners != 0;
         if (!listening) return;
         char data[1024];
         const auto chunk = debugweb::readChunk(debugCursor, data, sizeof(data));
@@ -418,6 +429,13 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     ssid_ = ssid;
     password_ = password;
     apPassword_ = apPassword;
+    WiFi.onEvent([this](WiFiEvent_t event, WiFiEventInfo_t info) {
+        if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) stationGotIp_ = true;
+        if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+            stationDisconnectReason_ = info.wifi_sta_disconnected.reason;
+            stationDisconnected_ = true;
+        }
+    });
 
     std::array<std::uint8_t, 6> mac{};
     WiFi.macAddress(mac.data());
@@ -451,6 +469,7 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
 }
 
 void WebPortal::applyMode(WifiMode mode) {
+    const WifiMode previous = applied_;
     const bool wantAp = mode == WifiMode::Ap || mode == WifiMode::ApSta;
     const bool wantSta = mode == WifiMode::Sta || mode == WifiMode::ApSta;
     WiFi.mode(wantAp && wantSta ? WIFI_AP_STA : wantAp ? WIFI_AP : WIFI_STA);
@@ -465,14 +484,15 @@ void WebPortal::applyMode(WifiMode mode) {
             impl_->dns.setErrorReplyCode(DNSReplyCode::NoError);
             impl_->dnsRunning = impl_->dns.start(kDnsPort, "*", WiFi.softAPIP());
         }
-        DBG_SERIAL.printf("[WiFi] access point \"%s\" (WPA2 password: %s) at %s%s/\n", apSsid_.c_str(),
-                      apPassword_ == BridgeConfig{}.apPassword ? apPassword_.c_str() : "(custom)",
+        DBG_SERIAL.printf("[WiFi] access point \"%s\" (password configured) at %s%s/\n", apSsid_.c_str(),
                       https_ ? "https://" : "http://", WiFi.softAPIP().toString().c_str());
     } else if (impl_ && impl_->dnsRunning) {
         impl_->dns.stop();
         impl_->dnsRunning = false;
     }
     applied_ = mode;
+    if (mode != previous)
+        DBG_SERIAL.printf("[WiFi] mode changed: %s\n", wifiModeName(mode));
     if (wantSta && !wifiScan_.scanning()) beginStation();
 }
 
@@ -566,6 +586,10 @@ void WebPortal::publish(std::uint32_t now) {
 void WebPortal::loop() {
     if (!started_) return;
     const std::uint32_t now = millis();
+    if (stationGotIp_.exchange(false))
+        DBG_SERIAL.printf("[WiFi] station connected: %s\n", WiFi.localIP().toString().c_str());
+    if (stationDisconnected_.exchange(false))
+        DBG_SERIAL.printf("[WiFi] station disconnected (reason=%d)\n", stationDisconnectReason_.exchange(-1));
     for (const std::string& message : api_.process(ui_)) {
         impl_->broadcast(message);  // Results remain available through GET /api/result if congested.
         lastStatusMs_ = now - kStatusIntervalMs;  // push the effect right away
@@ -580,6 +604,10 @@ void WebPortal::loop() {
     if (now - lastPolicyMs_ >= kPolicyIntervalMs) {
         lastPolicyMs_ = now;
         const int stations = applied_ != WifiMode::Sta ? WiFi.softAPgetStationNum() : 0;
+        if (stations != lastApStationCount_) {
+            lastApStationCount_ = stations;
+            DBG_SERIAL.printf("[WiFi] SoftAP clients: %d\n", stations);
+        }
         const WifiMode mode = policy_.update(WiFi.status() == WL_CONNECTED, stations, now);
         if (mode != applied_) applyMode(mode);
     }

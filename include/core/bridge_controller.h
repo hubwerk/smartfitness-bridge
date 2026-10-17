@@ -55,6 +55,8 @@ private:
     InputSelector* selector_ = nullptr;
     BleInputAdapter* ble_ = nullptr;
     bool restartRequested_ = false;
+    bool outputProtocolLogged_ = false;
+    smartfitness::OutputProtocol lastOutputProtocol_ = smartfitness::OutputProtocol::Off;
     std::string input_;
     bool overflow_ = false;
 };

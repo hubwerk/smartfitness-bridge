@@ -64,12 +64,14 @@ struct NimbleCentral::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimB
         if (client->isConnected()) connectedSession.connected(owner.session_.load());
     }
 
-    void onDisconnect(NimBLEClient*) override {
+    void onDisconnect(NimBLEClient* client) override {
         std::lock_guard<std::mutex> lock(callbackMutex);
         // Capture the link identity before releasing it for reuse. A queued
         // disconnect must never acquire the next connection's session.
         const std::uint32_t session = connectedSession.disconnected();
-        if (session != 0) owner.pushEvent(ble::CentralEventType::Disconnected, session);
+        if (session != 0)
+            owner.pushEvent(ble::CentralEventType::Disconnected, session, 0, 0, nullptr, 0,
+                            static_cast<std::uint16_t>(client->getLastError()));
     }
 
     NimbleCentral& owner;
@@ -200,12 +202,14 @@ bool NimbleCentral::pollScan(ble::ScanReport& report) { return scans_.pop(report
 bool NimbleCentral::pollEvent(ble::CentralEvent& event) { return events_.pop(event); }
 
 void NimbleCentral::pushEvent(ble::CentralEventType type, std::uint32_t session, std::uint8_t index,
-                              std::uint32_t mask, const std::uint8_t* data, std::size_t length) {
+                              std::uint32_t mask, const std::uint8_t* data, std::size_t length,
+                              std::uint16_t reasonCode) {
     ble::CentralEvent event;
     event.type = type;
     event.session = session;
     event.index = index;
     event.mask = mask;
+    event.reasonCode = reasonCode;
     if (data) event.setData(data, length);
     events_.push(event);
 }
@@ -295,7 +299,8 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
     if (cancelled(cmd.session)) return;
     const NimBLEAddress address(cmd.address.toString(), cmd.address.type);
     if (!client->connect(address, true)) {
-        pushEvent(ble::CentralEventType::ConnectFailed, cmd.session);
+        pushEvent(ble::CentralEventType::ConnectFailed, cmd.session, ble::kConnectFailure, 0, nullptr, 0,
+                  static_cast<std::uint16_t>(client->getLastError()));
         return;
     }
     if (cancelled(cmd.session)) {
@@ -319,7 +324,13 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         plan.subscriptionCount = 0;
         bool writeFound = false;
         const auto* services = client->getServices(true);
-        if (services) for (auto* service : *services) {
+        if (!services) {
+            pushEvent(ble::CentralEventType::ConnectFailed, cmd.session, ble::kServiceDiscoveryFailure, 0, nullptr, 0,
+                      static_cast<std::uint16_t>(client->getLastError()));
+            doDisconnect();
+            return;
+        }
+        for (auto* service : *services) {
             if (cancelled(session)) { doDisconnect(); return; }
             ble::Uuid serviceUuid;
             if (!ble::Uuid::parse(service->getUUID().toString(), serviceUuid)) continue;
@@ -364,7 +375,8 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         return;
     }
     if (!client->isConnected()) {
-        pushEvent(ble::CentralEventType::ConnectFailed, cmd.session);
+        pushEvent(ble::CentralEventType::ConnectFailed, cmd.session, ble::kConnectFailure, 0, nullptr, 0,
+                  static_cast<std::uint16_t>(client->getLastError()));
         return;
     }
     pendingConnection_.complete(cmd.session);

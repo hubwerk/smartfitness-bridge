@@ -3,6 +3,11 @@
 #include <algorithm>
 #include <utility>
 
+#ifdef ARDUINO
+#include <Arduino.h>
+#include "debug_serial.h"
+#endif
+
 #include "protocols/registry.hpp"
 #include "scan_label.h"
 
@@ -43,6 +48,7 @@ bool BleInputAdapter::scanAndConnect() {
     autoConnect_ = true;
     backoffMs_ = 0;
     attempts_ = 0;
+    reconnecting_ = false;
     const bool closed = closeLink();
     state_ = LinkState::Idle;
     if (!closed) {
@@ -129,6 +135,20 @@ bool BleInputAdapter::startConnection() {
     }
     ++attempts_;
     stateSinceMs_ = now;
+#ifdef ARDUINO
+    if (!reconnecting_ && attempts_ == 1) {
+        if (paired_.name.empty())
+            DBG_SERIAL.printf("[BLE] connecting to %s\n", paired_.address.toString().c_str());
+        else
+            DBG_SERIAL.printf("[BLE] connecting to %s (%s)\n", paired_.address.toString().c_str(),
+                              paired_.name.c_str());
+    } else if (!hasReconnectLog_ || now - lastReconnectLogMs_ >= 10000) {
+        DBG_SERIAL.printf("[BLE] reconnect attempt %u to %s\n", static_cast<unsigned>(attempts_),
+                          paired_.address.toString().c_str());
+        lastReconnectLogMs_ = now;
+        hasReconnectLog_ = true;
+    }
+#endif
     if (protocol_->advertisementOnly()) {
         state_ = LinkState::Listening;
         if (!transport_.startScan(0, true)) {
@@ -136,6 +156,9 @@ bool BleInputAdapter::startConnection() {
             scheduleReconnect("listening scan request rejected");
             return false;
         }
+#ifdef ARDUINO
+        DBG_SERIAL.println("[BLE] scan started for broadcast adapter");
+#endif
         return true;
     }
     if ((userScan_ && !stopScan()) || (transport_.scanning() && !transport_.stopScan())) {
@@ -176,6 +199,7 @@ void BleInputAdapter::scheduleReconnect(const std::string& reason) {
     lastError_ = reason;
     closeLink();
     if (autoConnect_ && paired_.valid) {
+        reconnecting_ = true;
         backoffMs_ = backoffMs_ == 0 ? timing_.backoffInitialMs : backoffMs_ * 2;
         if (backoffMs_ > timing_.backoffMaxMs) backoffMs_ = timing_.backoffMaxMs;
         nextAttemptMs_ = clock_() + backoffMs_;
@@ -241,6 +265,10 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
     const std::uint32_t now = clock_();
     if (event.type == ble::CentralEventType::ScanComplete) {
         // A stop's completion can remain queued while a new scan is requested.
+#ifdef ARDUINO
+        if (userScan_)
+            DBG_SERIAL.printf("[BLE] scan finished: %u device(s)\n", static_cast<unsigned>(results_.size()));
+#endif
         if (!transport_.scanning()) userScan_ = false;
         return;
     }
@@ -269,17 +297,43 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
                 stateSinceMs_ = now;
                 backoffMs_ = 0;
                 attempts_ = 0;
+                reconnecting_ = false;
                 lastError_.clear();
+#ifdef ARDUINO
+                DBG_SERIAL.printf("[BLE] connected; adapter=%s, notifications=%u/%u\n", protocol_->id(),
+                                  static_cast<unsigned>(std::count_if(subscriptions_.begin(), subscriptions_.end(),
+                                      [](const BleSubscriptionStatus& status) { return status.state == "ok"; })),
+                                  static_cast<unsigned>(subscriptions_.size()));
+                for (const auto& subscription : subscriptions_) {
+                    if (subscription.state == "failed")
+                        DBG_SERIAL.printf("[BLE] notification subscription failed: %s/%s\n",
+                                          subscription.service.toString().c_str(),
+                                          subscription.characteristic.toString().c_str());
+                }
+#endif
                 maybeEmit(true);
             } else {
                 scheduleReconnect(protocol_->lastError().empty() ? "device not supported" : protocol_->lastError());
             }
             break;
         case ble::CentralEventType::ConnectFailed:
-            if (linkActive) scheduleReconnect("connect failed");
+            if (linkActive) {
+#ifdef ARDUINO
+                if (event.index == ble::kServiceDiscoveryFailure)
+                    DBG_SERIAL.printf("[BLE] service discovery failed (reason=%u)\n", event.reasonCode);
+                else
+                    DBG_SERIAL.printf("[BLE] connection failed (reason=%u)\n", event.reasonCode);
+#endif
+                scheduleReconnect("connect failed");
+            }
             break;
         case ble::CentralEventType::Disconnected:
-            if (linkActive) scheduleReconnect("link lost");
+            if (linkActive) {
+#ifdef ARDUINO
+                DBG_SERIAL.printf("[BLE] disconnected (reason=%u)\n", event.reasonCode);
+#endif
+                scheduleReconnect("link lost");
+            }
             break;
         case ble::CentralEventType::Notification:
             if (linkActive) protocol_->onNotify(event.index, event.data.data(), event.length, now);
@@ -305,12 +359,20 @@ bool BleInputAdapter::startScan(std::uint32_t durationMs) {
     userScan_ = true;
     scanUntilMs_ = clock_() + durationMs;
     // While listening to a broadcast device the continuous scan is reused.
-    if (state_ == LinkState::Listening) return true;
+    if (state_ == LinkState::Listening) {
+#ifdef ARDUINO
+        DBG_SERIAL.println("[BLE] scan started (reusing broadcast scan)");
+#endif
+        return true;
+    }
     if (!transport_.startScan(durationMs, true, true)) {
         userScan_ = false;
         lastError_ = "scan could not be started";
         return false;
     }
+#ifdef ARDUINO
+    DBG_SERIAL.printf("[BLE] scan started for %u s\n", static_cast<unsigned>((durationMs + 999) / 1000));
+#endif
     return true;
 }
 
@@ -322,6 +384,9 @@ bool BleInputAdapter::stopScan() {
         return false;
     }
     userScan_ = false;
+#ifdef ARDUINO
+    DBG_SERIAL.printf("[BLE] scan stopped: %u device(s)\n", static_cast<unsigned>(results_.size()));
+#endif
     return true;
 }
 

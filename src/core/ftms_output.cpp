@@ -5,6 +5,11 @@
 #include <utility>
 
 #ifdef ARDUINO
+#include <Arduino.h>
+#include "debug_serial.h"
+#endif
+
+#ifdef ARDUINO
 #include <NimBLEDevice.h>
 #include <map>
 #endif
@@ -141,6 +146,9 @@ void FtmsOutput::setEnabled(bool enabled) {
         sensorDataSent_ = false;
     }
     if (enabled || !begun_) return;
+#ifdef ARDUINO
+    if (connected_) DBG_SERIAL.println("[FTMS] client disconnected (output disabled)");
+#endif
     transportDisconnectClients();
     stopAdvertising();
     resetSession();
@@ -219,6 +227,9 @@ void FtmsOutput::refreshProfile() {
     trainingStatus_ = ftms::TrainingStatus::Idle;
     profileDisconnectPending_ = connections_.load() > 0;
     transportDisconnectClients();
+#ifdef ARDUINO
+    if (connected_) DBG_SERIAL.println("[FTMS] client disconnected (profile changed)");
+#endif
     connected_ = false;
     stopAdvertising();
     transportApplyProfile();
@@ -305,7 +316,27 @@ std::uint32_t FtmsOutput::now() const {
 
 void FtmsOutput::handleConnectionChanges() {
     if (connections_.load() == 0) profileDisconnectPending_ = false;
+#ifdef ARDUINO
+    const bool wasConnected = connected_;
+#endif
     connected_ = enabled() && !profileDisconnectPending_ && connections_.load() > 0;
+#ifdef ARDUINO
+    if (wasConnected != connected_) {
+        if (connected_) {
+            std::array<std::uint8_t, 6> address{};
+            std::uint8_t type = 0;
+            if (clientAddress(address, type)) {
+                DBG_SERIAL.printf("[FTMS] client connected: %02X:%02X:%02X:%02X:%02X:%02X (%s)\n",
+                                  address[0], address[1], address[2], address[3], address[4], address[5],
+                                  type ? "random" : "public");
+            } else {
+                DBG_SERIAL.println("[FTMS] client connected");
+            }
+        } else {
+            DBG_SERIAL.println("[FTMS] client disconnected");
+        }
+    }
+#endif
     const std::uint32_t generation = generation_.load();
     if (generation != seenGeneration_) {
         // Every connect or disconnect starts a new session: control must be requested again.
@@ -316,7 +347,12 @@ void FtmsOutput::handleConnectionChanges() {
         trainingStatusSent_ = false;
         clearSessionData();
         // The stack stops advertising once a central connects.
-        if (connected_) advertising_ = false;
+        if (connected_ && advertising_) {
+#ifdef ARDUINO
+            DBG_SERIAL.println("[FTMS] advertising stopped (client connected)");
+#endif
+            advertising_ = false;
+        }
     }
     if (!connected_) startAdvertising();
 }
@@ -365,6 +401,35 @@ void FtmsOutput::handleControlPoint(const PendingWrite& write) {
     }
     response_ = ftms::encodeControlPointResponse(command.opcode, result);
     transportIndicateResponse();
+#ifdef ARDUINO
+    if (!hasControlLog_ || now() - lastControlLogMs_ >= 1000) {
+        const char* operation = nullptr;
+        const char* unit = "";
+        switch (static_cast<ftms::OpCode>(command.opcode)) {
+            case ftms::OpCode::RequestControl: operation = "request control"; break;
+            case ftms::OpCode::Reset: operation = "reset"; break;
+            case ftms::OpCode::SetTargetSpeed: operation = "target speed"; unit = " km/h"; break;
+            case ftms::OpCode::SetTargetInclination: operation = "target incline"; unit = "%"; break;
+            case ftms::OpCode::SetTargetResistance: operation = "target resistance"; break;
+            case ftms::OpCode::SetTargetPower: operation = "target power"; unit = " W"; break;
+            case ftms::OpCode::StartOrResume: operation = "start/resume"; break;
+            case ftms::OpCode::StopOrPause: operation = "stop/pause"; break;
+            case ftms::OpCode::SetIndoorBikeSimulation: operation = "simulation"; break;
+            case ftms::OpCode::ResponseCode: break;
+        }
+        if (operation) {
+            if (command.hasRequest && command.opcode != static_cast<std::uint8_t>(ftms::OpCode::SetIndoorBikeSimulation))
+                DBG_SERIAL.printf("[FTMS] %s %.1f%s (%s)\n", operation,
+                                  static_cast<double>(command.request.value), unit,
+                                  result == ftms::ResultCode::Success ? "ok" : "rejected");
+            else
+                DBG_SERIAL.printf("[FTMS] %s (%s)\n", operation,
+                                  result == ftms::ResultCode::Success ? "ok" : "rejected");
+            lastControlLogMs_ = now();
+            hasControlLog_ = true;
+        }
+    }
+#endif
     if (result != ftms::ResultCode::Success) return;
     auto status = ftms::encodeMachineStatus(command);
     if (status.empty()) return;
@@ -427,10 +492,18 @@ void FtmsOutput::startAdvertising() {
     advertising_ = transportBegin() && transportStartAdvertising();
     advertiseFailed_ = !advertising_;
     advertiseFailedMs_ = timestamp;
+#ifdef ARDUINO
+    DBG_SERIAL.println(advertising_ ? "[FTMS] advertising started" : "[FTMS] advertising start failed");
+#endif
 }
 
 void FtmsOutput::stopAdvertising() {
-    if (advertising_) transportStopAdvertising();
+    if (advertising_) {
+        transportStopAdvertising();
+#ifdef ARDUINO
+        DBG_SERIAL.println("[FTMS] advertising stopped");
+#endif
+    }
     advertising_ = false;
     advertiseFailed_ = false;
 }

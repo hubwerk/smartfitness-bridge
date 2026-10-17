@@ -121,6 +121,8 @@ private:
     bool granted_ = false;
     bool connected_ = false;
     bool profileDisconnectPending_ = false;
+    bool hasControlLog_ = false;
+    std::uint32_t lastControlLogMs_ = 0;
     std::uint8_t configuredServices_ = 0;
     std::uint8_t appliedServices_ = smartfitness::ble::kFtms;
     bool topologyFrozen_ = false;

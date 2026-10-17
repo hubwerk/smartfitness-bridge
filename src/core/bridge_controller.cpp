@@ -94,6 +94,13 @@ void BridgeController::applyConfig() {
     // Exactly one output protocol is active; ANT+ FE-C needs an ANT radio.
     ftms_.setEnabled(config.outputProtocol == OutputProtocol::BleFtms);
     ant_.setEnabled(config.outputProtocol == OutputProtocol::AntFec && ant_.available());
+#ifdef ARDUINO
+    if (!outputProtocolLogged_ || lastOutputProtocol_ != config.outputProtocol) {
+        DBG_SERIAL.printf("[BridgeCore] output protocol: %s\n", outputProtocolName(config.outputProtocol));
+        lastOutputProtocol_ = config.outputProtocol;
+        outputProtocolLogged_ = true;
+    }
+#endif
     if (ble_ && selector_) {
         const bool paired = config.pairedSource.valid && !config.pairedAdapterId.empty();
         if (paired) {
@@ -111,8 +118,17 @@ void BridgeController::applyConfig() {
         } else if (ble_->pairedDevice().valid) {
             ble_->clearPairedDevice();
         }
-        selector_->select(config.ftmsInput && paired ? InputSelector::Source::Ble
-                                                      : InputSelector::Source::Simulation);
+        const auto source = config.ftmsInput && paired ? InputSelector::Source::Ble
+                                                        : InputSelector::Source::Simulation;
+#ifdef ARDUINO
+        const auto previous = selector_->source();
+#endif
+        selector_->select(source);
+#ifdef ARDUINO
+        if (previous != selector_->source())
+            DBG_SERIAL.printf("[BridgeCore] input source: %s\n",
+                              selector_->source() == InputSelector::Source::Ble ? "BLE" : "simulation");
+#endif
     }
     bridge_.loop();
 }
@@ -199,6 +215,10 @@ CommandResult BridgeController::pair(const Command& command) {
     if (!config_.pairSource(toSource(device.address), device.name, device.adapterId, advertisedServices))
         return fail("pairing not persisted (storage write failed)");
     applyConfig();
+#ifdef ARDUINO
+    DBG_SERIAL.printf("[BLE] paired %s (%s) adapter=%s\n", device.name.empty() ? "device" : device.name.c_str(),
+                      device.address.toString().c_str(), device.adapterId.c_str());
+#endif
     if (!ble_->scanAndConnect()) return fail("paired, but connection request rejected: " + ble_->lastError());
     bridge_.loop();
     const std::string label = device.name.empty() ? device.address.toString() : device.name + " (" + device.address.toString() + ")";
@@ -267,11 +287,18 @@ CommandResult BridgeController::execute(const Command& command) {
             return ok("connecting; " + status());
         case CommandType::Disconnect:
         case CommandType::Unpair: {
+            const bool unpair = command.type == CommandType::Unpair;
+            const PairedDevice previous = ble_ ? ble_->pairedDevice() : PairedDevice{};
             const bool accepted = !bleSelected() || ble_->requestDisconnect();
             bridge_.disconnect();
             if (!accepted) return fail("disconnect request rejected: " + ble_->lastError());
-            const bool persisted = command.type != CommandType::Unpair || config_.unpair();
-            if (command.type == CommandType::Unpair) applyConfig();
+            const bool persisted = !unpair || config_.unpair();
+            if (unpair) {
+                applyConfig();
+#ifdef ARDUINO
+                DBG_SERIAL.printf("[BLE] unpaired %s\n", previous.valid ? previous.address.toString().c_str() : "device");
+#endif
+            }
             bridge_.loop();
             return persisted ? ok(status()) : fail("unpair not persisted (storage write failed); " + status());
         }

@@ -22,6 +22,7 @@ constexpr char kPath[] = "/debug.log";
 constexpr std::size_t kQueueBytes = 8192;
 constexpr std::size_t kBlockBytes = 1024;
 std::uint8_t queue[kQueueBytes];
+std::uint8_t queueToSerial[kQueueBytes];
 std::size_t head = 0;
 std::size_t queued = 0;
 std::uint64_t lost = 0;
@@ -135,7 +136,7 @@ int debugVprintf(const char* format, va_list args) {
         const std::size_t available = std::min(static_cast<std::size_t>(length), sizeof(buffer) - 1);
         if (static_cast<std::size_t>(length) > available) recordLoss(static_cast<std::size_t>(length) - available);
         const std::size_t clean = stripAnsi(buffer, available);
-        debugSerial.write(reinterpret_cast<const std::uint8_t*>(buffer), clean);
+        debugSerial.writeLog(reinterpret_cast<const std::uint8_t*>(buffer), clean);
     }
     inDebugVprintf = false;
     return uartResult;
@@ -207,14 +208,21 @@ void worker(void*) {
         vTaskDelay(pdMS_TO_TICKS(20));
         while (remaining) {
             portENTER_CRITICAL(&queueMux);
-            const std::size_t count = std::min(remaining, sizeof(block));
+            std::size_t count = std::min(remaining, sizeof(block));
+            const bool toSerial = queueToSerial[head] != 0;
+            for (std::size_t index = 1; index < count; ++index) {
+                if ((queueToSerial[(head + index) % kQueueBytes] != 0) != toSerial) {
+                    count = index;
+                    break;
+                }
+            }
             const std::size_t first = std::min(count, kQueueBytes - head);
             std::memcpy(block, queue + head, first);
             std::memcpy(block + first, queue, count - first);
             head = (head + count) % kQueueBytes;
             queued -= count;
             portEXIT_CRITICAL(&queueMux);
-            serialWrite(block, count);
+            if (toSerial) serialWrite(block, count);
             append(block, count);
             remaining -= count;
         }
@@ -246,6 +254,27 @@ std::size_t DebugSerial::write(const std::uint8_t* data, std::size_t size) {
     const std::size_t first = std::min(count, kQueueBytes - tail);
     std::memcpy(queue + tail, data, first);
     std::memcpy(queue, data + first, count - first);
+    std::memset(queueToSerial + tail, 1, first);
+    std::memset(queueToSerial, 1, count - first);
+    queued += count;
+    lost += size - count;
+    portEXIT_CRITICAL(&queueMux);
+    if (workerTask) xTaskNotifyGive(workerTask);
+    return count;
+}
+
+std::size_t DebugSerial::writeLog(const std::uint8_t* data, std::size_t size) {
+    if (rejectIsr()) return 0;
+    if (!data || !size) return 0;
+    if (serialOnly) return size;
+    portENTER_CRITICAL(&queueMux);
+    const std::size_t count = std::min(size, kQueueBytes - queued);
+    const std::size_t tail = (head + queued) % kQueueBytes;
+    const std::size_t first = std::min(count, kQueueBytes - tail);
+    std::memcpy(queue + tail, data, first);
+    std::memcpy(queue, data + first, count - first);
+    std::memset(queueToSerial + tail, 0, first);
+    std::memset(queueToSerial, 0, count - first);
     queued += count;
     lost += size - count;
     portEXIT_CRITICAL(&queueMux);

@@ -3,6 +3,11 @@
 #include <chrono>
 #include <utility>
 
+#ifdef ARDUINO
+#include <Arduino.h>
+#include "debug_serial.h"
+#endif
+
 using namespace smartfitness;
 using namespace smartfitness::ant;
 
@@ -152,12 +157,20 @@ void AntOutput::fail() {
     retryPending_ = true;
     retryAtMs_ = now() + kRetryMs;
     link_ = Link::Resetting;
+#ifdef ARDUINO
+    DBG_SERIAL.printf("[ANT] error: %s\n", errorName(error_));
+#endif
 }
 
 void AntOutput::closeChannel() {
     if (!stickConnected()) return;
     for (std::uint8_t channel = 0; channel < channelCount_; ++channel) {
-        if (openMask_ & channels_[channel].bit) send(encodeMessage(msg::kCloseChannel, Bytes{channel}));
+        if (openMask_ & channels_[channel].bit) {
+            send(encodeMessage(msg::kCloseChannel, Bytes{channel}));
+#ifdef ARDUINO
+            DBG_SERIAL.printf("[ANT] channel %u closed\n", channels_[channel].bit);
+#endif
+        }
     }
     if (link_ == Link::Open || link_ == Link::Configuring) send(encodeMessage(msg::kResetSystem, Bytes{0x00}));
 }
@@ -352,6 +365,9 @@ void AntOutput::handleChannelEvent(const Message& message) {
         return;
     }
     openMask_ |= channels_[configuringChannel_].bit;
+#ifdef ARDUINO
+    DBG_SERIAL.printf("[ANT] channel %u opened\n", channels_[configuringChannel_].bit);
+#endif
     sendNextPage(configuringChannel_);
     if (++configuringChannel_ < channelCount_) {
         step_ = 1;

@@ -141,6 +141,9 @@ private:
     std::uint32_t nextAttemptMs_ = 0;
     std::uint32_t backoffMs_ = 0;
     std::uint32_t attempts_ = 0;
+    std::uint32_t lastReconnectLogMs_ = 0;
+    bool hasReconnectLog_ = false;
+    bool reconnecting_ = false;
     std::string lastError_;
     bool userScan_ = false;
     std::uint32_t scanUntilMs_ = 0;
