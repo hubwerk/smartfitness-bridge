@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
+#include <algorithm>
 #include <type_traits>
 
 using namespace smartfitness;
@@ -440,8 +441,14 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         }
         // Runs on the NimBLE host task: queue only.
         auto callback = [this, session, index](NimBLERemoteCharacteristic*, std::uint8_t* data, std::size_t length,
-                                               bool) {
+                                               bool isNotify) {
+#if defined(DEBUG_WEB)
+            pushEvent(ble::CentralEventType::Notification, session, index,
+                      isNotify ? 0U : ble::kSubscriptionIndicate, data, length);
+#else
+            (void)isNotify;
             pushEvent(ble::CentralEventType::Notification, session, index, 0, data, length);
+#endif
         };
         progress(ble::ConnectPhase::Subscribe);
         const bool subscribed = characteristic->subscribe(!subscription.indicate, callback, true);
@@ -483,14 +490,24 @@ void NimbleCentral::doDisconnect() {
 
 void NimbleCentral::doWrite(const Cmd& cmd) {
     NimBLEClient* client = impl_->client;
-    if (cmd.session != session_.load() || cancelled(cmd.session) || !client->isConnected()) {
+    const auto failed = [this, &cmd]() {
+#if defined(DEBUG_WEB)
+        std::uint8_t endpoint[32];
+        std::copy(cmd.write.service.bytes.begin(), cmd.write.service.bytes.end(), endpoint);
+        std::copy(cmd.write.characteristic.bytes.begin(), cmd.write.characteristic.bytes.end(), endpoint + 16);
+        pushEvent(ble::CentralEventType::WriteFailed, cmd.session, 0, 0, endpoint, sizeof(endpoint));
+#else
         pushEvent(ble::CentralEventType::WriteFailed, cmd.session);
+#endif
+    };
+    if (cmd.session != session_.load() || cancelled(cmd.session) || !client->isConnected()) {
+        failed();
         return;
     }
     NimBLERemoteCharacteristic* characteristic =
         findCached(client, cmd.write.service, cmd.write.characteristic);
     if (!characteristic) {
-        pushEvent(ble::CentralEventType::WriteFailed, cmd.session);
+        failed();
         return;
     }
     bool response = cmd.write.withResponse;
@@ -498,7 +515,7 @@ void NimbleCentral::doWrite(const Cmd& cmd) {
     if (response && !characteristic->canWrite() && characteristic->canWriteNoResponse()) response = false;
     if (!response && !characteristic->canWriteNoResponse() && characteristic->canWrite()) response = true;
     if (!characteristic->writeValue(cmd.write.data.data(), cmd.write.length, response))
-        pushEvent(ble::CentralEventType::WriteFailed, cmd.session);
+        failed();
 }
 
 #endif  // ARDUINO

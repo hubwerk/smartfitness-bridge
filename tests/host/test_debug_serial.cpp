@@ -1,7 +1,7 @@
-// Standalone focused test, using the same g++/assert infrastructure as host tests:
-// g++ -std=c++17 -Wall -Wextra -Werror -pthread -DDEBUG_WEB -DARDUINO
-//   -Iinclude/core -Itests/host/debug_serial_fakes tests/host/test_debug_serial.cpp -o /tmp/smartfitness-debug-test
+// Firmware-debug tests, using the same g++/assert infrastructure as host tests:
+// make host-tests-debug
 #include "../../src/platform/debug_serial.cpp"
+#include "debug_log.h"
 
 #include <atomic>
 #include <iostream>
@@ -140,11 +140,28 @@ void testBatchingReadsAndSnapshots() {
         assert(!debugweb::streamLog(sink, &failed));
         assert(debugweb::readChunk(0, data, sizeof(data)).size == sizeof(data));
     }
+
     fake::readFails = true;
     Snapshot failedRead;
     assert(!debugweb::streamLog(sink, &failedRead));
     fake::readFails = false;
     assert(debugweb::readChunk(0, data, sizeof(data)).size == sizeof(data));
+}
+
+void testBleBurstHeadroom() {
+    reset();
+    debugweb::begin();
+    std::uint8_t payload[30]{};
+    const debuglog::Hex hex(payload, sizeof(payload));
+    // Five seconds of 300 payload bytes/s, before the worker gets to drain.
+    for (unsigned i = 0; i < 50; ++i) {
+        SF_DEBUG_LOG("[BLE-IN] #%u +%u 0x1826/0x2ad2 notify len=30: %s\n", i, i * 100, hex.c_str());
+        SF_DEBUG_LOG("[FTMS-IN] bike flags=0x0044 more=0 speed=25.00 cadence=80.00 power=150.00\n");
+    }
+    assert(lost == 0);
+    pump();
+    assert(fake::file == Serial.output);
+    assert(fake::file.find("LOST OUTPUT") == std::string::npos);
 }
 
 void testLossAndIsr() {
@@ -189,26 +206,27 @@ void testRotationAndFailure() {
     reset();
     debugweb::begin();
     const std::string block(kQueueBytes, 'r');
-    for (unsigned i = 0; i < 65; ++i) {
+    const std::size_t blocks = debugweb::kMaxLogBytes / kQueueBytes + 1;
+    for (std::size_t i = 0; i < blocks; ++i) {
         assert(writeText(block) == block.size());
         pump();
         assert(fake::file.size() <= debugweb::kMaxLogBytes);
     }
     assert(fake::maxSize == debugweb::kMaxLogBytes);
     assert(absoluteStart == debugweb::kMaxLogBytes);
-    assert(absoluteEnd == 65 * kQueueBytes && fake::file == block);
+    assert(absoluteEnd == blocks * kQueueBytes && fake::file == block);
     char data[8];
     const auto stale = debugweb::readChunk(0, data, sizeof(data));
     assert(stale.reset && stale.start == absoluteStart && stale.end == absoluteStart + sizeof(data));
     Snapshot snapshot;
     assert(debugweb::streamLog(sink, &snapshot));
-    assert(snapshot.end == absoluteEnd && snapshot.text == block && snapshot.calls == 9);
+    assert(snapshot.end == absoluteEnd && snapshot.text == block && snapshot.calls == 1 + kQueueBytes / kBlockBytes);
 
     fake::writeLimit = 2;
     writeText("lost to flash");
     pump();
     assert(Serial.output.find("persistent output lost") != std::string::npos);
-    assert(!writable && absoluteEnd == 65 * kQueueBytes + 2);
+    assert(!writable && absoluteEnd == blocks * kQueueBytes + 2);
 
     reset();
     fake::openFails = true;
@@ -305,14 +323,41 @@ void testConcurrentProducers() {
 }
 }  // namespace
 
+void testDebugBle();
+
 int main() {
     testMountAndBoot();
     testBatchingReadsAndSnapshots();
+    testBleBurstHeadroom();
     testLossAndIsr();
     testRotationAndFailure();
     testInitializationFallback();
     testEspLogForwarding();
     testConcurrentProducers();
+    reset();
+    debugweb::begin();
+    testDebugBle();
+    pump();
+    assert(lost == 0);
+    assert(fake::file.find("[BLE-IN]") != std::string::npos);
+    assert(fake::file.find("[FTMS-IN]") != std::string::npos);
+    assert(fake::file.find("[FTMS-CP]") != std::string::npos);
+    assert(fake::file.find("[BridgeCore] telemetry:") != std::string::npos);
+    assert(fake::file.find("0x1826/0x2ad2 notify len=8: 44 00 90 01 a0 00 96 00") != std::string::npos);
+    assert(fake::file.find("0x1826/0x2ad9 indicate len=3: 80 00 01") != std::string::npos);
+    assert(fake::file.find("0x1826/0x2ada notify len=1: 02") != std::string::npos);
+    assert(fake::file.find("0x1826/0x2ad9 indicate len=3: 80 00 05") != std::string::npos);
+    assert(fake::file.find("0x1826/0x2ada notify len=1: 01") != std::string::npos);
+    assert(fake::file.find("[BLE-READ] 0x1826/0x2acc len=8:") != std::string::npos);
+    assert(fake::file.find("[BLE-OUT] 0x1826/0x2ad9 with response len=1: 00") != std::string::npos);
+    assert(fake::file.find("idx=99 notify len=1: aa") != std::string::npos);
+    assert(fake::file.find("(ignored: session mismatch)") != std::string::npos);
+    assert(fake::file.find("(ignored: link inactive)") != std::string::npos);
+    assert(fake::file.find("WriteFailed") != std::string::npos);
+    assert(fake::file.find("[BLE-IN] stats: notifications=") != std::string::npos);
+    assert(fake::file.find("[BLE-IN] data stale") != std::string::npos);
+    assert(fake::file.find("[BLE-IN] data fresh") != std::string::npos);
+    assert(fake::file == Serial.output);
     reset();
     std::cout << "debug serial tests passed\n";
 }

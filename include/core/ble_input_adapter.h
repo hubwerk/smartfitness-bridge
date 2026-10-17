@@ -117,6 +117,9 @@ public:
     LinkState linkState() const { return state_; }
     static const char* linkStateName(LinkState state);
     bool stale() const;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    bool debugStale() const override { return stale(); }
+#endif
     const std::string& lastError() const { return lastError_; }
     std::uint32_t reconnectAttempts() const { return attempts_; }
     std::uint32_t nextAttemptInMs() const;
@@ -157,6 +160,14 @@ private:
     smartfitness::ble::ConnectPhase connectPhase_ = smartfitness::ble::ConnectPhase::Connect;
     std::uint32_t progressResults_ = 0;
     std::uint32_t expectedResults_ = 0;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    void logInputEvent(const smartfitness::ble::CentralEvent& event, std::uint32_t now);
+    std::vector<smartfitness::ble::ReadRequest> debugReads_;
+    std::uint32_t debugConnectMs_ = 0;
+    std::uint32_t debugSequence_ = 0;
+    std::uint32_t debugNotifications_ = 0;
+    std::uint32_t debugStatsMs_ = 0;
+#endif
     smartfitness::ble::Advertisement pairedAdvertisement_;
     bool hasPairedAdvertisement_ = false;
     std::uint32_t pairedAdvertisementMs_ = 0;
@@ -199,6 +210,9 @@ public:
     Source source() const { return source_; }
     BtDeviceAdapter& active();
     const BtDeviceAdapter& active() const;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    bool debugStale() const override { return active().debugStale(); }
+#endif
 
     void begin() override;
     void loop() override;

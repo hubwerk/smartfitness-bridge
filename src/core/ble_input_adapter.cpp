@@ -10,6 +10,7 @@
 
 #include "protocols/registry.hpp"
 #include "scan_label.h"
+#include "debug_log.h"
 
 using namespace smartfitness;
 
@@ -234,6 +235,12 @@ bool BleInputAdapter::connectAfterProbe() {
     userScan_ = false;
     ++session_;
     auto plan = protocol_->plan();
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    debugReads_.assign(plan.reads.begin(), plan.reads.begin() + plan.readCount);
+    debugConnectMs_ = now;
+    debugSequence_ = debugNotifications_ = 0;
+    debugStatsMs_ = now;
+#endif
     // Discovery plans start empty; the central reports what it subscribed.
     for (std::size_t index = 0; index < plan.subscriptionCount && index < ble::kMaxSubscriptions; ++index) {
         const auto& subscription = plan.subscriptions[index];
@@ -364,6 +371,17 @@ void BleInputAdapter::loop() {
             }
             break;
         case LinkState::Ready:
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+            if (now - debugStatsMs_ >= 5000) {
+                SF_DEBUG_LOG("[BLE-IN] stats: notifications=%u/5s, dropped(events=%u, notifications=%u, lifecycle=%u), lastData=%u ms ago, stale=%u\n",
+                             static_cast<unsigned>(debugNotifications_), static_cast<unsigned>(droppedEvents()),
+                             static_cast<unsigned>(droppedNotifications()), static_cast<unsigned>(droppedLifecycleEvents()),
+                             static_cast<unsigned>(now - (protocol_->hasData() ? protocol_->lastDataMs() : stateSinceMs_)),
+                             stale() ? 1U : 0U);
+                debugNotifications_ = 0;
+                debugStatsMs_ = now;
+            }
+#endif
             protocol_->tick(now);
             if (protocol_->failed()) scheduleReconnect(protocol_->lastError());
             else if (!protocol_->hasData()) {
@@ -390,6 +408,9 @@ void BleInputAdapter::loop() {
 
 void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
     const std::uint32_t now = clock_();
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    logInputEvent(event, now);
+#endif
     if (event.type == ble::CentralEventType::ScanComplete) {
         // A stop's completion can remain queued while a new scan is requested.
 #ifdef ARDUINO
@@ -488,6 +509,9 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
                 }
                 state_ = LinkState::Ready;
                 stateSinceMs_ = now;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+                debugConnectMs_ = debugStatsMs_ = now;
+#endif
                 backoffMs_ = 0;
                 attempts_ = 0;
                 reconnecting_ = false;
@@ -538,6 +562,59 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
         case ble::CentralEventType::ConnectProgress: break;
     }
 }
+
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+void BleInputAdapter::logInputEvent(const ble::CentralEvent& event, std::uint32_t now) {
+    if (event.type != ble::CentralEventType::Notification && event.type != ble::CentralEventType::ReadResult &&
+        event.type != ble::CentralEventType::WriteFailed) return;
+    const char* ignored = event.session != session_ ? "session mismatch" :
+                          !protocol_ ? "no protocol" :
+                          state_ != LinkState::Connecting && state_ != LinkState::Ready ? "link inactive" : nullptr;
+    // Old sessions must not be labelled with this connection's UUIDs.
+    char endpoint[80];
+    std::snprintf(endpoint, sizeof(endpoint), "idx=%u", event.index);
+    const BleSubscriptionStatus* subscription = nullptr;
+    if (event.session == session_) {
+        if (event.type == ble::CentralEventType::Notification) {
+            const auto found = std::find(subscriptionIndices_.begin(), subscriptionIndices_.end(), event.index);
+            if (found != subscriptionIndices_.end()) {
+                subscription = &subscriptions_[found - subscriptionIndices_.begin()];
+                std::snprintf(endpoint, sizeof(endpoint), "%s/%s", subscription->service.toString().c_str(),
+                              subscription->characteristic.toString().c_str());
+            }
+        } else if (event.type == ble::CentralEventType::ReadResult && event.index < debugReads_.size()) {
+            const auto& read = debugReads_[event.index];
+            std::snprintf(endpoint, sizeof(endpoint), "%s/%s", read.service.toString().c_str(),
+                          read.characteristic.toString().c_str());
+        }
+    }
+    const auto length = event.originalLength ? event.originalLength : event.length;
+    const debuglog::Hex hex(event.data.data(), event.length, length);
+    const char* suffix = ignored ? " (ignored: " : "";
+    const char* reason = ignored ? ignored : "";
+    const char* end = ignored ? ")" : "";
+    if (event.type == ble::CentralEventType::Notification) {
+        ++debugSequence_;
+        if (event.session == session_) ++debugNotifications_;
+        SF_DEBUG_LOG("[BLE-IN] #%u +%u %s %s len=%zu: %s%s%s%s\n",
+                     static_cast<unsigned>(debugSequence_), static_cast<unsigned>(now - debugConnectMs_), endpoint,
+                     subscription ? (subscription->indicate ? "indicate" : "notify") :
+                                    ((event.mask & ble::kSubscriptionIndicate) ? "indicate" : "notify"),
+                     length, hex.c_str(), suffix, reason, end);
+    } else if (event.type == ble::CentralEventType::ReadResult) {
+        SF_DEBUG_LOG("[BLE-READ] %s len=%zu: %s%s%s%s\n", endpoint, length, hex.c_str(), suffix, reason, end);
+    } else {
+        if (event.length == 32) {
+            ble::Uuid service, characteristic;
+            std::copy_n(event.data.begin(), 16, service.bytes.begin());
+            std::copy_n(event.data.begin() + 16, 16, characteristic.bytes.begin());
+            std::snprintf(endpoint, sizeof(endpoint), "%s/%s", service.toString().c_str(),
+                          characteristic.toString().c_str());
+        }
+        SF_DEBUG_LOG("[BLE-OUT] %s WriteFailed reason=%u%s%s%s\n", endpoint, event.reasonCode, suffix, reason, end);
+    }
+}
+#endif
 
 void BleInputAdapter::applySubscriptionResult(const ble::CentralEvent& event) {
     BleSubscriptionStatus status;
@@ -745,7 +822,12 @@ bool BleInputAdapter::flushWrites() {
     bool accepted = true;
     ble::GattWrite write;
     while (protocol_->takeWrite(write)) {
+        SF_DEBUG_LOG("[BLE-OUT] %s/%s %s response len=%u: %s\n", write.service.toString().c_str(),
+                     write.characteristic.toString().c_str(), write.withResponse ? "with" : "without",
+                     write.length, debuglog::Hex(write.data.data(), write.length).c_str());
         if (!transport_.write(session_, write)) {
+            SF_DEBUG_LOG("[BLE-OUT] %s/%s WriteFailed: write request rejected\n",
+                         write.service.toString().c_str(), write.characteristic.toString().c_str());
             protocol_->onWriteFailed(clock_());
             lastError_ = "write request rejected";
             accepted = false;
@@ -824,6 +906,8 @@ void BleInputAdapter::maybeEmit(bool force) {
     const std::uint32_t now = clock_();
     const bool connected = isConnected();
     const bool isStale = stale();
+    if (connected && isStale != lastEmittedStale_)
+        SF_DEBUG_LOG("[BLE-IN] data %s\n", isStale ? "stale" : "fresh");
     const TrainerCapabilities caps = capabilities();
     const bool capsChanged = caps.metrics != lastEmittedCaps_.metrics || caps.controls != lastEmittedCaps_.controls;
     const bool fresh = connected && protocol_ && protocol_->hasData() &&

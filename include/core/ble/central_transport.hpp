@@ -61,8 +61,14 @@ struct CentralEvent {
     std::uint32_t mask = 0;
     std::uint8_t length = 0;
     std::array<std::uint8_t, kMaxEventData> data{};
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    std::size_t originalLength = 0;
+#endif
 
     void setData(const std::uint8_t* bytes, std::size_t size) {
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+        originalLength = size;
+#endif
         length = static_cast<std::uint8_t>(size > data.size() ? data.size() : size);
         for (std::size_t i = 0; i < length; ++i) data[i] = bytes[i];
     }

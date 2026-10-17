@@ -1,4 +1,5 @@
 #include "protocols/ftms_source.hpp"
+#include "debug_log.h"
 
 #include <cmath>
 #include <cstdio>
@@ -49,6 +50,88 @@ const char* resultName(ftms::ResultCode code) {
     return "unknown result";
 }
 
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+const char* opcodeName(std::uint8_t opcode) {
+    switch (static_cast<ftms::OpCode>(opcode)) {
+        case ftms::OpCode::RequestControl: return "Request Control";
+        case ftms::OpCode::Reset: return "Reset";
+        case ftms::OpCode::SetTargetSpeed: return "Set Target Speed";
+        case ftms::OpCode::SetTargetInclination: return "Set Target Inclination";
+        case ftms::OpCode::SetTargetResistance: return "Set Target Resistance";
+        case ftms::OpCode::SetTargetPower: return "Set Target Power";
+        case ftms::OpCode::StartOrResume: return "Start/Resume";
+        case ftms::OpCode::StopOrPause: return "Stop/Pause";
+        case ftms::OpCode::SetIndoorBikeSimulation: return "Indoor Bike Simulation";
+        case ftms::OpCode::ResponseCode: return "Response";
+    }
+    return "unknown";
+}
+
+const char* controlStateName(FtmsSource::ControlState state) {
+    switch (state) {
+        case FtmsSource::ControlState::Unavailable: return "unavailable";
+        case FtmsSource::ControlState::Requesting: return "requesting";
+        case FtmsSource::ControlState::Granted: return "granted";
+        case FtmsSource::ControlState::Denied: return "denied";
+    }
+    return "unknown";
+}
+
+void logResponse(const std::uint8_t* data, std::size_t length) {
+    ftms::ControlPointResponse response;
+    if (!ftms::decodeControlPointResponse(data, length, response)) {
+        SF_DEBUG_LOG("[FTMS-CP] response malformed decode=failed (truncated/invalid payload) len=%u raw=%s\n",
+                     static_cast<unsigned>(length), debuglog::Hex(data, data ? length : 0).c_str());
+        return;
+    }
+    SF_DEBUG_LOG("[FTMS-CP] response to %s (0x%02x): %s result=0x%02x\n",
+                 opcodeName(response.requestOpcode), static_cast<unsigned>(response.requestOpcode),
+                 resultName(response.result), static_cast<unsigned>(response.result));
+}
+
+void logMachineData(std::size_t identity, const std::uint8_t* data, std::size_t length,
+                    const ftms::MachineData& decoded, bool ok) {
+    const auto* name = machineProfileName(subscriptionProfile(identity));
+    const std::size_t flagBytes = identity == FtmsSource::SubCrossTrainer ? 3 : 2;
+    if (!data || length < flagBytes) {
+        SF_DEBUG_LOG("[FTMS-IN] %s decode=failed: truncated/invalid payload (flags missing) len=%u\n",
+                     name, static_cast<unsigned>(length));
+        return;
+    }
+    unsigned flags = data[0] | (static_cast<unsigned>(data[1]) << 8);
+    if (flagBytes == 3) flags |= static_cast<unsigned>(data[2]) << 16;
+    if (!ok) {
+        SF_DEBUG_LOG("[FTMS-IN] %s flags=0x%06x more=%u len=%u decode=failed: truncated/invalid payload\n",
+                     name, flags, flags & 1U, static_cast<unsigned>(length));
+        return;
+    }
+    const char* direction = identity == FtmsSource::SubCrossTrainer
+        ? (flags & (1U << 15) ? " movementBackward=1" : " movementBackward=0") : "";
+    char line[1024];
+    std::size_t used = static_cast<std::size_t>(std::snprintf(
+        line, sizeof(line), "[FTMS-IN] %s flags=0x%06x more=%u len=%u%s",
+        name, flags, flags & 1U, static_cast<unsigned>(length), direction));
+    for (std::size_t index = 0; index < kMetricCount; ++index) {
+        const auto metric = static_cast<Metric>(index);
+        if (!decoded[metric].valid) continue;
+        // Reserve the newline and terminator within DebugSerial.printf's 1024-byte limit.
+        const std::size_t available = sizeof(line) - used - 1;
+        int count = std::snprintf(line + used, available, " %s=%.2f", metricKey(metric),
+                                  static_cast<double>(decoded[metric].value));
+        if (static_cast<std::size_t>(count) >= available) {
+            line[used] = '\0';
+            SF_DEBUG_LOG("%s\n", line);
+            used = static_cast<std::size_t>(std::snprintf(
+                line, sizeof(line), "[FTMS-IN] %s continuation flags=0x%06x more=%u", name, flags, flags & 1U));
+            count = std::snprintf(line + used, sizeof(line) - used - 1, " %s=%.2f", metricKey(metric),
+                                  static_cast<double>(decoded[metric].value));
+        }
+        used += static_cast<std::size_t>(count);
+    }
+    SF_DEBUG_LOG("%s\n", line);
+}
+#endif
+
 }  // namespace
 
 FtmsSource::FtmsSource() : FtmsSource(Options{}) {}
@@ -60,15 +143,22 @@ ble::ConnectPlan FtmsSource::plan() const {
     const std::uint16_t characteristics[SubCount] = {
         ftms::kIndoorBikeDataUuid, ftms::kTreadmillDataUuid, ftms::kCrossTrainerDataUuid,
         ftms::kRowerDataUuid, ftms::kControlPointUuid, ftms::kStepClimberDataUuid, ftms::kStairClimberDataUuid
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+        , ftms::kMachineStatusUuid
+#endif
     };
     for (std::size_t identity = SubBike; identity < SubCount; ++identity) {
         if (options_.bikeDataOnly && identity != SubBike) continue;
         const bool data = isDataSubscription(identity);
+        bool optional = data && !options_.bikeDataOnly && !lastMachineTypes_;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+        if (identity == SubMachineStatus) optional = true;
+#endif
         if (data && !options_.bikeDataOnly && lastMachineTypes_ &&
             !(lastMachineTypes_ & machineType(identity))) continue;
         subscriptions_[subscriptionCount_++] = static_cast<Subscription>(identity);
         plan.subscribe(kService, uuid16(characteristics[identity]), identity == SubControlPoint,
-                       data && !options_.bikeDataOnly && !lastMachineTypes_);
+                       optional);
     }
     if (options_.bikeDataOnly) return plan;
     plan.read(kService, uuid16(ftms::kFeatureUuid));
@@ -97,7 +187,7 @@ void FtmsSource::reset() {
     inclinationRange_ = {};
     powerRange_ = {};
     controlPointSubscribed_ = false;
-    controlState_ = ControlState::Unavailable;
+    setControlState(ControlState::Unavailable);
     controlRequestedMs_ = 0;
     controlAttempts_ = 0;
 }
@@ -178,21 +268,41 @@ bool FtmsSource::onConnected(std::uint32_t subscribedMask, std::uint32_t nowMs) 
 }
 
 void FtmsSource::requestControl(std::uint32_t nowMs) {
-    controlState_ = ControlState::Requesting;
+    setControlState(ControlState::Requesting);
     controlRequestedMs_ = nowMs;
     ++controlAttempts_;
+    SF_DEBUG_LOG("[FTMS-CP] Request Control attempt=%u/%u\n",
+                 static_cast<unsigned>(controlAttempts_), static_cast<unsigned>(kControlAttempts));
     sendControl(ftms::encodeRequestControl());
 }
 
-bool FtmsSource::sendControl(const ftms::Bytes& payload) { return queueWrite(kService, kControlPoint, payload, true); }
+void FtmsSource::setControlState(ControlState state) {
+    if (controlState_ != state)
+        SF_DEBUG_LOG("[FTMS-CP] state %s -> %s\n", controlStateName(controlState_), controlStateName(state));
+    controlState_ = state;
+}
+
+bool FtmsSource::sendControl(const ftms::Bytes& payload) {
+    const bool queued = queueWrite(kService, kControlPoint, payload, true);
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    if (!payload.empty())
+        SF_DEBUG_LOG("[FTMS-CP] send %s (0x%02x) params=%s %s\n", opcodeName(payload[0]),
+                     static_cast<unsigned>(payload[0]), debuglog::Hex(payload.data() + 1, payload.size() - 1).c_str(),
+                     queued ? "queued" : "dropped: write queue full/invalid payload");
+#endif
+    return queued;
+}
 
 void FtmsSource::tick(std::uint32_t nowMs) {
     if (controlState_ != ControlState::Requesting || nowMs - controlRequestedMs_ < kControlTimeoutMs) return;
+    SF_DEBUG_LOG("[FTMS-CP] timeout Request Control attempt=%u/%u %s\n",
+                 static_cast<unsigned>(controlAttempts_), static_cast<unsigned>(kControlAttempts),
+                 controlAttempts_ < kControlAttempts ? "retry" : "exhausted");
     if (controlAttempts_ < kControlAttempts) {
         requestControl(nowMs);
         return;
     }
-    controlState_ = ControlState::Denied;
+    setControlState(ControlState::Denied);
     setError("no response to FTMS Request Control");
 }
 
@@ -200,15 +310,18 @@ void FtmsSource::handleResponse(const std::uint8_t* data, std::size_t length) {
     ftms::ControlPointResponse response;
     if (!ftms::decodeControlPointResponse(data, length, response)) return;
     if (response.requestOpcode == static_cast<std::uint8_t>(ftms::OpCode::RequestControl)) {
-        if (controlState_ != ControlState::Requesting) return;
+        if (controlState_ != ControlState::Requesting) {
+            SF_DEBUG_LOG("[FTMS-CP] response ignored: not requesting control\n");
+            return;
+        }
         if (response.result == ftms::ResultCode::Success) {
-            controlState_ = ControlState::Granted;
+            setControlState(ControlState::Granted);
             const bool confirmedBike = options_.bikeDataOnly || dataSubscribedMask_ == (1U << SubBike) ||
                                        (advertisedProfileValid_ && advertisedProfile_ == MachineProfile::IndoorBike);
             if (profile_ == MachineProfile::IndoorBike && confirmedBike)
                 sendControl(ftms::encodeStartOrResume());
         } else {
-            controlState_ = ControlState::Denied;
+            setControlState(ControlState::Denied);
             setError(std::string("FTMS Request Control refused: ") + resultName(response.result));
         }
         return;
@@ -247,14 +360,36 @@ void FtmsSource::onNotify(std::size_t index, const std::uint8_t* data, std::size
         case SubStepClimber: ok = ftms::decodeStepClimberData(data, length, decoded); break;
         case SubStairClimber: ok = ftms::decodeStairClimberData(data, length, decoded); break;
         case SubControlPoint:
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+            logResponse(data, length);
+#endif
             if (options_.allowControl) handleResponse(data, length);
+            else SF_DEBUG_LOG("[FTMS-CP] response ignored: control disabled\n");
             return;
-        default: return;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+        case SubMachineStatus:
+            return;
+#endif
+        default:
+            SF_DEBUG_LOG("[FTMS-IN] dropped: unknown subscription index=%u\n", static_cast<unsigned>(index));
+            return;
     }
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    logMachineData(identity, data, length, decoded, ok);
+#endif
     if (ok) {
-        if (options_.bikeDataOnly && identity != SubBike) return;
-        if (dataSubscribedMask_ && !(dataSubscribedMask_ & (1U << identity))) return;
-        if (dataProfileSelected_ && subscriptionProfile(identity) != profile_) return;
+        if (options_.bikeDataOnly && identity != SubBike) {
+            SF_DEBUG_LOG("[FTMS-IN] dropped: bike-only source\n");
+            return;
+        }
+        if (dataSubscribedMask_ && !(dataSubscribedMask_ & (1U << identity))) {
+            SF_DEBUG_LOG("[FTMS-IN] dropped: unsubscribed characteristic\n");
+            return;
+        }
+        if (dataProfileSelected_ && subscriptionProfile(identity) != profile_) {
+            SF_DEBUG_LOG("[FTMS-IN] dropped: profile mismatch (selected=%s)\n", machineProfileName(profile_));
+            return;
+        }
         profile_ = subscriptionProfile(identity);
         dataProfileSelected_ = true;
         apply(decoded, nowMs);

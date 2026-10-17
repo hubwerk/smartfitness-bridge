@@ -19,7 +19,8 @@
 
 namespace {
 constexpr char kPath[] = "/debug.log";
-constexpr std::size_t kQueueBytes = 8192;
+// Headroom for raw BLE + decoded telemetry bursts and short log downloads.
+constexpr std::size_t kQueueBytes = 16 * 1024;
 constexpr std::size_t kBlockBytes = 1024;
 std::uint8_t queue[kQueueBytes];
 std::uint8_t queueToSerial[kQueueBytes];
