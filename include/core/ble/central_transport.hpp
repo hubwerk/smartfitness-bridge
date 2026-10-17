@@ -21,6 +21,16 @@ constexpr std::size_t kMaxEventData = 64;
 constexpr std::uint8_t kConnectFailure = 0;
 constexpr std::uint8_t kServiceDiscoveryFailure = 1;
 
+// SubscriptionResult outcome, carried in CentralEvent::reasonCode.
+enum class SubscriptionOutcome : std::uint8_t {
+    Ok,
+    NotFound,     // service or characteristic not found
+    Unsupported,  // characteristic lacks notify/indicate as requested
+    CccdFailed,   // writing the client characteristic configuration failed
+    Overflow      // discovered beyond kMaxSubscriptions; index = number skipped
+};
+constexpr std::uint32_t kSubscriptionIndicate = 1U;  // SubscriptionResult mask bit
+
 enum class CentralEventType : std::uint8_t {
     Connected,      // mask = subscriptions that succeeded
     ConnectFailed,  // connection or service discovery failed
@@ -29,7 +39,16 @@ enum class CentralEventType : std::uint8_t {
     ReadResult,     // index = read index (delivered before Connected)
     WriteEndpoint,  // discovered service + characteristic UUID (32 bytes)
     WriteFailed,
-    ScanComplete
+    ScanComplete,
+    // Before Connected, one per effective subscription: index = subscription
+    // index, data = service + characteristic UUID (32 bytes), mask =
+    // kSubscriptionIndicate when indicating, reasonCode = SubscriptionOutcome.
+    // Exception: a final Overflow event names the first characteristic that
+    // did not fit and its index is the number skipped, not a list position.
+    SubscriptionResult,
+    // Before Connected when ConnectPlan::reportServices: one GATT primary
+    // service UUID (16 bytes) per event.
+    GattService
 };
 
 struct CentralEvent {
@@ -46,6 +65,18 @@ struct CentralEvent {
         for (std::size_t i = 0; i < length; ++i) data[i] = bytes[i];
     }
 };
+static_assert(kMaxEventData >= 32, "SubscriptionResult/WriteEndpoint carry two 128-bit UUIDs");
+
+inline const char* subscriptionOutcomeName(SubscriptionOutcome outcome) {
+    switch (outcome) {
+        case SubscriptionOutcome::Ok: return "ok";
+        case SubscriptionOutcome::NotFound: return "not-found";
+        case SubscriptionOutcome::Unsupported: return "unsupported";
+        case SubscriptionOutcome::CccdFailed: return "cccd-failed";
+        case SubscriptionOutcome::Overflow: return "overflow";
+    }
+    return "unknown";
+}
 
 template <std::size_t Capacity>
 class CentralEventQueue {

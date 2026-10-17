@@ -27,7 +27,10 @@ struct BleSubscriptionStatus {
     smartfitness::ble::Uuid service;
     smartfitness::ble::Uuid characteristic;
     bool indicate = false;
-    std::string state = "pending";
+    std::string state = "pending";  // pending, ok or failed
+    // Why a subscription failed: not-found, unsupported, cccd-failed,
+    // overflow, or the connection failure (connect-failed, timeout, ...).
+    std::string reason;
 };
 
 struct ScanResult {
@@ -119,7 +122,10 @@ public:
 
 private:
     bool startConnection();
-    void scheduleReconnect(const std::string& reason);
+    // A non-null subscriptionReason marks pending subscriptions as failed
+    // and keeps the list visible during the backoff.
+    void scheduleReconnect(const std::string& reason, const char* subscriptionReason = nullptr);
+    void applySubscriptionResult(const smartfitness::ble::CentralEvent& event);
     bool closeLink();
     void handleEvent(const smartfitness::ble::CentralEvent& event);
     void handleScanReport(const smartfitness::ble::ScanReport& report);
@@ -133,6 +139,8 @@ private:
     PairedDevice paired_;
     std::vector<smartfitness::ble::Uuid> advertisedServices_;
     std::vector<BleSubscriptionStatus> subscriptions_;
+    bool gattServicesRequested_ = false;
+    std::vector<smartfitness::ble::Uuid> gattServices_;
     bool autoConnect_ = false;
     std::unique_ptr<smartfitness::protocols::SourceProtocol> protocol_;
     LinkState state_ = LinkState::Idle;

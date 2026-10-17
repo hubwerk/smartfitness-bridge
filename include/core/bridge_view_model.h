@@ -37,6 +37,7 @@ struct SubscriptionView {
     std::string characteristic;
     std::string state;
     bool indicate = false;
+    std::string reason;  // empty unless state == "failed"
 };
 
 struct PairedView {

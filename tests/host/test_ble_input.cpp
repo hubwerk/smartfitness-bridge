@@ -743,10 +743,139 @@ void testPairedServiceDiagnostics() {
     h.adapter.setPairedDevice(saved);
     assert(h.adapter.scanAndConnect());
     assert(h.adapter.advertisedServices() == saved.advertisedServices);
+    assert(!h.central.connects.back().plan.reportServices);
     h.central.pushEvent(ble::CentralEventType::Connected, 0);
     h.adapter.loop();
     assert(!h.adapter.isConnected());
-    assert(h.adapter.subscriptions().empty() && h.adapter.advertisedServices().empty());
+    // A rejected connection keeps the failed subscriptions visible during the backoff.
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+    assert(!h.adapter.subscriptions().empty() && h.adapter.advertisedServices().empty());
+    for (const auto& subscription : h.adapter.subscriptions()) assert(subscription.state == "failed");
+    h.adapter.disconnect();
+    assert(h.adapter.subscriptions().empty());
+}
+
+void testSubscriptionResultsFixedPlan() {
+    Harness h;
+    h.pair("aa:00:00:00:00:02", "ftms");
+    assert(h.adapter.scanAndConnect());
+    // Nothing advertised is known: the central reports the GATT services.
+    assert(h.central.connects.back().plan.reportServices);
+    const auto plan = h.central.connects.back().plan;
+    assert(plan.subscriptionCount >= 3);
+    const auto& subs = plan.subscriptions;
+    h.central.pushSubscriptionResult(0, subs[0].service, subs[0].characteristic, subs[0].indicate,
+                                     ble::SubscriptionOutcome::Ok);
+    h.central.pushSubscriptionResult(1, subs[1].service, subs[1].characteristic, subs[1].indicate,
+                                     ble::SubscriptionOutcome::NotFound);
+    h.central.pushSubscriptionResult(2, subs[2].service, subs[2].characteristic, subs[2].indicate,
+                                     ble::SubscriptionOutcome::CccdFailed);
+    // Results of an older session are ignored.
+    h.central.pushSubscriptionResult(3, subs[3].service, subs[3].characteristic, subs[3].indicate,
+                                     ble::SubscriptionOutcome::Ok, h.central.lastSession() - 1);
+    h.central.pushGattService(ble::Uuid::from16(0x1826));
+    h.central.pushGattService(ble::Uuid::from16(0x180a));
+    h.central.pushGattService(ble::Uuid::from16(0x1826));
+    h.adapter.loop();
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
+    const auto& list = h.adapter.subscriptions();
+    assert(list.size() == plan.subscriptionCount);
+    assert(list[0].state == "ok" && list[0].reason.empty());
+    assert(list[1].state == "failed" && list[1].reason == "not-found");
+    assert(list[2].state == "failed" && list[2].reason == "cccd-failed");
+    assert(list[3].state == "pending");
+    // GATT services are only taken over after a successful connection.
+    assert(h.adapter.advertisedServices().empty());
+    h.central.pushEvent(ble::CentralEventType::Connected, 0x9);  // bit 3 comes from the mask fallback
+    h.adapter.loop();
+    assert(h.adapter.isConnected());
+    assert(list[0].state == "ok" && list[1].reason == "not-found" && list[2].state == "failed");
+    assert(list[3].state == "ok");
+    for (std::size_t index = 4; index < list.size(); ++index) assert(list[index].state == "failed");
+    assert(h.adapter.advertisedServices() ==
+           (std::vector<ble::Uuid>{ble::Uuid::from16(0x1826), ble::Uuid::from16(0x180a)}));
+    assert(h.adapter.pairedDevice().advertisedServices == h.adapter.advertisedServices());
+    // Late results after Connected do not change the list.
+    h.central.pushSubscriptionResult(0, subs[0].service, subs[0].characteristic, subs[0].indicate,
+                                     ble::SubscriptionOutcome::Unsupported);
+    h.adapter.loop();
+    assert(h.adapter.subscriptions()[0].state == "ok");
+    // A reconnect reuses the known services and does not ask for discovery again.
+    h.central.pushEvent(ble::CentralEventType::Disconnected);
+    h.adapter.loop();
+    h.advance(2000);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
+    assert(!h.central.connects.back().plan.reportServices);
+    assert(h.adapter.advertisedServices().size() == 2);
+}
+
+void testSubscriptionResultsDiscoveryPlan() {
+    Harness h;
+    h.pair("aa:00:00:00:00:03", "kickr-run");
+    assert(h.adapter.scanAndConnect());
+    assert(h.central.connects.back().plan.discoverNotifications);
+    assert(h.adapter.subscriptions().empty());
+    const auto service = ble::Uuid::fromString("a026ee0b-0a7d-4ab3-97fa-f1500f9feb8b");
+    const auto data = ble::Uuid::fromString("a026e01d-0a7d-4ab3-97fa-f1500f9feb8b");
+    const auto status = ble::Uuid::fromString("a026e01f-0a7d-4ab3-97fa-f1500f9feb8b");
+    h.central.pushSubscriptionResult(0, service, data, false, ble::SubscriptionOutcome::Ok);
+    h.central.pushSubscriptionResult(1, service, status, true, ble::SubscriptionOutcome::CccdFailed);
+    h.central.pushSubscriptionResult(3, service, status, false, ble::SubscriptionOutcome::Overflow);
+    h.adapter.loop();
+    const auto& list = h.adapter.subscriptions();
+    assert(list.size() == 3);
+    assert(list[0].service == service && list[0].characteristic == data && !list[0].indicate);
+    assert(list[0].state == "ok");
+    assert(list[1].characteristic == status && list[1].indicate);
+    assert(list[1].state == "failed" && list[1].reason == "cccd-failed");
+    assert(list[2].state == "failed" && list[2].reason == "overflow");
+    h.central.pushEvent(ble::CentralEventType::Connected, 0x1);
+    h.adapter.loop();
+    assert(h.adapter.subscriptions().size() == 3);
+    assert(h.adapter.subscriptions()[0].state == "ok" && h.adapter.subscriptions()[1].state == "failed");
+}
+
+void testSubscriptionsAfterConnectFailure() {
+    Harness h;
+    h.pair("aa:00:00:00:00:04", "ftms");
+    assert(h.adapter.scanAndConnect());
+    const auto& first = h.central.connects.back().plan.subscriptions[0];
+    h.central.pushSubscriptionResult(0, first.service, first.characteristic, first.indicate,
+                                     ble::SubscriptionOutcome::Ok);
+    h.central.pushEvent(ble::CentralEventType::ConnectFailed);
+    h.adapter.loop();
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+    auto list = h.adapter.subscriptions();
+    assert(list.size() > 1);
+    assert(list[0].state == "ok");
+    for (std::size_t index = 1; index < list.size(); ++index)
+        assert(list[index].state == "failed" && list[index].reason == "connect-failed");
+    // The next attempt starts again with pending entries.
+    h.advance(2000);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
+    for (const auto& subscription : h.adapter.subscriptions())
+        assert(subscription.state == "pending" && subscription.reason.empty());
+    // Disconnect while connecting.
+    h.central.pushEvent(ble::CentralEventType::Disconnected);
+    h.adapter.loop();
+    for (const auto& subscription : h.adapter.subscriptions())
+        assert(subscription.state == "failed" && subscription.reason == "disconnected");
+    // Timeout while connecting.
+    h.advance(5000);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
+    h.advance(16000);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Backoff);
+    for (const auto& subscription : h.adapter.subscriptions())
+        assert(subscription.state == "failed" && subscription.reason == "timeout");
+    // Service discovery failure.
+    h.advance(10000);
+    assert(h.adapter.linkState() == BleInputAdapter::LinkState::Connecting);
+    h.central.pushEvent(ble::CentralEventType::ConnectFailed, 0, ble::kServiceDiscoveryFailure);
+    h.adapter.loop();
+    assert(h.adapter.subscriptions()[0].reason == "discovery-failed");
+    // A user disconnect clears the list.
+    h.adapter.disconnect();
+    assert(h.adapter.subscriptions().empty());
 }
 
 void testServiceShortNames() {
@@ -1638,6 +1767,9 @@ void testScanLabelHelpers() {
 void runBleInputTests() {
     testBleTypes();
     testPairedServiceDiagnostics();
+    testSubscriptionResultsFixedPlan();
+    testSubscriptionResultsDiscoveryPlan();
+    testSubscriptionsAfterConnectFailure();
     testServiceShortNames();
     testBoundedQueue();
     testFtmsInputCodec();

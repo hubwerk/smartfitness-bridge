@@ -23,6 +23,11 @@ NimBLERemoteCharacteristic* findCharacteristic(NimBLEClient* client, const ble::
     NimBLERemoteService* remote = client->getService(toNimble(service));
     return remote ? remote->getCharacteristic(toNimble(characteristic)) : nullptr;
 }
+
+// Generic Access / Generic Attribute say nothing about the device.
+bool genericService(const ble::Uuid& uuid) {
+    return uuid == ble::Uuid::from16(0x1800) || uuid == ble::Uuid::from16(0x1801);
+}
 }  // namespace
 
 struct NimbleCentral::Impl : public NimBLEAdvertisedDeviceCallbacks, public NimBLEClientCallbacks {
@@ -307,6 +312,9 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         doDisconnect();
         return;
     }
+    // Fixed plans only enumerate all primary services when none are known;
+    // later getService() lookups reuse this cache.
+    if (cmd.plan.reportServices && !cmd.plan.discoverNotifications) client->getServices(true);
     // Reads are reported before Connected so protocols can derive capabilities.
     for (std::uint8_t index = 0; index < cmd.plan.readCount; ++index) {
         if (cancelled(cmd.session)) { doDisconnect(); return; }
@@ -320,6 +328,21 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
     std::uint32_t mask = 0;
     const std::uint32_t session = cmd.session;
     ble::ConnectPlan plan = cmd.plan;
+    // Results are reported to the adapter (main loop) before Connected; the
+    // host task never logs.
+    auto reportSubscription = [this, session](std::uint8_t index, const ble::Subscription& subscription,
+                                              ble::SubscriptionOutcome outcome) {
+        std::uint8_t data[32];
+        for (std::size_t i = 0; i < 16; ++i) {
+            data[i] = subscription.service.bytes[i];
+            data[i + 16] = subscription.characteristic.bytes[i];
+        }
+        pushEvent(ble::CentralEventType::SubscriptionResult, session, index,
+                  subscription.indicate ? ble::kSubscriptionIndicate : 0U, data, sizeof(data),
+                  static_cast<std::uint16_t>(outcome));
+    };
+    std::uint8_t overflowCount = 0;
+    ble::Subscription firstOverflow;
     if (plan.discoverNotifications) {
         plan.subscriptionCount = 0;
         bool writeFound = false;
@@ -340,8 +363,13 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
                 if (cancelled(session)) { doDisconnect(); return; }
                 ble::Uuid characteristicUuid;
                 if (!ble::Uuid::parse(characteristic->getUUID().toString(), characteristicUuid)) continue;
-                if (characteristic->canNotify() || characteristic->canIndicate())
-                    plan.subscribe(serviceUuid, characteristicUuid, !characteristic->canNotify());
+                if (characteristic->canNotify() || characteristic->canIndicate()) {
+                    const bool indicate = !characteristic->canNotify();
+                    if (!plan.subscribe(serviceUuid, characteristicUuid, indicate)) {
+                        if (overflowCount == 0) firstOverflow = {serviceUuid, characteristicUuid, indicate};
+                        if (overflowCount < 0xff) ++overflowCount;
+                    }
+                }
                 bool allowed = false;
                 for (const auto& uuid : plan.discoveryWriteCharacteristics)
                     allowed = allowed || (!uuid.isZero() && uuid == characteristicUuid);
@@ -359,15 +387,36 @@ void NimbleCentral::doConnect(const Cmd& cmd) {
         const auto& subscription = plan.subscriptions[index];
         NimBLERemoteCharacteristic* characteristic =
             findCharacteristic(client, subscription.service, subscription.characteristic);
-        if (!characteristic) continue;
+        if (!characteristic) {
+            reportSubscription(index, subscription, ble::SubscriptionOutcome::NotFound);
+            continue;
+        }
         const bool supported = subscription.indicate ? characteristic->canIndicate() : characteristic->canNotify();
-        if (!supported) continue;
+        if (!supported) {
+            reportSubscription(index, subscription, ble::SubscriptionOutcome::Unsupported);
+            continue;
+        }
         // Runs on the NimBLE host task: queue only.
         auto callback = [this, session, index](NimBLERemoteCharacteristic*, std::uint8_t* data, std::size_t length,
                                                bool) {
             pushEvent(ble::CentralEventType::Notification, session, index, 0, data, length);
         };
-        if (characteristic->subscribe(!subscription.indicate, callback, true)) mask |= 1UL << index;
+        const bool subscribed = characteristic->subscribe(!subscription.indicate, callback, true);
+        if (subscribed) mask |= 1UL << index;
+        reportSubscription(index, subscription,
+                           subscribed ? ble::SubscriptionOutcome::Ok : ble::SubscriptionOutcome::CccdFailed);
+    }
+    // index = number of discovered characteristics that did not fit.
+    if (overflowCount != 0) reportSubscription(overflowCount, firstOverflow, ble::SubscriptionOutcome::Overflow);
+    if (plan.reportServices) {
+        std::size_t reported = 0;
+        for (auto* service : *client->getServices(false)) {
+            if (reported >= ble::kMaxAdvertisedServices) break;
+            ble::Uuid uuid;
+            if (!ble::Uuid::parse(service->getUUID().toString(), uuid) || genericService(uuid)) continue;
+            pushEvent(ble::CentralEventType::GattService, session, 0, 0, uuid.bytes.data(), uuid.bytes.size());
+            ++reported;
+        }
     }
     std::lock_guard<std::mutex> lock(commandMutex_);
     if (cancelled(cmd.session)) {

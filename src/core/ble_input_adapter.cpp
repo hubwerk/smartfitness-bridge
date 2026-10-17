@@ -166,13 +166,17 @@ bool BleInputAdapter::startConnection() {
         return false;
     }
     ++session_;
-    const auto plan = protocol_->plan();
+    auto plan = protocol_->plan();
+    // Discovery plans start empty; the central reports what it subscribed.
     for (std::size_t index = 0; index < plan.subscriptionCount && index < ble::kMaxSubscriptions; ++index) {
         const auto& subscription = plan.subscriptions[index];
-        subscriptions_.push_back({subscription.service, subscription.characteristic, subscription.indicate, "pending"});
+        subscriptions_.push_back({subscription.service, subscription.characteristic, subscription.indicate, "pending", ""});
     }
+    plan.reportServices = advertisedServices_.empty();
+    gattServicesRequested_ = plan.reportServices;
+    gattServices_.clear();
     if (!transport_.connect(session_, paired_.address, plan)) {
-        scheduleReconnect("connect request rejected");
+        scheduleReconnect("connect request rejected", "connect-failed");
         return false;
     }
     state_ = LinkState::Connecting;
@@ -195,9 +199,19 @@ bool BleInputAdapter::closeLink() {
     return accepted;
 }
 
-void BleInputAdapter::scheduleReconnect(const std::string& reason) {
+void BleInputAdapter::scheduleReconnect(const std::string& reason, const char* subscriptionReason) {
     lastError_ = reason;
+    std::vector<BleSubscriptionStatus> kept;
+    if (subscriptionReason) {
+        for (auto& subscription : subscriptions_) {
+            if (subscription.state != "pending") continue;
+            subscription.state = "failed";
+            subscription.reason = subscriptionReason;
+        }
+        kept.swap(subscriptions_);
+    }
     closeLink();
+    subscriptions_ = std::move(kept);
     if (autoConnect_ && paired_.valid) {
         reconnecting_ = true;
         backoffMs_ = backoffMs_ == 0 ? timing_.backoffInitialMs : backoffMs_ * 2;
@@ -225,7 +239,8 @@ void BleInputAdapter::loop() {
     if (lifecycleDrops != observedLifecycleDrops_) {
         observedLifecycleDrops_ = lifecycleDrops;
         lastError_ = "BLE lifecycle event overflow";
-        if (state_ == LinkState::Connecting || state_ == LinkState::Ready) scheduleReconnect(lastError_);
+        if (state_ == LinkState::Connecting || state_ == LinkState::Ready)
+            scheduleReconnect(lastError_, state_ == LinkState::Connecting ? "event-overflow" : nullptr);
         if (!transport_.scanning()) userScan_ = false;
     }
 
@@ -234,7 +249,7 @@ void BleInputAdapter::loop() {
 
     switch (state_) {
         case LinkState::Connecting:
-            if (now - stateSinceMs_ > timing_.connectTimeoutMs) scheduleReconnect("connect timeout");
+            if (now - stateSinceMs_ > timing_.connectTimeoutMs) scheduleReconnect("connect timeout", "timeout");
             break;
         case LinkState::Ready:
             protocol_->tick(now);
@@ -288,11 +303,42 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
                 protocol_->onWriteEndpoint(service, characteristic);
             }
             break;
+        case ble::CentralEventType::SubscriptionResult:
+            if (state_ == LinkState::Connecting && event.length == 32) applySubscriptionResult(event);
+            break;
+        case ble::CentralEventType::GattService:
+            if (state_ == LinkState::Connecting && gattServicesRequested_ && event.length == 16 &&
+                gattServices_.size() < ble::kMaxAdvertisedServices) {
+                ble::Uuid service;
+                std::copy(event.data.begin(), event.data.begin() + 16, service.bytes.begin());
+                if (std::find(gattServices_.begin(), gattServices_.end(), service) == gattServices_.end())
+                    gattServices_.push_back(service);
+            }
+            break;
         case ble::CentralEventType::Connected:
             if (state_ != LinkState::Connecting) break;
-            for (std::size_t index = 0; index < subscriptions_.size(); ++index)
-                subscriptions_[index].state = (event.mask & (1U << index)) ? "ok" : "failed";
+            // Fallback for results lost in the event queue: derive from the mask.
+            for (std::size_t index = 0; index < subscriptions_.size() && index < ble::kMaxSubscriptions; ++index) {
+                auto& subscription = subscriptions_[index];
+                if (subscription.state != "pending") continue;
+                const bool subscribed = (event.mask & (1U << index)) != 0;
+                subscription.state = subscribed ? "ok" : "failed";
+#ifdef ARDUINO
+                DBG_SERIAL.printf("[BLE] subscribe %s/%s %s: %s\n", subscription.service.toString().c_str(),
+                                  subscription.characteristic.toString().c_str(),
+                                  subscription.indicate ? "indicate" : "notify", subscribed ? "ok" : "no result");
+#endif
+            }
             if (protocol_->onConnected(event.mask, now)) {
+                if (advertisedServices_.empty() && !gattServices_.empty()) {
+                    advertisedServices_ = gattServices_;
+                    paired_.advertisedServices = advertisedServices_;
+#ifdef ARDUINO
+                    std::string list;
+                    for (const auto& service : advertisedServices_) list += " " + service.toString();
+                    DBG_SERIAL.printf("[BLE] GATT services:%s\n", list.c_str());
+#endif
+                }
                 state_ = LinkState::Ready;
                 stateSinceMs_ = now;
                 backoffMs_ = 0;
@@ -304,16 +350,11 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
                                   static_cast<unsigned>(std::count_if(subscriptions_.begin(), subscriptions_.end(),
                                       [](const BleSubscriptionStatus& status) { return status.state == "ok"; })),
                                   static_cast<unsigned>(subscriptions_.size()));
-                for (const auto& subscription : subscriptions_) {
-                    if (subscription.state == "failed")
-                        DBG_SERIAL.printf("[BLE] notification subscription failed: %s/%s\n",
-                                          subscription.service.toString().c_str(),
-                                          subscription.characteristic.toString().c_str());
-                }
 #endif
                 maybeEmit(true);
             } else {
-                scheduleReconnect(protocol_->lastError().empty() ? "device not supported" : protocol_->lastError());
+                scheduleReconnect(protocol_->lastError().empty() ? "device not supported" : protocol_->lastError(),
+                                  "rejected");
             }
             break;
         case ble::CentralEventType::ConnectFailed:
@@ -324,7 +365,9 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
                 else
                     DBG_SERIAL.printf("[BLE] connection failed (reason=%u)\n", event.reasonCode);
 #endif
-                scheduleReconnect("connect failed");
+                const char* subscriptionReason =
+                    event.index == ble::kServiceDiscoveryFailure ? "discovery-failed" : "connect-failed";
+                scheduleReconnect("connect failed", state_ == LinkState::Connecting ? subscriptionReason : nullptr);
             }
             break;
         case ble::CentralEventType::Disconnected:
@@ -332,7 +375,7 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
 #ifdef ARDUINO
                 DBG_SERIAL.printf("[BLE] disconnected (reason=%u)\n", event.reasonCode);
 #endif
-                scheduleReconnect("link lost");
+                scheduleReconnect("link lost", state_ == LinkState::Connecting ? "disconnected" : nullptr);
             }
             break;
         case ble::CentralEventType::Notification:
@@ -346,6 +389,36 @@ void BleInputAdapter::handleEvent(const ble::CentralEvent& event) {
             break;
         case ble::CentralEventType::ScanComplete: break;
     }
+}
+
+void BleInputAdapter::applySubscriptionResult(const ble::CentralEvent& event) {
+    BleSubscriptionStatus status;
+    std::copy(event.data.begin(), event.data.begin() + 16, status.service.bytes.begin());
+    std::copy(event.data.begin() + 16, event.data.begin() + 32, status.characteristic.bytes.begin());
+    status.indicate = (event.mask & ble::kSubscriptionIndicate) != 0;
+    const auto outcome = static_cast<ble::SubscriptionOutcome>(event.reasonCode);
+    status.state = outcome == ble::SubscriptionOutcome::Ok ? "ok" : "failed";
+    if (outcome != ble::SubscriptionOutcome::Ok) status.reason = ble::subscriptionOutcomeName(outcome);
+#ifdef ARDUINO
+    if (outcome == ble::SubscriptionOutcome::Overflow)
+        DBG_SERIAL.printf("[BLE] subscribe %s/%s %s: overflow (%u characteristic(s) beyond limit %u)\n",
+                          status.service.toString().c_str(), status.characteristic.toString().c_str(),
+                          status.indicate ? "indicate" : "notify", static_cast<unsigned>(event.index),
+                          static_cast<unsigned>(ble::kMaxSubscriptions));
+    else
+        DBG_SERIAL.printf("[BLE] subscribe %s/%s %s: %s\n", status.service.toString().c_str(),
+                          status.characteristic.toString().c_str(), status.indicate ? "indicate" : "notify",
+                          ble::subscriptionOutcomeName(outcome));
+#endif
+    if (outcome == ble::SubscriptionOutcome::Overflow) {
+        // One entry stands for every discovered characteristic that did not fit.
+        subscriptions_.push_back(std::move(status));
+        return;
+    }
+    if (event.index >= ble::kMaxSubscriptions) return;
+    // Fixed plans update their entry; discovery plans grow the list in order.
+    if (event.index >= subscriptions_.size()) subscriptions_.resize(event.index + 1U);
+    subscriptions_[event.index] = std::move(status);
 }
 
 bool BleInputAdapter::startScan(std::uint32_t durationMs) {

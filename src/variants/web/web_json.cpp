@@ -97,6 +97,7 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
             subscription["name"] = serviceShortName(entry.service);
             subscription["state"] = entry.state;
             subscription["indicate"] = entry.indicate;
+            subscription["reason"] = entry.reason;
         }
     } else {
         input["paired"] = nullptr;

@@ -32,13 +32,13 @@ PAIRED = {
     "subscriptions": [
         {"service": "00001826-0000-1000-8000-00805f9b34fb",
          "characteristic": "00002ad2-0000-1000-8000-00805f9b34fb", "name": "FTMS",
-         "state": "ok", "indicate": False},
+         "state": "ok", "indicate": False, "reason": ""},
         {"service": "00001826-0000-1000-8000-00805f9b34fb",
          "characteristic": "00002ad9-0000-1000-8000-00805f9b34fb", "name": "FTMS",
-         "state": "pending", "indicate": True},
+         "state": "pending", "indicate": True, "reason": ""},
         {"service": "0000180d-0000-1000-8000-00805f9b34fb",
          "characteristic": "00002a37-0000-1000-8000-00805f9b34fb", "name": "HR",
-         "state": "failed", "indicate": False},
+         "state": "failed", "indicate": False, "reason": "not-found"},
     ],
 }
 BLE_SERVICES = [
@@ -357,7 +357,7 @@ def render(browser, output, name, width, height):
                 "title", "00001826-0000-1000-8000-00805f9b34fb")
             expect(page.locator("#paired-subscriptions .ok")).to_have_text("FTMS · 2ad2 · NOTIFY · ok")
             expect(page.locator("#paired-subscriptions .pending")).to_have_text("FTMS · 2ad9 · INDICATE · pending")
-            expect(page.locator("#paired-subscriptions .bad")).to_have_text("HR · 2a37 · NOTIFY · failed")
+            expect(page.locator("#paired-subscriptions .bad")).to_have_text("HR · 2a37 · NOTIFY · failed (not-found)")
             expect(page.locator("#paired-subscriptions .bad")).to_have_attribute(
                 "title", PAIRED["subscriptions"][2]["service"] + " / " +
                 PAIRED["subscriptions"][2]["characteristic"])
