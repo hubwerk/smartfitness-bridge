@@ -307,7 +307,7 @@ void testOutputProfiles() {
     assert(status["input"]["profile"] == "bike");
     assert(status["ftmsOutput"]["profile"] == "bike");
     assert(status["ftmsOutput"]["override"] == "auto");
-    assert(status["telemetry"]["elapsed"].isNull());
+    assert(rig.statusJson().find("\"elapsed\"") == std::string::npos);
     assert(contains(rig.ui.handleCommand("help"), "ftms-profile"));
     for (const std::string value : {"auto", "bike", "treadmill", "cross-trainer", "rower"}) {
         Command command;
@@ -382,6 +382,7 @@ void testOutputProfiles() {
         status = parse(rig.statusJson());
         assert(status["input"]["profile"].as<std::string>() == machineProfileName(profile));
         assert(status["telemetry"]["elapsed"] == 321);
+        assert(status["telemetry"].as<JsonObjectConst>().size() == 1);
         assert(status["ftmsOutput"]["profile"].as<std::string>() ==
                machineProfileName(effectiveOutputProfile(FtmsOutputProfile::Auto, profile)));
         assert(contains(rig.ui.status(), std::string("input-profile=") + machineProfileName(profile)));

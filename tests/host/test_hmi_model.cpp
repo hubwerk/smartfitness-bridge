@@ -77,6 +77,23 @@ void testMetrics() {
     assert(cycler.current(MachineProfile::IndoorBike) == Metric::Incline);  // wraps
     // A profile change keeps the selected metric when it exists there.
     assert(cycler.current(MachineProfile::Treadmill) == Metric::Incline);
+
+    StatusView available;
+    assert(dashboardMetrics(MachineProfile::IndoorBike, available).empty());
+    assert(cycler.current(available) == Metric::Count);
+    cycler.step(available, 1);
+    assert(cycler.current(available) == Metric::Count);
+    available.telemetry[static_cast<std::size_t>(Metric::HeartRate)] = {true, 120.0F};
+    available.telemetry[static_cast<std::size_t>(Metric::ForceOnBelt)] = {true, 30.0F};
+    const auto availableMetrics = dashboardMetrics(MachineProfile::IndoorBike, available);
+    assert((availableMetrics == std::vector<Metric>{Metric::HeartRate, Metric::ForceOnBelt}));
+    assert(cycler.current(available) == Metric::HeartRate);
+    cycler.step(available, 1);
+    assert(cycler.current(available) == Metric::ForceOnBelt);
+    available.telemetry[static_cast<std::size_t>(Metric::Power)] = {true, NAN};
+    assert(dashboardMetrics(MachineProfile::IndoorBike, available).size() == 2);
+    available.telemetry[static_cast<std::size_t>(Metric::HeartRate)].valid = false;
+    assert(cycler.current(available) == Metric::ForceOnBelt);
 }
 
 void testTargetEditor() {

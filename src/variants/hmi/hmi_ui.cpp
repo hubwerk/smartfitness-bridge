@@ -504,13 +504,26 @@ void HmiUi::buildDashboard() {
 }
 
 void HmiUi::cycleMetric(int detents) {
-    metric_.step(status_.input.profile, detents);
+    metric_.step(status_, detents);
     updateDashboard();
 }
 
 void HmiUi::updateDashboard() {
     if (!dash_.value) return;
-    const Metric metric = metric_.current(status_.input.profile);
+    const Metric metric = metric_.current(status_);
+    if (metric == Metric::Count) {
+        lv_label_set_text(dash_.name, lcars::uppercase(tr(Str::ServiceNoData)).c_str());
+        lv_label_set_text(dash_.value, "--");
+        lv_label_set_text(dash_.unit, "");
+        lcars::setGauge(dash_.segments, 0.0F);
+        lv_label_set_text(dash_.state, lcars::uppercase(tr(stateLabel(status_.state))).c_str());
+        lv_obj_set_style_bg_color(dash_.state, lv_color_hex(lcars::LightBlue), 0);
+        lv_obj_set_style_text_color(dash_.state, lv_color_black(), 0);
+        lv_label_set_text(dash_.target, lcars::uppercase(targetLabel(status_)).c_str());
+        const std::string info = outputServicesLabel(status_) + "\n" + outputLabel(status_);
+        lv_label_set_text(dash_.info, lcars::uppercase(info).c_str());
+        return;
+    }
     const MetricFormat& format = metricFormat(metric);
     const MetricView& sample = status_.metric(metric);
     lv_label_set_text(dash_.name, lcars::uppercase(tr(format.name)).c_str());

@@ -30,17 +30,10 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
     document["version"] = status.version;
     document["state"] = runtimeStateName(status.state);
     JsonObject telemetry = document["telemetry"].to<JsonObject>();
-    addMetric(telemetry, "power", status, Metric::Power);
-    addMetric(telemetry, "cadence", status, Metric::Cadence);
-    addMetric(telemetry, "speed", status, Metric::Speed);
-    addMetric(telemetry, "heartRate", status, Metric::HeartRate);
-    addMetric(telemetry, "incline", status, Metric::Incline);
-    addMetric(telemetry, "distance", status, Metric::Distance);
-    addMetric(telemetry, "elapsed", status, Metric::ElapsedTime);
-    // Further FTMS metrics are only listed when the device actually sends them.
-    for (std::size_t index = static_cast<std::size_t>(Metric::Resistance); index < kMetricCount; ++index) {
+    for (std::size_t index = 0; index < kMetricCount; ++index) {
         const auto metric = static_cast<Metric>(index);
-        if (status.metric(metric).valid) addMetric(telemetry, metricKey(metric), status, metric);
+        const auto& sample = status.metric(metric);
+        if (sample.valid && std::isfinite(sample.value)) addMetric(telemetry, metricKey(metric), status, metric);
     }
     document["deviceName"] = status.deviceName;
     document["trainer"] = status.trainer;

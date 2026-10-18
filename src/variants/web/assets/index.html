@@ -18,9 +18,9 @@ nav button:nth-child(2){background:var(--muted)}nav button:nth-child(3){backgrou
 nav button.active{background:var(--acc)}nav button[aria-selected="true"]:before{content:"";display:inline-block;width:8px;height:8px;background:#000;margin-right:8px}
 main{max-width:1120px;margin:auto;border-bottom:16px solid var(--tan);padding-bottom:12px}
 section{display:none}section.active{display:block}section h2{margin:0 0 16px;font-size:23px;font-weight:400;letter-spacing:2px;text-transform:uppercase;color:var(--light)}
-.grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;margin-bottom:22px}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:22px}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px}
 .card{background:#000;border-top:6px solid var(--tan);padding:12px 0;margin-bottom:14px;min-width:0}.metric{border-color:var(--acc);margin:0;padding-top:8px}.metric:nth-child(2n){border-color:var(--muted)}.metric:nth-child(3n){border-color:var(--light)}
-.metric .v{font-size:62px;line-height:1.2;font-weight:400;color:var(--fg)}.metric .u{color:var(--light);font-size:18px;text-transform:uppercase}.metric:last-child .v{font-size:35px}
+.metric .v{font-size:62px;line-height:1.2;font-weight:400;color:var(--fg)}.metric .u{color:var(--light);font-size:18px;text-transform:uppercase}
 .label{color:var(--muted);font-size:18px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
 .pill{display:inline-block;padding:3px 12px;border-radius:18px;background:var(--tan);color:#000;font-size:16px;margin:3px 4px 3px 0;overflow-wrap:anywhere}
 .pill.ok{background:var(--ok);color:#000}.pill.bad{background:var(--bad);color:#000}.pill.warn{background:var(--warn);color:#000}
@@ -45,9 +45,9 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 .gray{color:#888888}tr.gray td{color:#888888}tr.gray select,tr.gray button.b{opacity:.8}
 .status-legend{display:flex;flex-wrap:wrap;gap:6px 16px;list-style:none;padding:0;margin:8px 0 14px;font-size:16px}.status-legend li{display:flex;align-items:center;gap:6px}.status-legend .legend-swatch{display:inline-block;flex-shrink:0;width:12px;height:12px;padding:0;margin:0;border-radius:50%}.legend-swatch.gray{background:currentColor}.connection-status .status-legend{margin:4px 0 0}
 #ctl-result:not(:empty){display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:var(--ok);color:#000}#ctl-result.bad{background:var(--bad)}
-.gauge{display:flex;align-items:center;gap:14px;margin:16px 0 22px;color:var(--light);text-transform:uppercase;font-size:16px}.gauge meter{flex:1;width:100%;height:14px;appearance:none;background:#000;border:2px solid var(--tan)}meter::-webkit-meter-bar{background:#000;border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--acc)}meter::-moz-meter-bar{background:var(--acc)}
-@media(max-width:1000px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.status-grid{grid-template-columns:1fr}}
-@media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric .v{font-size:49px}.metric:last-child .v{font-size:28px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
+.gauge{display:flex;align-items:center;gap:14px;margin:16px 0 22px;color:var(--light);text-transform:uppercase;font-size:16px}.gauge[hidden]{display:none}.gauge meter{flex:1;width:100%;height:14px;appearance:none;background:#000;border:2px solid var(--tan)}meter::-webkit-meter-bar{background:#000;border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--acc)}meter::-moz-meter-bar{background:var(--acc)}
+@media(max-width:1000px){.status-grid{grid-template-columns:1fr}}
+@media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}.metric .v{font-size:49px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 /* #ifdef DEBUG_WEB */
 #debug-output{display:block;width:100%;height:55vh;resize:vertical;background:var(--bg);color:var(--fg);border:2px solid var(--violet);padding:12px;font:14px/1.4 monospace;white-space:pre}
@@ -69,16 +69,8 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 <main>
 <section id="dash" class="active" role="tabpanel" aria-labelledby="tab-dash" tabindex="0">
  <h2>01 / Live telemetry</h2>
- <div class="grid">
-  <div class="card metric"><div class="label">Power</div><span class="v" id="m-power">–</span> <span class="u">W</span></div>
-  <div class="card metric"><div class="label">Cadence</div><span class="v" id="m-cadence">–</span> <span class="u">rpm</span></div>
-  <div class="card metric"><div class="label">Speed</div><span class="v" id="m-speed">–</span> <span class="u">km/h</span></div>
-  <div class="card metric"><div class="label">Heart rate</div><span class="v" id="m-heartRate">–</span> <span class="u">bpm</span></div>
-  <div class="card metric"><div class="label">Incline</div><span class="v" id="m-incline">–</span> <span class="u">%</span></div>
-  <div class="card metric"><div class="label">Target</div><span class="v" id="m-target">–</span></div>
- </div>
- <div class="card"><div class="label">Further metrics (only values sent by the device)</div><div id="m-extra" class="small">–</div></div>
- <div class="gauge"><label for="power-gauge">Power / 500 W</label><meter id="power-gauge" min="0" max="500" value="0">0 W</meter></div>
+ <div id="metrics" class="grid"></div><p id="metrics-empty" class="small" hidden>Waiting for device measurements.</p>
+ <div class="gauge" id="power-display" hidden><label for="power-gauge">Power</label><meter id="power-gauge" min="0" max="500" value="0">0 W</meter></div>
  <div class="status-grid">
  <div class="card"><div class="label">Bridge</div><div id="s-bridge"></div></div>
  <div class="card"><div class="label">Input device</div><div id="s-input"></div></div>
@@ -210,12 +202,22 @@ async function poll(id,n){ // fallback when the WebSocket result does not arrive
 function finish(res){const cb=pending[res.id];if(!cb)return;delete pending[res.id];cb(res)}
 async function run(endpoint,body,quiet){const r=await post(endpoint,body);if(r&&!quiet)toast(r.message,r.ok);return r}
 function fmt(v){return v===null||v===undefined?"–":(Math.round(v*10)/10).toString()}
+const metricNames={speed:"Speed",distance:"Distance",cadence:"Cadence",power:"Power",heartRate:"Heart rate",incline:"Incline",elapsed:"Elapsed time",resistance:"Resistance",averageSpeed:"Average speed",averageCadence:"Average cadence",averagePower:"Average power",totalEnergy:"Total energy",energyPerHour:"Energy per hour",energyPerMinute:"Energy per minute",metabolicEquivalent:"MET",remainingTime:"Remaining time",rampAngle:"Ramp angle",positiveElevationGain:"Elevation gain",negativeElevationGain:"Elevation loss",pace:"Pace",averagePace:"Average pace",strokeCount:"Strokes",stepCount:"Steps",strideCount:"Strides",floors:"Floors",forceOnBelt:"Belt force"};
+const metricUnits={speed:"km/h",distance:"m",cadence:"rpm",power:"W",heartRate:"bpm",incline:"%",elapsed:"s",resistance:"level",averageSpeed:"km/h",averageCadence:"rpm",averagePower:"W",totalEnergy:"kcal",energyPerHour:"kcal/h",energyPerMinute:"kcal/min",metabolicEquivalent:"MET",remainingTime:"s",rampAngle:"°",positiveElevationGain:"m",negativeElevationGain:"m",pace:"s/500m",averagePace:"s/500m",strokeCount:"strokes",stepCount:"steps",strideCount:"strides",floors:"floors",forceOnBelt:"N"};
+function renderMetrics(telemetry){
+ const entries=Object.entries(telemetry||{}).filter(([,value])=>Number.isFinite(value));
+ fill($("metrics"),entries.map(([key,value])=>{
+  const card=el("div",null,"card metric"),valueNode=el("span",fmt(value),"v");
+  valueNode.id="m-"+key;card.append(el("div",metricNames[key]||key,"label"),valueNode);
+  if(metricUnits[key])card.append(" ",el("span",metricUnits[key],"u"));
+  return card;
+ }));
+ $("metrics-empty").hidden=entries.length>0;
+}
 function renderStatus(s){
  status=s;$("conn").textContent="online";$("conn").className="pill ok";
- for(const k of["power","cadence","speed","heartRate","incline"])$("m-"+k).textContent=fmt(s.telemetry&&s.telemetry[k]);
- const main=["power","cadence","speed","heartRate","incline"],extra=Object.entries(s.telemetry||{}).filter(([k,v])=>!main.includes(k)&&Number.isFinite(v)).map(([k,v])=>k+": "+fmt(v));$("m-extra").textContent=extra.length?extra.join(" · "):"–";
- const power=s.telemetry&&s.telemetry.power;$("power-gauge").value=Number.isFinite(power)?Math.max(0,Math.min(500,power)):0;$("power-gauge").textContent=fmt(power)+" W";
- $("m-target").textContent=s.target?s.target.control+" "+fmt(s.target.value):"–";
+ const telemetry=s.telemetry||{},power=telemetry.power;renderMetrics(telemetry);
+ $("power-display").hidden=!Number.isFinite(power);$("power-gauge").value=Number.isFinite(power)?Math.max(0,Math.min(500,power)):0;$("power-gauge").textContent=fmt(power)+" W";
  fill($("s-bridge"),[pill(s.state,["disconnected","error","fault"].includes(s.state)?"bad":"ok"),pill(s.trainer?"trainer":"no trainer",s.trainer?"ok":""),pill(s.canControl?"control ready":"no control",s.canControl?"ok":""),
   ...(s.controls||[]).map(c=>pill(c)),pill(s.deviceName||"no device")]);
  const i=s.input||{},items=[pill("source: "+i.source),pill("profile: "+(i.profile||"bike"))];

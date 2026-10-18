@@ -34,6 +34,9 @@ struct MetricFormat {
 const MetricFormat& metricFormat(smartfitness::Metric metric);
 // Metrics offered on the dashboard gauge, most relevant first for the profile.
 std::vector<smartfitness::Metric> dashboardMetrics(smartfitness::MachineProfile profile);
+// Available dashboard metrics, ordered by profile preference then by metric.
+std::vector<smartfitness::Metric> dashboardMetrics(smartfitness::MachineProfile profile,
+                                                   const smartfitness::StatusView& status);
 // "123" / "8.5"; "--" when the sample is invalid.
 std::string formatValue(float value, int decimals);
 std::string formatMetric(const smartfitness::MetricView& sample, smartfitness::Metric metric);
@@ -43,7 +46,9 @@ std::string formatMetric(const smartfitness::MetricView& sample, smartfitness::M
 class MetricCycler {
 public:
     smartfitness::Metric current(smartfitness::MachineProfile profile) const;
+    smartfitness::Metric current(const smartfitness::StatusView& status) const;
     void step(smartfitness::MachineProfile profile, int detents);
+    void step(const smartfitness::StatusView& status, int detents);
 
 private:
     smartfitness::Metric metric_ = smartfitness::Metric::Count;  // Count: first of the profile
