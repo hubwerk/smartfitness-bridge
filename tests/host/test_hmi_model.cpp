@@ -233,6 +233,10 @@ void testServiceDisplays() {
     assert(subscriptionStateLabel("pending") == Str::ServicePending);
     assert(subscriptionStateLabel("unknown") == Str::ServicePending);
     assert(std::string(tr(subscriptionStateLabel("failed"))) == "FAIL");
+    assert(subscriptionLabel({"1826", "2ad2", "ok", false, ""}) == "SUB FTMS 2ad2\nIndoor Bike Data\nNTF OK");
+    assert(subscriptionLabel({"1826", "2ad9", "pending", true, ""}) ==
+           std::string("SUB FTMS 2ad9\nFitness Machine Control Point\nIND ") + tr(Str::ServicePending));
+    assert(subscriptionLabel({"fff0", "fff1", "failed", false, "not-found"}) == "SUB fff0\nfff1 NTF FAIL");
     StatusView status;
     assert(outputServicesLabel(status) == "OUT -");
     status.ftmsOutput.services = {{"ftms", "FTMS", true, true, true},

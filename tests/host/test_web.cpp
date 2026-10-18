@@ -707,6 +707,9 @@ void testJsonViews() {
     assert(paired["subscriptions"][0]["state"] == "ok");
     assert(paired["subscriptions"][1]["state"] == "pending" && paired["subscriptions"][1]["indicate"] == true);
     assert(paired["subscriptions"][2]["state"] == "failed");
+    assert(paired["subscriptions"][0]["characteristicName"] == "Indoor Bike Data");
+    assert(paired["subscriptions"][1]["characteristicName"] == "Fitness Machine Control Point");
+    assert(paired["subscriptions"][2]["characteristicName"] == "Heart Rate Measurement");
     assert(paired["subscriptions"][0]["reason"] == "" && paired["subscriptions"][2]["reason"] == "not-found");
     assert(document["ftmsOutput"]["services"][0]["active"] == true);
     assert(document["ftmsOutput"]["restartRequired"] == true);
