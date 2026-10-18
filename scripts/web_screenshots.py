@@ -31,13 +31,16 @@ PAIRED = {
                               "12345678-1234-5678-9abc-def012345678": "12345678..."},
     "subscriptions": [
         {"service": "00001826-0000-1000-8000-00805f9b34fb",
-         "characteristic": "00002ad2-0000-1000-8000-00805f9b34fb", "name": "FTMS",
+         "characteristic": "00002ad2-0000-1000-8000-00805f9b34fb",
+         "characteristicName": "Indoor Bike Data", "name": "FTMS",
          "state": "ok", "indicate": False, "reason": ""},
         {"service": "00001826-0000-1000-8000-00805f9b34fb",
-         "characteristic": "00002ad9-0000-1000-8000-00805f9b34fb", "name": "FTMS",
+         "characteristic": "00002ad9-0000-1000-8000-00805f9b34fb",
+         "characteristicName": "Fitness Machine Control Point", "name": "FTMS",
          "state": "pending", "indicate": True, "reason": ""},
         {"service": "0000180d-0000-1000-8000-00805f9b34fb",
-         "characteristic": "00002a37-0000-1000-8000-00805f9b34fb", "name": "HR",
+         "characteristic": "00002a37-0000-1000-8000-00805f9b34fb",
+         "characteristicName": "Heart Rate Measurement", "name": "HR",
          "state": "failed", "indicate": False, "reason": "not-found"},
     ],
 }
@@ -377,9 +380,12 @@ def render(browser, output, name, width, height):
             expect(page.locator("#paired-advertised .sensor")).to_have_count(3)
             expect(page.locator("#paired-advertised .sensor").first).to_have_attribute(
                 "title", "00001826-0000-1000-8000-00805f9b34fb")
-            expect(page.locator("#paired-subscriptions .ok")).to_have_text("FTMS · 2ad2 · NOTIFY · ok")
-            expect(page.locator("#paired-subscriptions .pending")).to_have_text("FTMS · 2ad9 · INDICATE · pending")
-            expect(page.locator("#paired-subscriptions .bad")).to_have_text("HR · 2a37 · NOTIFY · failed (not-found)")
+            expect(page.locator("#paired-subscriptions .ok")).to_have_text(
+                "FTMS · Indoor Bike Data (2ad2) · NOTIFY · ok")
+            expect(page.locator("#paired-subscriptions .pending")).to_have_text(
+                "FTMS · Fitness Machine Control Point (2ad9) · INDICATE · pending")
+            expect(page.locator("#paired-subscriptions .bad")).to_have_text(
+                "HR · Heart Rate Measurement (2a37) · NOTIFY · failed (not-found)")
             expect(page.locator("#paired-subscriptions .bad")).to_have_attribute(
                 "title", PAIRED["subscriptions"][2]["service"] + " / " +
                 PAIRED["subscriptions"][2]["characteristic"])

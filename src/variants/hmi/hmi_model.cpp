@@ -315,6 +315,15 @@ Str subscriptionStateLabel(const std::string& state) {
     return Str::ServicePending;
 }
 
+std::string subscriptionLabel(const smartfitness::SubscriptionView& subscription) {
+    const std::string mode = std::string(subscription.indicate ? "IND " : "NTF ") +
+                             tr(subscriptionStateLabel(subscription.state));
+    const std::string uuid = serviceUuidLabel(subscription.characteristic);
+    const std::string name = characteristicName(subscription.characteristic);
+    if (name.empty()) return "SUB " + serviceUuidLabel(subscription.service) + "\n" + uuid + " " + mode;
+    return "SUB " + serviceUuidLabel(subscription.service) + " " + uuid + "\n" + name + "\n" + mode;
+}
+
 Command toggleOutputService(const std::string& transport, std::uint8_t mask, std::uint8_t bit) {
     Command command = makeText(CommandType::SetOutputServices, transport);
     const std::uint8_t explicitMask = mask == 0 ? 1 : mask;

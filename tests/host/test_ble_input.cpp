@@ -1136,6 +1136,21 @@ void testServiceShortNames() {
     assert(serviceShortName("invalid") == "invalid");
 }
 
+void testCharacteristicNames() {
+    assert(characteristicName("2ad2") == "Indoor Bike Data");
+    assert(characteristicName("0x2ADC") == "Mesh Provisioning Data Out");
+    assert(characteristicName("00002AD9-0000-1000-8000-00805F9B34FB") == "Fitness Machine Control Point");
+    assert(characteristicName("2a00") == "Device Name");
+    assert(characteristicName("2a37") == "Heart Rate Measurement");
+    assert(characteristicName("2a63") == "Cycling Power Measurement");
+    assert(characteristicName("2a5b") == "CSC Measurement");
+    assert(characteristicName("6E400003-B5A3-F393-E0A9-E50E24DCCA9E") == "NUS TX");
+    assert(characteristicName("a026e005-0a7d-4ab3-97fa-f1500f9feb8b") == "Wahoo Trainer");
+    assert(characteristicName("fff1").empty());
+    assert(characteristicName("0bf669f1-45f2-11e7-9598-0800200c9a66").empty());
+    assert(characteristicName("invalid").empty());
+}
+
 void testAdapterProfiles() {
     Harness h;
     assert(h.adapter.profile() == MachineProfile::IndoorBike);
@@ -2027,6 +2042,7 @@ void runBleInputTests() {
     testSubscriptionResultsDiscoveryPlan();
     testSubscriptionsAfterConnectFailure();
     testServiceShortNames();
+    testCharacteristicNames();
     testBoundedQueue();
     testFtmsInputCodec();
     testSensorCodecs();

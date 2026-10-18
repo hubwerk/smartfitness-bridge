@@ -88,6 +88,7 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
             subscription["service"] = entry.service;
             subscription["characteristic"] = entry.characteristic;
             subscription["name"] = serviceShortName(entry.service);
+            subscription["characteristicName"] = characteristicName(entry.characteristic);
             subscription["state"] = entry.state;
             subscription["indicate"] = entry.indicate;
             subscription["reason"] = entry.reason;

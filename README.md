@@ -29,10 +29,14 @@ a selectable output protocol: BLE FTMS, ANT+ FE-C with optional sensor channels
 unverified on hardware.
 OTA is not implemented.
 
-The CrowPanel HMI has been verified on real hardware: the display, rotary encoder
-(turning/direction), and knob button work. BLE equipment compatibility, app
-interoperability, radio coexistence, the web variant, safe physical trainer operation,
-and all supported-device entries remain unverified on equipment.
+**Hardware test status** (the single place where hardware verification is tracked):
+
+| Area | Status |
+|------|--------|
+| CrowPanel HMI: display, rotary encoder (turning/direction), knob button | Verified |
+| End-to-end, **web** and **HMI** variant: **Wahoo KICKR** as FTMS input → subscribed characteristics shown in the HMI / web UI → bridge BLE FTMS output → **MyWhoosh** | Verified |
+| Other BLE equipment and supported-device entries, Zwift and other apps, trainer control from apps, ANT+ output, reconnect/persistence, radio coexistence under load, safe physical trainer operation, readability on the real IPS panel | Unverified |
+
 The post-PR-#10 [main CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38030185653)
 passed both host tests and firmware build; the badge above tracks CI.
 
@@ -60,10 +64,9 @@ never starts Wi-Fi.
 
 Both variants share an **LCARS-inspired** palette, Antonio typography, swept
 frames, pill controls and telemetry gauges. Existing commands and safety
-confirmations are unchanged. The HMI UI has been tested on the real CrowPanel;
-the screenshots are simulator/browser renders, not photographs. The web UI remains
-unverified on hardware, and colours and readability still need checking on the real
-IPS panel.
+confirmations are unchanged. The screenshots are simulator/browser renders, not
+photographs; for hardware test status see
+[Overview and project status](#overview-and-project-status).
 
 ![Round HMI dashboard](docs/hmi/hmi/01-dashboard-bike.png)
 ![Round HMI speed confirmation](docs/hmi/hmi/10-confirm-speed.png)
@@ -536,7 +539,8 @@ Connect the source first, then pair the bridge's advertised name (default
 `SmartFitness Bridge`) as an FTMS power/cadence source and controllable trainer.
 Use only one app/client at a time. ERG requires source power control; simulation
 grade requires incline control. Read-only sources do not become controllable trainers.
-App compatibility remains **not verified on hardware**.
+For the app compatibility tested on hardware see
+[Overview and project status](#overview-and-project-status).
 
 ### Treadmill apps
 
@@ -813,7 +817,7 @@ than silently omitting requested channels.
   "advertisedServiceNames":{"1826":"FTMS"},
   "subscriptions":[{"service":"00001826-0000-1000-8000-00805f9b34fb",
     "characteristic":"00002ad2-0000-1000-8000-00805f9b34fb",
-    "name":"FTMS","state":"ok","indicate":false}]
+    "name":"FTMS","characteristicName":"Indoor Bike Data","state":"ok","indicate":false}]
 }
 ```
 
@@ -821,6 +825,9 @@ than silently omitting requested channels.
 subscription); `advertisedServiceNames` maps those UUID strings to short labels.
 `subscriptions` contains planned/attempted characteristics with
 `pending`, `ok` or `failed` state and the requested indication mode.
+`characteristicName` is the Bluetooth SIG name of the characteristic (for example
+`Indoor Bike Data` for `0x2AD2`) or a well-known vendor name (`NUS RX`/`NUS TX`,
+`Wahoo Trainer`); it is empty for unknown characteristics.
 Unknown services use a short UUID label; full UUID values are always retained.
 Empty arrays mean no reported advertisements/subscriptions, not a transport error.
 
@@ -1297,9 +1304,9 @@ green CI as hardware validation.
 
 ## Roadmap
 
-- Hardware validation: CrowPanel HMI display, rotary encoder and knob verified;
-  remaining work includes first setup, every source protocol, real trainer controls,
-  reconnect/persistence, nRF Connect, Zwift/MyWhoosh and BLE/Wi-Fi load tests.
+- Hardware validation of the areas still marked unverified in
+  [Overview and project status](#overview-and-project-status), including first
+  setup, nRF Connect and BLE/Wi-Fi load tests.
 - API authentication and access protection.
 - CPS/HRS outputs and multi-client support for Garmin recording.
 - ANT+ FE-C hardware validation (COOSPO stick, Zwift/Garmin displays).

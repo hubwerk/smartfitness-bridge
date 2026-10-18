@@ -109,6 +109,7 @@ std::string outputServicesLabel(const smartfitness::StatusView& status);
 std::string serviceUuidLabel(const std::string& uuid);
 std::string advertisedServicesLabel(const std::vector<std::string>& services);
 Str subscriptionStateLabel(const std::string& state);
+std::string subscriptionLabel(const smartfitness::SubscriptionView& subscription);
 // Mask zero is Auto (baseline only); BLE FTMS remains mandatory.
 Command toggleOutputService(const std::string& transport, std::uint8_t mask, std::uint8_t bit);
 // "Power 180 W" / "No target".

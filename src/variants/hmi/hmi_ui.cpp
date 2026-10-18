@@ -917,10 +917,7 @@ void HmiUi::buildInputServices() {
         const Str state = subscriptionStateLabel(sub.state);
         const auto color = state == Str::ServiceOk ? lcars::LightBlue :
                            state == Str::ServiceFail ? lcars::Alert : lcars::Tan;
-        const std::string text = "SUB " + serviceUuidLabel(sub.service) + "\n" +
-                                 serviceUuidLabel(sub.characteristic) + " " +
-                                 (sub.indicate ? "IND " : "NTF ") + tr(state);
-        lcars::pill(addButton(list, text, [] {}), color);
+        lcars::pill(addButton(list, subscriptionLabel(sub), [] {}), color);
     }
     addButton(list, tr(Str::Back), [this] { back(); });
 }
