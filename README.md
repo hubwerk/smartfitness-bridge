@@ -29,13 +29,14 @@ a selectable output protocol: BLE FTMS, ANT+ FE-C with optional sensor channels
 unverified on hardware.
 OTA is not implemented.
 
-The CrowPanel HMI has been verified on real hardware: the display, rotary encoder
-(turning/direction), and knob button work. Both the **web** and the **HMI** variant
-passed an end-to-end hardware test: a **Wahoo KICKR** connected as FTMS input, its
-subscribed characteristics shown in the HMI and in the web UI, and the telemetry
-forwarded over the bridge's BLE FTMS output to **MyWhoosh**. Other BLE equipment and
-supported-device entries, other apps, ANT+ output, radio coexistence under load and
-safe physical trainer operation remain unverified on equipment.
+**Hardware test status** (the single place where hardware verification is tracked):
+
+| Area | Status |
+|------|--------|
+| CrowPanel HMI: display, rotary encoder (turning/direction), knob button | Verified |
+| End-to-end, **web** and **HMI** variant: **Wahoo KICKR** as FTMS input → subscribed characteristics shown in the HMI / web UI → bridge BLE FTMS output → **MyWhoosh** | Verified |
+| Other BLE equipment and supported-device entries, Zwift and other apps, trainer control from apps, ANT+ output, reconnect/persistence, radio coexistence under load, safe physical trainer operation, readability on the real IPS panel | Unverified |
+
 The post-PR-#10 [main CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38030185653)
 passed both host tests and firmware build; the badge above tracks CI.
 
@@ -63,10 +64,9 @@ never starts Wi-Fi.
 
 Both variants share an **LCARS-inspired** palette, Antonio typography, swept
 frames, pill controls and telemetry gauges. Existing commands and safety
-confirmations are unchanged. The HMI UI has been tested on the real CrowPanel and
-the web UI on the web variant (Wahoo KICKR → MyWhoosh end-to-end test); the
-screenshots are simulator/browser renders, not photographs. Colours and readability
-still need checking on the real IPS panel.
+confirmations are unchanged. The screenshots are simulator/browser renders, not
+photographs; for hardware test status see
+[Overview and project status](#overview-and-project-status).
 
 ![Round HMI dashboard](docs/hmi/hmi/01-dashboard-bike.png)
 ![Round HMI speed confirmation](docs/hmi/hmi/10-confirm-speed.png)
@@ -539,9 +539,8 @@ Connect the source first, then pair the bridge's advertised name (default
 `SmartFitness Bridge`) as an FTMS power/cadence source and controllable trainer.
 Use only one app/client at a time. ERG requires source power control; simulation
 grade requires incline control. Read-only sources do not become controllable trainers.
-**MyWhoosh** has been verified on hardware with a Wahoo KICKR as FTMS source, with both
-the web and the HMI variant (telemetry over the bridge's FTMS output). Zwift remains
-**not verified on hardware**.
+For the app compatibility tested on hardware see
+[Overview and project status](#overview-and-project-status).
 
 ### Treadmill apps
 
@@ -1305,10 +1304,9 @@ green CI as hardware validation.
 
 ## Roadmap
 
-- Hardware validation: CrowPanel HMI display, rotary encoder and knob verified;
-  Wahoo KICKR (FTMS) → HMI/web UI → FTMS output → MyWhoosh verified on both variants;
-  remaining work includes first setup, every other source protocol, real trainer
-  controls, reconnect/persistence, nRF Connect, Zwift and BLE/Wi-Fi load tests.
+- Hardware validation of the areas still marked unverified in
+  [Overview and project status](#overview-and-project-status), including first
+  setup, nRF Connect and BLE/Wi-Fi load tests.
 - API authentication and access protection.
 - CPS/HRS outputs and multi-client support for Garmin recording.
 - ANT+ FE-C hardware validation (COOSPO stick, Zwift/Garmin displays).
