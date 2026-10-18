@@ -98,6 +98,21 @@ std::vector<Metric> dashboardMetrics(MachineProfile profile) {
     }
 }
 
+std::vector<Metric> dashboardMetrics(MachineProfile profile, const StatusView& status) {
+    std::vector<Metric> metrics;
+    const auto addIfValid = [&metrics, &status](Metric metric) {
+        const auto& sample = status.metric(metric);
+        if (!sample.valid || !std::isfinite(sample.value) ||
+            std::find(metrics.begin(), metrics.end(), metric) != metrics.end())
+            return;
+        metrics.push_back(metric);
+    };
+    for (const auto metric : dashboardMetrics(profile)) addIfValid(metric);
+    for (std::size_t index = 0; index < static_cast<std::size_t>(Metric::Count); ++index)
+        addIfValid(static_cast<Metric>(index));
+    return metrics;
+}
+
 std::string formatValue(float value, int decimals) {
     if (!std::isfinite(value)) return "--";
     char buffer[24];
@@ -119,9 +134,28 @@ Metric MetricCycler::current(MachineProfile profile) const {
     return metrics.front();
 }
 
+Metric MetricCycler::current(const StatusView& status) const {
+    const auto metrics = dashboardMetrics(status.input.profile, status);
+    if (std::find(metrics.begin(), metrics.end(), metric_) != metrics.end()) return metric_;
+    return metrics.empty() ? Metric::Count : metrics.front();
+}
+
 void MetricCycler::step(MachineProfile profile, int detents) {
     const auto metrics = dashboardMetrics(profile);
     const Metric now = current(profile);
+    const auto count = static_cast<int>(metrics.size());
+    int index = static_cast<int>(std::find(metrics.begin(), metrics.end(), now) - metrics.begin());
+    index = ((index + detents) % count + count) % count;
+    metric_ = metrics[static_cast<std::size_t>(index)];
+}
+
+void MetricCycler::step(const StatusView& status, int detents) {
+    const auto metrics = dashboardMetrics(status.input.profile, status);
+    if (metrics.empty()) {
+        metric_ = Metric::Count;
+        return;
+    }
+    const Metric now = current(status);
     const auto count = static_cast<int>(metrics.size());
     int index = static_cast<int>(std::find(metrics.begin(), metrics.end(), now) - metrics.begin());
     index = ((index + detents) % count + count) % count;

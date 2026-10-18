@@ -142,6 +142,8 @@ def render_before(browser, asset, output, name, width, height):
     context.route("**/*", route)
     page.goto(ORIGIN)
     expect(page.locator("#m-power")).to_have_text("214")
+    assert page.locator("#metrics .metric").count() == len(STATUS["telemetry"])
+    assert page.locator("#m-target").count() == 0
     expect(page.locator("#s-input .bad")).to_have_text("connection lost")
     expect(page.locator("#dash")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
@@ -337,6 +339,20 @@ def render(browser, output, name, width, height):
     sockets[0].send(json.dumps(searching))
     expect(page.locator("#s-input .pending")).to_have_text("link: searching")
     check_view(page, "dash", width < 650)
+
+    reduced = json.loads(json.dumps(STATUS))
+    reduced["telemetry"] = {"cadence": 86}
+    sockets[0].send(json.dumps(reduced))
+    expect(page.locator("#metrics .metric")).to_have_count(1)
+    expect(page.locator("#m-cadence")).to_have_text("86")
+    assert page.locator("#m-power, #m-heartRate").count() == 0
+    empty = json.loads(json.dumps(STATUS))
+    empty["telemetry"] = {}
+    sockets[0].send(json.dumps(empty))
+    expect(page.locator("#metrics .metric")).to_have_count(0)
+    expect(page.locator("#metrics-empty")).to_be_visible()
+    sockets[0].send(json.dumps(STATUS))
+    expect(page.locator("#metrics .metric")).to_have_count(len(STATUS["telemetry"]))
 
     # Status failure rendering is driven by the real WebSocket status contract.
     sockets[0].send(json.dumps(failure_status()))

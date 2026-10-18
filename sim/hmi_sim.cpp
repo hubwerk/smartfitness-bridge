@@ -697,7 +697,7 @@ ConfigView configView() {
     return config;
 }
 
-// Every dashboard metric of every machine profile at its widest value.
+// Every available dashboard metric of every machine profile at its widest value.
 void checkDashboardMetrics() {
     g_ui.navigate(Screen::Dashboard);
     for (std::size_t p = 0; p < kMachineProfileCount; ++p) {
@@ -710,7 +710,7 @@ void checkDashboardMetrics() {
         }
         g_ui.setStatus(status);
         pump(100);
-        for (std::size_t i = 0; i < dashboardMetrics(status.input.profile).size(); ++i) {
+        for (std::size_t i = 0; i < dashboardMetrics(status.input.profile, status).size(); ++i) {
             turn(1);
             pump(50);
             const std::string name = "dashboard-" + std::to_string(p) + "-" + std::to_string(i);
