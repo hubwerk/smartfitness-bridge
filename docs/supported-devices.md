@@ -6,7 +6,7 @@ the protocol layouts; vendor vectors are synthetic samples based on upstream
 parsers/command bytes, not validated equipment captures.
 
 The tables mirror `src/core/protocols/registry.cpp` (the table below and the
-[batch 2](#batch-2-further-ble-only-vendor-protocols) families). Highest matching priority wins;
+[additional vendor protocol](#additional-vendor-protocols) families). Highest matching priority wins;
 ties keep the first registered match. Pairing can override detection with a
 registered id. Names are case-sensitive unless explicitly noted below.
 
@@ -28,7 +28,7 @@ attempt first checks for a fresh advertisement; `searching` is shown in both UIs
 | Id (priority) | Device / profile | Match rule | Metrics | Control | Source / attribution | Test status | FTMS output profile |
 |---|---|---|---|---|---|---|---|
 | `keiser-m3i` (90) | Keiser M3i | Name starts `M3` and manufacturer payload passes Keiser broadcast parser | Cadence, power, nonzero HR; gear decoded as resistance; no speed/distance forwarded | None; advertisement-only (no GATT connection) | qdomyos-zwift `src/devices/m3ibike/m3ibike.cpp`; `yesoul_keiser.hpp/.cpp` | Host broadcast/detection tests; hardware unverified | `bike` |
-| `echelon` (80) | Echelon Connect Sport / EX bike protocol | Name starts `ECH`; excludes `ECH-ROW`, `ECH-STRIDE`, `ECH-SC` case-insensitively; must not advertise FTMS; names claimed by the higher-priority `echelon-rower`/`echelon-stride`/`echelon-stride4`/`echelon-stair` entries (batch 2) are not selected | Cadence, resistance; estimated power and speed from upstream formulas | Normalized resistance 0–100% mapped to levels 1–32; requires notification subscriptions; initialization frames are queued without acknowledgement gating | qdomyos-zwift `src/devices/echelonconnectsport/echelonconnectsport.cpp`; `echelon.hpp/.cpp` | Host frame/init/control tests; hardware unverified | `bike` |
+| `echelon` (80) | Echelon Connect Sport / EX bike protocol | Name starts `ECH`; excludes `ECH-ROW`, `ECH-STRIDE`, `ECH-SC` case-insensitively; must not advertise FTMS; names claimed by the higher-priority `echelon-rower`/`echelon-stride`/`echelon-stride4`/`echelon-stair` entries (additional vendor protocols) are not selected | Cadence, resistance; estimated power and speed from upstream formulas | Normalized resistance 0–100% mapped to levels 1–32; requires notification subscriptions; initialization frames are queued without acknowledgement gating | qdomyos-zwift `src/devices/echelonconnectsport/echelonconnectsport.cpp`; `echelon.hpp/.cpp` | Host frame/init/control tests; hardware unverified | `bike` |
 | `domyos` (80) | Domyos / Decathlon bike, Chang Yow init variant | Name starts `Domyos-Bike`, excludes `DomyosBridge`, no FTMS advertisement | Speed, cadence, HR, resistance; estimated power | Normalized resistance 0–100% mapped to levels 1–15; requires initialization acknowledgement | qdomyos-zwift `src/devices/domyosbike/domyosbike.cpp`; `domyos.hpp/.cpp` | Host frame/init/control tests; hardware unverified | `bike` |
 | `schwinn-ic4` (70) | Schwinn IC4/IC8; Bowflex bikes with matching names | Case-insensitive `IC BIKE`, `C7-` when name length is **not 17**, or `C9/C10` prefix | FTMS Indoor Bike Data metrics (speed, cadence, power, HR as present); resistance decoded internally | None; forced read-only, bike-data-only FTMS wrapper | qdomyos-zwift `src/bluetooth.cpp` discovery and `src/devices/schwinnic4bike/schwinnic4bike.cpp` behavior; registry uses local FTMS codec | Host matcher/read-only tests; hardware unverified | `bike` |
 | `yesoul` (70) | Yesoul bike | Name starts `YESOUL`, case-insensitive `YS_G1M_`, or manufacturer prefix `7d 02 01 05 00 ff ff` | Cadence, power, resistance; speed derived from cadence; decoded distance not forwarded | None (upstream read-only behavior) | qdomyos-zwift `src/devices/yesoulbike/yesoulbike.cpp`; `yesoul_keiser.hpp/.cpp` | Host frame/init/detection tests; hardware unverified | `bike` |
@@ -61,7 +61,7 @@ Vendor ports are GPL-derived from
 [`cagnulein/qdomyos-zwift`](https://github.com/cagnulein/qdomyos-zwift),
 Copyright Roberto Viola and contributors (GPL-3.0). Attribution is retained in
 `include/core/protocols/` and `src/core/protocols/`. The original ports do not record a
-revision; new batch-1 ports use the pinned revision below.
+revision; vendor ports use the pinned revision below.
 Discovery rules follow upstream `src/devices/bluetooth.cpp`.
 The Sportstech/FitHome port (`sportstech-f15`) is derived from
 [`syssi/esphome-treadmill-f15`](https://github.com/syssi/esphome-treadmill-f15)
@@ -74,7 +74,7 @@ cross-checked against [`deniskie/ha-sportstech-walkingpad-integration`](https://
 automatic matching. See [license and
 attribution](../README.md#license-and-attribution) and [HD-005](hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports).
 
-## Batch 1: BLE-only vendor protocols
+## Initial BLE vendor protocols
 
 Devices are assessed independently; an unsupported variant does not block
 other manufacturers. **Peloton Bike / Bike+ and DFC hardware are excluded.**
@@ -101,19 +101,19 @@ not an assumption based on the device name:
   [`src/devices/stagesbike/stagesbike.cpp`](https://github.com/cagnulein/qdomyos-zwift/blob/ea70d7ff64bc8bf508fc6401fd056211e05311b3/src/devices/stagesbike/stagesbike.cpp),
   which parses standard Cycling Power Measurement notifications. This evidence
   does **not** add accessory support, Bike+ compatibility or Peloton resistance
-  control to this batch.
+  control to this supported-device list.
 
 Do not pair a native Peloton by forcing a vendor adapter, or infer control
 capabilities from the upstream virtual output. OCR/UDP, Wi-Fi, cloud, USB and
-ANT+ paths remain outside this BLE-only batch.
+ANT+ paths remain outside this BLE input scope.
 
-### Excluded transports and proposed batch 2
+### Excluded transports and protocol boundaries
 
 - Bowflex C6 and C7/VeloCore bikes advertising the existing `IC BIKE`, `C7-`
   (non-17-character) or `C9/C10` layouts retain the read-only `schwinn-ic4`
   adapter. Other genuine FTMS variants use `ftms`; a manufacturer name alone
   does not establish a new proprietary control protocol.
-- Peloton Bike/Bike+ and DFC: explicitly excluded from this batch. The pinned
+- Peloton Bike/Bike+ and DFC: explicitly excluded from this BLE input scope. The pinned
   evidence above explains the native BLE limitation; no DFC-specific matcher,
   accessory control or Peloton adapter is added.
 - `nordictrackifitadbbike`: its constructor binds a UDP socket on port 8002.
@@ -125,12 +125,12 @@ ANT+ paths remain outside this BLE-only batch.
   Schwinn advertisement/Indoor Bike Data layout remain read-only through
   `schwinn-ic4`; other models require verified BLE evidence, not a guessed port.
 
-The remaining BLE classes of the upstream catalogue are ported in
-[batch 2](#batch-2-further-ble-only-vendor-protocols).
+The remaining registered BLE classes of the upstream catalogue are listed in
+[additional vendor protocols](#additional-vendor-protocols).
 
 ### Resource and validation notes
 
-The vendor batch did not change the BLE queues. Machine-profile selection now
+These vendor ports did not change the BLE queues. Machine-profile selection now
 adds a one-byte output override in configuration schema v3 (maximum 252 bytes;
 v1/v2 migrate with `auto`). Only the selected source protocol is instantiated;
 inactive adapters contribute code and registry metadata, not one live protocol
@@ -201,7 +201,7 @@ Suffix `s0` means standard service/characteristics; `s1c1` selects service
 when advertisements do not distinguish them. These are BLE protocol variants,
 not claims that every model can use every cipher.
 
-## Batch 2: further BLE-only vendor protocols
+## Additional vendor protocols
 
 These families port the remaining BLE classes of qdomyos-zwift revision
 [`ea70d7ff64bc8bf508fc6401fd056211e05311b3`](https://github.com/cagnulein/qdomyos-zwift/tree/ea70d7ff64bc8bf508fc6401fd056211e05311b3)
@@ -239,7 +239,7 @@ exposed. The Domyos treadmill omits upstream's connect-time
 change a running belt; the Domyos elliptical/rower still send it.
 
 All vectors are **synthetic samples in the upstream byte layout**; no entry in
-this batch is verified on hardware.
+these additional vendor protocols is verified on hardware.
 
 | Id (priority) | Device / profile | Match rule | Metrics | Control | Source / attribution | Test status | FTMS output profile |
 |---|---|---|---|---|---|---|---|
@@ -366,7 +366,7 @@ this batch is verified on hardware.
 | `lifefitness-tm` (80) | Life Fitness treadmills | `LF` with name length 15 or 18 (FTMS allowed, as upstream) | FTMS treadmill data | None (upstream controls are commented out) | `src/devices/lifefitnesstreadmill/lifefitnesstreadmill.cpp`; `vendor_treadmills.hpp/.cpp` | Host tests; hardware unverified | `treadmill` |
 | `shuaa5-tm` (80) | ShuaA5 treadmills (FTMS) | `ZW-` without FTMS advertisement (FTMS-advertising devices use generic `ftms`) | FTMS treadmill data | FTMS speed/incline only on fresh data while running; never sends Start | `src/devices/shuaa5treadmill/shuaa5treadmill.cpp`; `vendor_treadmills.hpp/.cpp` | Host tests; hardware unverified | `treadmill` |
 
-### Batch 2: not ported
+### Not ported
 
 - **Bluetooth Classic (RFCOMM/SPP):** `toorxtreadmill`, `iconsolebike`,
   `iconceptbike`, `iconceptelliptical`, `technogymmyruntreadmillrfcomm`.
@@ -394,7 +394,7 @@ this batch is verified on hardware.
 
 - This is **not** the entire qdomyos-zwift catalogue: non-BLE transports,
   accessories and the classes listed under
-  [batch 2: not ported](#batch-2-not-ported) are not implemented.
+  [not-ported entries](#not-ported) are not implemented.
 - Only one input is selected: CPS, CSC and HRS are alternative sources, not
   additional sensors merged with a trainer.
 - Every metric is optional: a value the device does not send stays absent

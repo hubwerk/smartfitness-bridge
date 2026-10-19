@@ -29,7 +29,8 @@ a selectable output protocol: BLE FTMS, ANT+ FE-C with optional sensor channels
 unverified on hardware.
 OTA is not implemented.
 
-**Hardware test status** (the single place where hardware verification is tracked):
+**Hardware test status** (the single place where hardware verification is tracked;
+see the [supported-device table](#supported-devices-and-new-protocols)):
 
 | Area | Status |
 |------|--------|
@@ -502,14 +503,45 @@ the saved BLE source again. `save` persists that input toggle.
 
 ## Supported devices and new protocols
 
-See [supported devices](docs/supported-devices.md) for the complete adapter table,
-match rules, metrics, controls, attribution, and test status. Only the listed
-qdomyos-zwift (and Sportstech/FitHome) ports exist. Batch 2 covers the remaining
-BLE vendor classes (FitShow, Toorx/TRX App Gate, Domyos treadmill/elliptical/rower,
-Echelon rower/stride/stair, Nautilus/Bowflex, Sportstech/SportPlus/Pafers and
-further treadmills, bikes, ellipticals and rowers). Bluetooth Classic, ANT+,
-USB/serial, Wi-Fi/ADB, accessories and the other entries listed as not ported are
-excluded. None of these ports is verified on hardware.
+“Implemented” means the adapter is registered and has a device matcher and
+decoder; it does not mean every model or firmware has been verified. “Tested”
+means the input and named output were confirmed with real equipment and the
+listed app. Adapters marked manual are selected in the adapter list while
+pairing. Please share test results in an issue, including device, firmware,
+output protocol, and app.
+
+| Manufacturer / model family | Device type | Input protocol / adapter IDs | Auto-detect or manual | Tested on hardware | Output tested (BLE FTMS / ANT+) | Tested with (device / app) |
+|---|---|---|---|---|---|---|
+| Standard FTMS fitness machines | Bike, treadmill, cross trainer, step/stair climber, rower | `ftms` | Auto | ✅ Wahoo KICKR only | ✅ BLE FTMS; ANT+ not tested | Wahoo KICKR via `ftms` / MyWhoosh (web and HMI; CrowPanel 1.28") |
+| Standard fitness sensors | Cycling power, speed/cadence, heart rate | `cps`, `csc`, `hrs` | Auto | 🧪 | — | — |
+| Keiser M3i | Bike | `keiser-m3i` | Auto (broadcast) | 🧪 | — | — |
+| Echelon Connect, Row, Stride, Stride 4, stair climber | Bike, rower, treadmill, stair climber | `echelon`, `echelon-*` | Auto | 🧪 | — | — |
+| Domyos / Decathlon | Bike, treadmill, elliptical, rower | `domyos`, `domyos-tm`, `domyos-el`, `domyos-row` | Auto | 🧪 | — | — |
+| Schwinn IC4/IC8, 170/270; matching Bowflex bikes | Bike | `schwinn-ic4`, `schwinn-170` | Auto | 🧪 | — | — |
+| Yesoul | Bike | `yesoul` | Auto | 🧪 | — | — |
+| iFit / NordicTrack / ProForm; Bowflex T216 | Bike, treadmill, elliptical, rower | `ifit-*`, `ifit-model-1…97`, `bowflex-t216`, `proform-rower`, `proform-750r`, `proform-sport-rl` | Auto and manual profiles | 🧪 | — | — |
+| Nautilus / Bowflex | Bike, treadmill, elliptical | `nautilus-*`, `bowflex-tm` | Auto and manual variants | 🧪 | — | — |
+| Tacx Neo/Flux; Elite legacy, DR, Misuro | Bike / trainer | `tacx-fec`, `elite-*` | Auto | 🧪 | — | — |
+| Wahoo KICKR legacy; KICKR RUN | Bike / treadmill | `wahoo-legacy`, `kickr-run` | Auto | 🧪 | — | — |
+| Concept2 PM5 / SkiErg | Rower, SkiErg | `concept2-pm5`, `concept2-skierg` | Auto | 🧪 | — | — |
+| FitShow / FitPlus / S-Node / NoblePro / Merach | Treadmill, bike, rower | `fitshow-*`, `fitplus-*`, `snode-bike` | Auto and manual variants | 🧪 | — | — |
+| Toorx / TRX App Gate, including i-Running, Reebok, Adidas, DKN | Treadmill, bike, elliptical, rower | `trx-*` | Auto and manual variants | 🧪 | — | — |
+| Sportstech / SportPlus / Carefitness / Pafers | Treadmill, bike, elliptical, rower | `sportstech-*`, `sportsplus-*`, `carefit-bike`, `sp-ht-9600ie`, `pafers-*` | Auto and manual variants | 🧪 | — | — |
+| Horizon / Paragon, Spirit, Sole, Kingsmith / WalkingPad | Treadmill | `horizon-*`, `spirit-*`, `sole-*`, `walkingpad-*` | Auto and manual variants | 🧪 | — | — |
+| TRUE, Technogym MyRun, LifeSpan, Octane, ZiPro, ESLinker, Sperax, Focus, DeerRun/PitPat, Activio, Life Fitness, ShuaA5 | Treadmill | `true-*`, `technogym-myrun`, `lifespan-tm`, `octane-*`, `zipro-tm`, `esanglinker`, `eslinker-costa`, `sperax-tm`, `focus-tm`, `deerrun-pitpat`, `activio-*`, `lifefitness-tm`, `shuaa5-tm` | Auto and manual variants | 🧪 | — | — |
+| Flywheel, Sole, Kettler, Technogym, Inspire, Keep, MCF, XCX, Chrono, Volava, Ultrasport, Skandika, PitPat, Freebeat, MEPANEL, Apex, NPE CABLE, CycleOps, Joroto/BGYM, Renpho, Horizon GR7 | Bike | `flywheel`, `sole-*`, `kettler-c12`, `technogym`, `inspire`, `keep-bike`, `mcf-bike`, `xcx-bike`, `chrono-bike`, `volava`, `ultrasport`, `skandika-*`, `pitpat-bike`, `freebeat-boom`, `mepanel`, `apex-bike`, `npe-cable`, `cycleops`, `csc-bike`, `lifespan-bike`, `renpho`, `horizon-gr7` | Auto and manual variants | 🧪 | — | — |
+| BH, YPOO, Sole, Xterra, Octane Q37, SmartRow, Sunny | Elliptical, rower, stepper | `bh-elliptical`, `ypoo-*`, `sole-elliptical`, `xterra-xe88`, `octane-q37`, `smartrow`, `sunnyfit-stepper` | Auto and manual variants | 🧪 | — | — |
+
+Legend: ✅ tested on hardware · 🧪 host tests with synthetic data only · — no
+hardware-verified output. ANT+ output has not been tested on hardware. The
+[supported-device guide](docs/supported-devices.md) has match rules, metrics,
+controls, and attribution.
+
+### Not supported
+
+Peloton/DFC, Bluetooth Classic (RFCOMM), ANT+/USB/Wi-Fi/ADB inputs, accessories
+without fitness data, and Kinetic (licensed protocol) are not supported. See
+[the supported-device guide](docs/supported-devices.md) for details.
 
 To add a protocol:
 1. Implement pure C++ `SourceProtocol` in `include/core/protocols/` and `src/core/protocols/`:
