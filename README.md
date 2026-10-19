@@ -512,7 +512,7 @@ output protocol, and app.
 
 | Manufacturer / model family | Device type | Input protocol / adapter IDs | Auto-detect or manual | Tested on hardware | Output tested (BLE FTMS / ANT+) | Tested with (device / app) |
 |---|---|---|---|---|---|---|
-| Standard FTMS fitness machines | Bike, treadmill, cross trainer, step/stair climber, rower | `ftms` | Auto | ✅ | ✅ BLE FTMS; ANT+ not tested | Wahoo KICKR via `ftms` / MyWhoosh (web and HMI; CrowPanel 1.28") |
+| Standard FTMS fitness machines | Bike, treadmill, cross trainer, step/stair climber, rower | `ftms` | Auto | ✅ Wahoo KICKR only | ✅ BLE FTMS; ANT+ not tested | Wahoo KICKR via `ftms` / MyWhoosh (web and HMI; CrowPanel 1.28") |
 | Standard fitness sensors | Cycling power, speed/cadence, heart rate | `cps`, `csc`, `hrs` | Auto | 🧪 | — | — |
 | Keiser M3i | Bike | `keiser-m3i` | Auto (broadcast) | 🧪 | — | — |
 | Echelon Connect, Row, Stride, Stride 4, stair climber | Bike, rower, treadmill, stair climber | `echelon`, `echelon-*` | Auto | 🧪 | — | — |
