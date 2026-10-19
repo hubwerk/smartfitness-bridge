@@ -52,6 +52,8 @@ host-tests-all:
 host-tests-debug:
 	$(CXX) $(CXXFLAGS) -DDEBUG_WEB -DARDUINO -Iinclude/core -Itests/host/debug_serial_fakes \
 		-Itests/host tests/host/test_debug_serial.cpp tests/host/test_debug_ble.cpp \
+		tests/host/test_debug_ant.cpp src/core/ant_output.cpp src/core/ant_message.cpp \
+		src/core/fec_codec.cpp src/core/ant_sensor_codec.cpp \
 		src/core/ble_input_adapter.cpp src/core/ble_types.cpp src/core/bt_device_adapter.cpp \
 		src/core/bridge_core.cpp src/core/bridge_output.cpp src/core/metric.cpp \
 		src/core/scan_label.cpp src/core/source_protocol.cpp src/core/ftms_source.cpp \

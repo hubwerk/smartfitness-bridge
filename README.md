@@ -168,6 +168,48 @@ the BLE drop counters when diagnosing missing packets.
 All these diagnostics, formatters and additional subscriptions compile out
 unless both `ARDUINO` and `DEBUG_WEB` are defined; normal host tests are unchanged.
 
+ANT+ diagnostics use the same `DEBUG_WEB` flag, Debug tab, and downloadable log
+(USB stick or UART radio). They trace complete ANT serial messages at the shared
+output layer, including received FE-C display controls:
+
+```text
+[ANT-IN] #42 +250 ms ch=0 device=1 type=17 msg=0x4f len=9: 00 31 ff ff ff ff ff 20 03 page=49 targetPower=200.00
+[ANT-CP] requested page=49 targetPower=200.00
+[ANT-CP] page=49 result=pass(0x00) command-status recorded
+[ANT-OUT] ch=0 device=1 type=17 msg=0x4e len=9: 00 10 19 00 00 88 13 78 33 page=16 speed=18.00 km/h hr=120.00 tx=accepted
+[ANT-IN] stats: messages=20/5000 ms dropped=0 writeErrors=0 radioErrors=0 lastData=100 ms stale=0
+```
+
+`[ANT-IN]` numbers every parsed message; `+N ms` is the interval since the
+previous incoming message (zero for the first). `ch` is the radio channel index;
+`device` and `type` identify its configured ANT+ device number/type when known.
+`ch=-` means a radio-wide or unknown message. `msg` is the ANT message ID
+(`0x40` response/event, `0x4e` broadcast, `0x4f` acknowledged data).
+`len` and hex cover the serial **payload**, including the channel byte, not
+framing/checksum. Network-key writes are redacted, including private overrides.
+`page` identifies the data page; speed/cadence's unpaged counter payload uses
+`page=-`. Concise decoded fields include power (W), cadence (rpm), speed (km/h),
+heart rate (bpm), requested controls, and page 71 command status; `-` means
+unavailable. Unknown messages/pages remain visible as raw hex.
+
+`[ANT-OUT]` logs every write with `tx=accepted` or `tx=failed`; accepted means
+the transport accepted the write, **not** that a trainer applied a command.
+`[ANT-CP]` traces display requests, local command results, configuration
+responses, radio transfer events, timeouts and retries. Page 71 replies show
+the command result on the outgoing line. A radio transfer acknowledgment is
+not trainer control acceptance; ANT controls still follow the existing core
+gate and BLE control path.
+
+ANT statistics appear at most once every five seconds while enabled and the
+radio is connected. They report the message count over the actual window in
+milliseconds, parser-lifetime dropped frames (bad checksum/oversized length),
+write/radio-response errors since `begin()`, and the last accepted display-page
+age (`-` before any); `stale=1` means no display page within five seconds.
+Regular radio TX events do not refresh that age. All messages are logged without
+sampling, like BLE input; multiple ANT channels increase log volume, so monitor
+`LOST OUTPUT` for debug-queue overload. No protocol timing, retries or control
+decisions are changed, and these diagnostics compile out of non-debug builds.
+
 ESP-IDF logging defaults to **Info** with `DEBUG_WEB`. To change it, uncomment
 `-DDEBUG_WEB_IDF_LEVEL=3` next to `-DDEBUG_WEB` in `platformio.ini` and choose
 1=Error, 2=Warning, 3=Info, 4=Debug or 5=Verbose. Higher levels can fill the

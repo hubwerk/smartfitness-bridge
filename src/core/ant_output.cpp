@@ -1,4 +1,5 @@
 #include "ant_output.h"
+#include "ant/debug_log.hpp"
 
 #include <chrono>
 #include <utility>
@@ -98,6 +99,10 @@ void AntOutput::begin() {
     pendingAcknowledged_ = false;
     openMask_ = 0;
     error_ = Error::None;
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    debugSequence_ = debugMessages_ = debugWriteErrors_ = debugRadioErrors_ = 0;
+    debugLastEventMs_ = debugWindowMs_ = now();
+#endif
 }
 
 void AntOutput::setEnabled(bool enabled) {
@@ -148,11 +153,19 @@ bool AntOutput::controlActive() const { return displaySeen() && controlApplied_;
 const char* AntOutput::hardware() const { return transport_ ? transport_->description() : ""; }
 
 bool AntOutput::send(const Bytes& bytes) {
-    return transport_ && !bytes.empty() && transport_->write(bytes.data(), bytes.size());
+    const bool sent = transport_ && !bytes.empty() && transport_->write(bytes.data(), bytes.size());
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    if (!sent) ++debugWriteErrors_;
+    if (bytes.size() >= 4)
+        logMessage("ANT-OUT", bytes[2], bytes.data() + 3, bytes[1], sent ? " tx=accepted" : " tx=failed");
+#endif
+    return sent;
 }
 
 void AntOutput::fail() {
     if (error_ == Error::None) error_ = Error::RadioFailure;
+    SF_DEBUG_LOG("[ANT-CP] radio failure error=%s link=%s awaiting=0x%02x retry=%u ms\n",
+                 errorName(error_), linkName(link_), awaiting_, static_cast<unsigned>(kRetryMs));
     openMask_ = 0;
     retryPending_ = true;
     retryAtMs_ = now() + kRetryMs;
@@ -269,6 +282,9 @@ void AntOutput::loop() {
         }
     }
     const std::uint32_t timestamp = now();
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    logStats(timestamp);
+#endif
     encoder_.update(trainerState(), profile(), timestamp);
     sensorEncoder_.update(trainerState(), timestamp);
     if (retryPending_) {
@@ -285,6 +301,7 @@ void AntOutput::loop() {
             break;
         case Link::Configuring:
             if (timestamp - sentMs_ >= kResponseTimeoutMs) {
+                SF_DEBUG_LOG("[ANT-CP] timeout awaiting=0x%02x\n", awaitingCapabilities_ ? kCapabilities : awaiting_);
                 if (awaitingCapabilities_) error_ = Error::CapabilitiesUnavailable;
                 fail();
             }
@@ -294,6 +311,9 @@ void AntOutput::loop() {
 }
 
 void AntOutput::handleMessage(const Message& message) {
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    logMessage("ANT-IN", message.id, message.payload.data(), message.payload.size());
+#endif
     switch (message.id) {
         case msg::kStartup:
             // After our reset, or an unexpected stick reset: (re)configure.
@@ -346,6 +366,14 @@ void AntOutput::handleChannelEvent(const Message& message) {
     const auto channel = message.payload[0];
     const std::uint8_t id = message.payload[1];
     const std::uint8_t result = message.payload[2];
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    if ((id == kEventMessageId && (result == code::kTransferTxFailed || result == code::kChannelClosed)) ||
+        (id != kEventMessageId && result != code::kResponseNoError))
+        ++debugRadioErrors_;
+#endif
+    if (id != kEventMessageId || result == code::kTransferTxCompleted || result == code::kTransferTxFailed)
+        SF_DEBUG_LOG("[ANT-CP] ch=%u responseTo=0x%02x result=0x%02x%s\n", channel, id, result,
+                     id == kEventMessageId ? " (radio transfer event, not trainer acceptance)" : "");
     if (id == kEventMessageId) {
         if (channel >= channelCount_ || !channelOpen(channels_[channel].bit)) return;
         if (result == code::kEventTx || result == code::kTransferTxCompleted || result == code::kTransferTxFailed)
@@ -381,6 +409,8 @@ void AntOutput::handleDisplayPage(const Page& page) {
     displaySeenValid_ = true;
     displaySeenMs_ = now();
     if (page[0] == fec::page::kRequest) {
+        SF_DEBUG_LOG("[ANT-CP] request page=%u repeats=%u acknowledged=%u command=0x%02x\n",
+                     page[6], page[5] & 0x7F, page[5] >> 7, page[7]);
         if (page[7] != 0x01) return;  // only "request data page"
         const std::uint8_t repeats = static_cast<std::uint8_t>(page[5] & 0x7FU);
         pendingResponse_ = page[6];
@@ -390,13 +420,74 @@ void AntOutput::handleDisplayPage(const Page& page) {
     }
     const auto control = fec::decodeControlPage(page);
     if (!control.known) return;
+    SF_DEBUG_LOG("[ANT-CP] requested page=%u%s\n", page[0], diagnostics::Summary(kFec, page.data()).c_str());
     auto status = fec::CommandStatus::Pass;
     if (control.hasRequest) {
         status = fec::commandStatusFor(requestControl(control.request));
         controlApplied_ = status == fec::CommandStatus::Pass || controlApplied_;
     }
     encoder_.recordCommand(page[0], status, page);
+    SF_DEBUG_LOG("[ANT-CP] page=%u result=%s(0x%02x) command-status recorded\n",
+                 page[0], diagnostics::statusName(status), static_cast<unsigned>(status));
 }
+
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+void AntOutput::logMessage(const char* direction, std::uint8_t id, const std::uint8_t* payload,
+                           std::size_t length, const char* result) {
+    char prefix[64]{};
+    if (direction[4] == 'I') {
+        const auto timestamp = now();
+        const auto delta = debugSequence_ ? timestamp - debugLastEventMs_ : 0;
+        ++debugSequence_;
+        ++debugMessages_;
+        debugLastEventMs_ = timestamp;
+        std::snprintf(prefix, sizeof(prefix), " #%u +%u ms", debugSequence_, delta);
+    }
+    const bool data = id == msg::kBroadcastData || id == msg::kAcknowledgedData;
+    const bool channelMessage = data || id == msg::kChannelEvent || id == msg::kChannelId ||
+        id == msg::kAssignChannel || id == msg::kUnassignChannel || id == msg::kChannelPeriod ||
+        id == msg::kChannelRfFrequency || id == msg::kOpenChannel || id == msg::kCloseChannel || id == kRequestMessage;
+    char channel[80] = "ch=-";
+    std::uint8_t service = 0;
+    if (channelMessage && length) {
+        if (payload[0] < channelCount_) {
+            const auto& spec = channels_[payload[0]];
+            service = spec.bit;
+            std::snprintf(channel, sizeof(channel), "ch=%u device=%u type=%u", payload[0], deviceNumber_, spec.deviceType);
+        } else {
+            std::snprintf(channel, sizeof(channel), "ch=%u", payload[0]);
+        }
+    }
+    char details[224]{};
+    if (data && length >= 9) {
+        const diagnostics::Summary summary(service, payload + 1);
+        if (service == kSpeedCadence)
+            std::snprintf(details, sizeof(details), " page=-%s", summary.c_str());
+        else
+            std::snprintf(details, sizeof(details), " page=%u%s", service == kHeartRate ? payload[1] & 0x7F : payload[1],
+                          summary.c_str());
+    } else if (data) {
+        std::snprintf(details, sizeof(details), " decode=failed (truncated page)");
+    } else if (id == msg::kChannelEvent && length >= 3) {
+        std::snprintf(details, sizeof(details), " responseTo=0x%02x result=0x%02x", payload[1], payload[2]);
+    }
+    // Never expose an overridden private network key in a downloadable log.
+    const debuglog::Hex hex(payload, id == msg::kSetNetworkKey ? 0 : length);
+    SF_DEBUG_LOG("[%s]%s %s msg=0x%02x len=%zu: %s%s%s\n", direction, prefix, channel, id, length,
+                 id == msg::kSetNetworkKey ? "<network key redacted>" : hex.c_str(), details, result);
+}
+
+void AntOutput::logStats(std::uint32_t timestamp) {
+    const auto window = timestamp - debugWindowMs_;
+    if (window < 5000) return;
+    char age[40] = "-";
+    if (displaySeenValid_) std::snprintf(age, sizeof(age), "%u ms", timestamp - displaySeenMs_);
+    SF_DEBUG_LOG("[ANT-IN] stats: messages=%u/%u ms dropped=%u writeErrors=%u radioErrors=%u lastData=%s stale=%u\n",
+                 debugMessages_, window, parser_.dropped(), debugWriteErrors_, debugRadioErrors_, age, !displaySeen());
+    debugMessages_ = 0;
+    debugWindowMs_ = timestamp;
+}
+#endif
 
 void AntOutput::sendNextPage(std::uint8_t channel) {
     encoder_.update(trainerState(), profile(), now());
