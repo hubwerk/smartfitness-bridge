@@ -720,6 +720,25 @@ void testJsonViews() {
     assert(document["antOutput"]["channels"][1]["available"] == false);
     assert(document["antOutput"]["error"] == "insufficient-channels");
     assert(document["antOutput"]["channelLimit"] == 1);
+    const auto ftmsService = document["ftmsOutput"]["services"][0];
+    assert(ftmsService["uuid"] == "1826" && ftmsService["characteristics"].size() == 9);
+    assert(ftmsService["characteristics"][1]["uuid"] == "2ad2");
+    assert(ftmsService["characteristics"][1]["name"] == "Indoor Bike Data");
+    assert(ftmsService["characteristics"][1]["properties"] == "notify");
+    assert(ftmsService["characteristics"][7]["name"] == "Fitness Machine Control Point");
+    assert(ftmsService["characteristics"][7]["properties"] == "write/indicate");
+    assert(document["ftmsOutput"]["services"][1]["uuid"] == "1818");
+    assert(document["ftmsOutput"]["services"][1]["characteristics"][0]["name"] == "Cycling Power Measurement");
+    assert(document["ftmsOutput"]["clientAddress"].isNull());
+    view.ftmsOutput.profile = MachineProfile::Rower;
+    view.ftmsOutput.client = true;
+    view.ftmsOutput.clientAddress = "aa:bb:cc:00:11:22";
+    view.ftmsOutput.clientRandomAddress = true;
+    document = parse(web::statusJson(view, rig.network));
+    assert(document["ftmsOutput"]["services"][0]["characteristics"][1]["uuid"] == "2ad1");
+    assert(document["ftmsOutput"]["services"][0]["characteristics"][1]["name"] == "Rower Data");
+    assert(document["ftmsOutput"]["clientAddress"] == "aa:bb:cc:00:11:22");
+    assert(document["ftmsOutput"]["clientAddressType"] == "random");
 }
 
 void testWifiPolicy() {

@@ -102,6 +102,23 @@ void testDefaultViews() {
     assert(scan.bleAvailable && !scan.scanning && scan.devices.empty() && scan.dropped == 0);
 }
 
+void testFtmsClientView() {
+    ControllerRig rig;
+    StatusView status = rig.controller.statusView();
+    assert(!status.ftmsOutput.client && status.ftmsOutput.clientAddress.empty());
+    rig.ftms.setClientAddress({0xAA, 0xBB, 0xCC, 0x00, 0x11, 0x22}, 1);
+    rig.ftms.notifyClientConnected();
+    rig.ftms.loop();
+    status = rig.controller.statusView();
+    assert(status.ftmsOutput.client && status.ftmsOutput.clientAddress == "aa:bb:cc:00:11:22");
+    assert(status.ftmsOutput.clientRandomAddress);
+    rig.ftms.clearClientAddress();
+    rig.ftms.notifyClientDisconnected();
+    rig.ftms.loop();
+    status = rig.controller.statusView();
+    assert(!status.ftmsOutput.client && status.ftmsOutput.clientAddress.empty());
+}
+
 void testSimulationTelemetryAndTargets() {
     ControllerRig rig;
     // Same Command objects the HMI submits; same results as the console.
@@ -497,6 +514,7 @@ void testWithoutBleInput() {
 void runControllerTests() {
     testRuntimeStateNames();
     testDefaultViews();
+    testFtmsClientView();
     testSimulationTelemetryAndTargets();
     testScanAndPairViews();
     testScanSortingAndRelevance();

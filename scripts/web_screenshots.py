@@ -44,11 +44,32 @@ PAIRED = {
          "state": "failed", "indicate": False, "reason": "not-found"},
     ],
 }
+# Mirrors outputCharacteristics() in include/core/bridge/output_gatt.hpp (bike profile).
+GATT = {
+    "ftms": ("1826", [("2acc", "Fitness Machine Feature", "read"), ("2ad2", "Indoor Bike Data", "notify"),
+                      ("2ad3", "Training Status", "read/notify"),
+                      ("2ad5", "Supported Inclination Range", "read"),
+                      ("2ad4", "Supported Speed Range", "read"),
+                      ("2ad6", "Supported Resistance Level Range", "read"),
+                      ("2ad8", "Supported Power Range", "read"),
+                      ("2ad9", "Fitness Machine Control Point", "write/indicate"),
+                      ("2ada", "Fitness Machine Status", "notify")]),
+    "cps": ("1818", [("2a63", "Cycling Power Measurement", "notify"), ("2a65", "Cycling Power Feature", "read"),
+                     ("2a5d", "Sensor Location", "read")]),
+    "hr": ("180d", [("2a37", "Heart Rate Measurement", "notify")]),
+    "csc": ("1816", [("2a5b", "CSC Measurement", "notify"), ("2a5c", "CSC Feature", "read"),
+                     ("2a5d", "Sensor Location", "read"), ("2a55", "SC Control Point", "write/indicate")]),
+    "rsc": ("1814", [("2a53", "RSC Measurement", "notify"), ("2a54", "RSC Feature", "read")]),
+}
 BLE_SERVICES = [
-    {"id": ident, "name": name, "enabled": enabled, "available": available, "active": enabled}
-    for ident, name, enabled, available in [
-        ("ftms", "FTMS", True, True), ("cps", "CPS", True, True),
-        ("hr", "HR", True, True), ("csc", "CSC", False, True), ("rsc", "RSC", False, False)]
+    {"id": ident, "name": name, "enabled": enabled, "available": available, "active": active,
+     "uuid": GATT[ident][0],
+     "characteristics": [{"uuid": uuid, "name": char_name, "properties": props}
+                         for uuid, char_name, props in GATT[ident][1]]}
+    for ident, name, enabled, available, active in [
+        ("ftms", "Fitness Machine (FTMS)", True, True, True), ("cps", "Cycling Power (CPS)", True, True, False),
+        ("hr", "Heart Rate", True, True, True), ("csc", "Cycling Speed/Cadence (CSC)", False, True, False),
+        ("rsc", "Running Speed/Cadence (RSC)", False, False, False)]
 ]
 ANT_CHANNELS = [
     {"id": ident, "name": name, "deviceType": device_type, "enabled": enabled, "open": False,
@@ -71,6 +92,7 @@ STATUS = {
               "dropped": {"scans": 0, "events": 0, "notifications": 0, "commands": 0}},
     "ftmsOutput": {"enabled": True, "profile": "bike", "override": "auto",
                    "name": "SmartFitness", "advertising": True, "client": True, "control": True,
+                   "clientAddress": "5a:12:34:56:78:9a", "clientAddressType": "random",
                    "restartRequired": False, "services": BLE_SERVICES},
     "outputProtocol": "ble-ftms",
     "antOutput": {"enabled": False, "available": True, "link": "disabled", "stick": False, "open": False,
@@ -174,12 +196,15 @@ def check_view(page, panel, mobile):
         "Bluetooth service": ["Advertised service", "Subscribed / OK",
                               "Pending / none reported", "Subscription failed"],
         "Bluetooth scan": ["Unrelated device / unnamed device"],
+        "Bridge output": ["Service / ANT+ channel", "Sending / subscribed / channel open",
+                          "Pending / not applied"],
+        "Receiving device": ["Connected / has control", "Waiting / no control / output off"],
         "Control result": ["Command accepted", "Command failed / disconnected / rejected"],
         "Output service": ["Service active / channel open / channel capacity",
                            "Pending / off", "Failed / error / duplicate power warning"],
     }
     names = ["Web connection"] + {
-        "dash": ["Bridge connection"], "dev": ["Bluetooth service", "Bluetooth scan"],
+        "dash": ["Bridge connection"], "dev": ["Bluetooth service", "Bridge output", "Receiving device", "Bluetooth scan"],
         "ctl": ["Control result"], "set": ["Output service"], "debug": [],
     }[panel]
     expect(page.locator(".status-legend:visible")).to_have_count(len(names))
@@ -397,6 +422,36 @@ def render(browser, output, name, width, height):
                 "e => getComputedStyle(e).backgroundColor") == "rgb(153, 204, 255)"
             assert page.locator("#paired-subscriptions .bad").evaluate(
                 "e => getComputedStyle(e).textTransform") == "uppercase"
+            # Input, bridge and receiving device share one card layout.
+            cards = page.locator("#dev .device-card")
+            expect(cards).to_have_count(3)
+            expect(cards.locator(".facts")).to_have_count(3)
+            expect(page.locator("#p-name")).to_have_text("Training bike")
+            expect(page.locator("#p-address")).to_have_text("aa:bb:cc:dd:ee:01 (public)")
+            expect(page.locator("#b-name")).to_have_text("SmartFitness")
+            expect(page.locator("#b-ant")).to_have_text("#4660")
+            expect(page.locator("#c-outputProtocol")).to_have_value("ble-ftms")
+            expect(page.locator("#b-sent .service-group")).to_have_count(3)
+            expect(page.locator("#b-sent .sensor")).to_have_text(
+                ["Fitness Machine (FTMS) · 1826", "Cycling Power (CPS) · 1818", "Heart Rate · 180d"])
+            expect(page.locator("#b-sent .service-group").first.locator(".ok")).to_have_count(9)
+            expect(page.locator("#b-sent .service-group").nth(1).locator(".pending")).to_have_count(3)
+            expect(page.locator("#b-sent")).to_contain_text("Indoor Bike Data (2ad2) · NOTIFY")
+            expect(page.locator("#b-sent")).to_contain_text("Fitness Machine Control Point (2ad9) · WRITE/INDICATE")
+            expect(page.locator("#r-id")).to_have_text("5a:12:34:56:78:9a (random)")
+            expect(page.locator("#r-protocol")).to_have_text("BLE FTMS")
+            expect(page.locator("#r-state .ok")).to_have_text(["app connected", "app has control"])
+            # The sent services follow the selected (not yet applied) output format.
+            page.locator("#c-outputProtocol").select_option("ant-fec")
+            expect(page.locator("#b-sent-label")).to_have_text("Sent ANT+ channels")
+            expect(page.locator("#b-sent .sensor")).to_have_text(["FE-C", "HR"])
+            expect(page.locator("#b-sent .pending")).to_have_text(
+                ["device type 17 · device #4660 · PENDING", "device type 120 · device #4660 · PENDING"])
+            expect(page.locator("#b-note")).to_contain_text("Not applied yet")
+            page.locator("#c-outputProtocol").select_option("off")
+            expect(page.locator("#b-sent .pending")).to_have_text("output off – nothing is sent")
+            page.locator("#c-outputProtocol").select_option("ble-ftms")
+            expect(page.locator("#b-sent .sensor")).to_have_count(3)
             expect(page.get_by_label("Adapter for Training bike")).to_have_value("ftms")
             page.get_by_label("Pair Unknown peripheral", exact=True).click()
             expect(page.locator("#toast")).to_have_text("choose an adapter first")
@@ -427,7 +482,7 @@ def render(browser, output, name, width, height):
             command(page.locator("#btn-save"), "config")
             expect(page.locator("#toast")).to_have_text("applied")
             assert commands[-1] == ("config", {
-                "ftmsName": "SmartFitness", "outputProtocol": "ble-ftms", "ftmsOutputProfile": "auto",
+                "ftmsName": "SmartFitness", "ftmsOutputProfile": "auto",
                 "ftmsOutputServices": 7, "antOutputServices": 5,
                 "simulatedTrainer": True, "wifiSsid": "Training room", "https": True, "save": True})
             page.locator("#toast").evaluate("e => e.style.display = 'none'")
@@ -466,13 +521,18 @@ def render(browser, output, name, width, height):
         expect(page.locator("#ctl-result")).to_have_class("small bad")
         assert commands[-1] == ("control", {"control": control, "value": int(value)})
 
+    # The output format is applied from the Devices → Bridge card on its own.
+    with page.expect_response("**/api/config"):
+        page.locator("#tab-dev").click()
+    expect(page.locator("#c-outputProtocol")).to_have_value("ble-ftms")
+    expect(page.locator('#c-outputProtocol option[value="ant-fec"]')).to_be_enabled()
+    page.locator("#c-outputProtocol").select_option("ant-fec")
+    command(page.locator("#btn-output"), "config")
+    assert commands[-1] == ("config", {"outputProtocol": "ant-fec", "save": True}), commands[-1]
     with page.expect_response("**/api/config"):
         page.locator("#tab-set").click()
     expect(page.locator("#c-ftmsName")).to_have_value("SmartFitness")
     page.locator("#c-ftmsOutputProfile").select_option("treadmill")
-    expect(page.locator("#c-outputProtocol")).to_have_value("ble-ftms")
-    expect(page.locator('#c-outputProtocol option[value="ant-fec"]')).to_be_enabled()
-    page.locator("#c-outputProtocol").select_option("ant-fec")
     ble_group, ant_group = page.locator("#c-ftmsServices"), page.locator("#c-antServices")
     expect(ble_group.locator('[data-service="ftms"]')).to_be_disabled()
     expect(ble_group.locator('[data-service="rsc"]')).to_be_disabled()
@@ -499,7 +559,7 @@ def render(browser, output, name, width, height):
     page.locator("#c-https").uncheck()
     command(page.locator("#btn-save"), "config")
     assert commands[-1] == ("config", {
-        "ftmsName": "Test treadmill", "outputProtocol": "ant-fec", "ftmsOutputProfile": "treadmill",
+        "ftmsName": "Test treadmill", "ftmsOutputProfile": "treadmill",
         "ftmsOutputServices": 5, "antOutputServices": 7,
         "simulatedTrainer": False, "wifiSsid": "Training room", "save": True,
         "wifiPassword": "test-fixture-only", "https": False}), commands[-1]
@@ -645,7 +705,7 @@ def check_debug(browser, output, name, width, height):
                                   headers={"X-Debug-End": str(end),
                                            "Content-Disposition": 'attachment; filename="debug.log"'})
         else:
-            fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN}
+            fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": CONFIG}
             assert path in fixtures, f"Unexpected debug request: {path}"
             request_route.fulfill(json=fixtures[path])
 

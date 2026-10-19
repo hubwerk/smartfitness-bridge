@@ -649,9 +649,9 @@ except pairing/unpairing, which persist their own changes immediately.
 ### Using the UI
 The single-page app (`src/variants/web/assets/index.html`, web variant only, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
 - **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and the active output (BLE FTMS client state, or ANT+ stick/channel/display state) (WebSocket, ≤ 4 Hz).
-- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. Advertised services and actual notify/indicate subscriptions are separate pills; subscription state is **OK**, **PENDING** or **FAILED** (not inferred from advertisements). Hover a pill for full service/characteristic UUIDs. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device.
+- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. Advertised services and actual notify/indicate subscriptions are separate pills; subscription state is **OK**, **PENDING** or **FAILED** (not inferred from advertisements). Hover a pill for full service/characteristic UUIDs. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device. Below the paired device, cards in the same layout (facts, pills, legend) show the **Bridge** – its BLE (FTMS) name, ANT+ device number and the *Output format* selection (*BLE FTMS*, *ANT+ FE-C* – hidden without an ANT transport – or *Off*; *Apply* saves it) with the services/characteristics (BLE: service and characteristic UUIDs with READ/NOTIFY/WRITE/INDICATE) or ANT+ channels (device type and number) sent for the selected format – and the **Receiving device**: the connected BLE app's address (BLE centrals send no name) or the ANT+ display state (ANT+ displays transmit no device number of their own).
 - **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
-- **Settings:** output protocol (*BLE FTMS*, *ANT+* – needs an external USB/UART ANT radio, hidden when the firmware has no ANT transport – or *Off*), BLE service and ANT+ channel pills, FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version. Selected services are golden, off/pending tan; **NO DATA** choices are disabled. **Auto** preserves the original FTMS/FE-C-only behavior. FTMS is mandatory for an explicit BLE selection; ANT+ may use sensor-only channels. **Save and restart** to apply a changed BLE GATT topology, then re-pair clients that cache services; Save alone persists the preference but does not rebuild an initialized server. Selecting both FE-C and Power warns about duplicate power sources.
+- **Settings:** BLE service and ANT+ channel pills, FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version. Selected services are golden, off/pending tan; **NO DATA** choices are disabled. **Auto** preserves the original FTMS/FE-C-only behavior. FTMS is mandatory for an explicit BLE selection; ANT+ may use sensor-only channels. **Save and restart** to apply a changed BLE GATT topology, then re-pair clients that cache services; Save alone persists the preference but does not rebuild an initialized server. Selecting both FE-C and Power warns about duplicate power sources.
 
 ## REST / WebSocket API
 
@@ -804,8 +804,9 @@ or `null` when invalid. Example disconnected snapshot:
   "input":{"source":"simulation","profile":"bike","bleAvailable":true,"link":"idle","protocol":"","stale":false,
     "scanning":false,"error":"","reconnectAttempts":0,"nextAttemptMs":0,"autoConnect":false,"paired":null,
     "dropped":{"scans":0,"events":0,"notifications":0,"commands":0}},
-  "ftmsOutput":{"enabled":true,"profile":"bike","override":"auto","name":"SmartFitness Bridge","advertising":true,"client":false,"control":false,"restartRequired":false,
-    "services":[{"id":"ftms","name":"Fitness Machine (FTMS)","enabled":true,"available":true,"active":false}]},
+  "ftmsOutput":{"enabled":true,"profile":"bike","override":"auto","name":"SmartFitness Bridge","advertising":true,"client":false,"clientAddress":null,"control":false,"restartRequired":false,
+    "services":[{"id":"ftms","name":"Fitness Machine (FTMS)","enabled":true,"available":true,"active":false,"uuid":"1826",
+      "characteristics":[{"uuid":"2acc","name":"Fitness Machine Feature","properties":"read"},{"uuid":"2ad2","name":"Indoor Bike Data","properties":"notify"}]}]},
   "outputProtocol":"ble-ftms",
   "antOutput":{"enabled":false,"available":true,"link":"disabled","stick":false,"open":false,"deviceNumber":4660,
     "profile":"bike","display":false,"control":false,"hardware":"","error":"","channelLimit":0,
@@ -830,6 +831,10 @@ States: `disconnected`, `connected/read-only`, `trainer`, `control-ready`.
 availability (`available`), and actual notification subscription (`active`) state.
 Configured services can differ from the boot-applied topology;
 `ftmsOutput.restartRequired:true` means save and restart to apply the selection.
+Each service also lists its 16-bit `uuid` and the served `characteristics`
+(`uuid`, `name`, `properties`; the example is shortened; for FTMS only the effective
+profile's data characteristic is listed). `ftmsOutput.clientAddress` is the connected
+client's address (`clientAddressType`: `public`/`random`) or `null`.
 `antOutput.channels` reports each channel's selected, metric/profile availability,
 and actual open states;
 top-level `antOutput.open` remains the FE-C channel state for backward compatibility,
@@ -1071,7 +1076,7 @@ Control flow: NimBLE callbacks (BLE task) only push writes and connect/disconnec
 
 ## ANT+ output
 
-Select it with `output ant-fec`, the HMI/web *Settings → Output protocol* field, or
+Select it with `output ant-fec`, the HMI *Settings → Output protocol* field, the web *Devices → Bridge → Output format* field, or
 `/api/config` `{"outputProtocol":"ant-fec"}` (then `save`). Only one output
 protocol is active at a time: selecting ANT+ FE-C stops BLE FTMS advertising and
 disconnects its client; selecting BLE FTMS or Off closes the ANT channels.

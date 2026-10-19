@@ -34,6 +34,8 @@ input[type="checkbox"]{accent-color:var(--acc);width:24px;min-height:24px}input:
 table{width:100%;border-collapse:collapse;table-layout:fixed}td,th{padding:10px 6px;border-bottom:2px solid var(--tan);text-align:left;vertical-align:top;overflow-wrap:anywhere}th{color:var(--muted);font-weight:400;font-size:16px;text-transform:uppercase}th:first-child{width:30%}th:nth-child(2){width:8%}th:nth-child(3){width:16%}th:nth-child(4){width:30%}
 td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}.row label{min-width:180px;color:var(--light)}
+.facts{display:grid;grid-template-columns:200px minmax(0,1fr);gap:8px 16px;align-items:center;margin:4px 0 14px}.facts dt{color:var(--light);text-transform:uppercase;font-size:16px}.facts dd{margin:0;min-width:0;overflow-wrap:anywhere}.facts dd.control{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.facts .na{color:#888888}
+.service-group{margin-bottom:4px}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--tan);color:#000;padding:12px 24px;border-radius:24px;display:none;max-width:90%;z-index:2}
 .combo{position:relative;width:305px;max-width:100%;min-width:0}.combo input{width:100%}
 #wifi-list{position:absolute;left:0;right:0;top:100%;z-index:3;margin:0;padding:0;list-style:none;background:#000;border:2px solid var(--acc);border-top:0;max-height:264px;overflow-y:auto}
@@ -47,7 +49,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 #ctl-result:not(:empty){display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:var(--ok);color:#000}#ctl-result.bad{background:var(--bad)}
 .gauge{display:flex;align-items:center;gap:14px;margin:16px 0 22px;color:var(--light);text-transform:uppercase;font-size:16px}.gauge[hidden]{display:none}.gauge meter{flex:1;width:100%;height:14px;appearance:none;background:#000;border:2px solid var(--tan)}meter::-webkit-meter-bar{background:#000;border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--acc)}meter::-moz-meter-bar{background:var(--acc)}
 @media(max-width:1000px){.status-grid{grid-template-columns:1fr}}
-@media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}.metric .v{font-size:49px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
+@media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}.metric .v{font-size:49px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.facts{grid-template-columns:1fr;gap:2px 0}.facts dd{margin-bottom:6px}.facts dd.control select{width:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 /* #ifdef DEBUG_WEB */
 #debug-output{display:block;width:100%;height:55vh;resize:vertical;background:var(--bg);color:var(--fg);border:2px solid var(--violet);padding:12px;font:14px/1.4 monospace;white-space:pre}
@@ -86,7 +88,8 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 </section>
 <section id="dev" role="tabpanel" aria-labelledby="tab-dev" tabindex="0" hidden>
  <h2>02 / Device registry</h2>
- <div class="card"><div class="label">Paired device</div><div id="paired">none</div>
+ <div class="card device-card" id="card-input"><div class="label">Fitness device · input</div>
+  <dl class="facts" id="paired"><dt>Name</dt><dd id="p-name">none</dd><dt>Address</dt><dd id="p-address">–</dd><dt>Adapter</dt><dd id="p-adapter">–</dd></dl>
   <div class="label">Advertised services</div><div id="paired-advertised" class="service-pills"></div>
   <div class="label">Subscribed characteristics</div><div id="paired-subscriptions" class="service-pills"></div>
   <ul class="status-legend" aria-label="Bluetooth service color legend">
@@ -96,6 +99,25 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
    <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Subscription failed</li>
   </ul>
   <div class="row"><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
+ <div class="card device-card" id="card-bridge"><div class="label">Bridge · output</div>
+  <dl class="facts"><dt>BLE name (FTMS)</dt><dd id="b-name">–</dd><dt>ANT+ device number</dt><dd id="b-ant">–</dd>
+   <dt><label for="c-outputProtocol">Output format</label></dt><dd class="control"><select id="c-outputProtocol"><option value="ble-ftms">BLE FTMS</option><option value="ant-fec">ANT+ FE-C</option><option value="off">Off</option></select><button class="b" id="btn-output">Apply</button></dd></dl>
+  <p class="small" id="c-outputHint">ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.</p>
+  <div class="label" id="b-sent-label">Sent services / characteristics</div><div id="b-sent"></div>
+  <ul class="status-legend" aria-label="Bridge output color legend">
+   <li><span class="legend-swatch pill sensor" aria-hidden="true"></span>Service / ANT+ channel</li>
+   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Sending / subscribed / channel open</li>
+   <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Pending / not applied</li>
+  </ul>
+  <p class="small" id="b-note">BLE services and ANT+ channels are selected under Settings.</p></div>
+ <div class="card device-card" id="card-receiver"><div class="label">Receiving device · app / display</div>
+  <dl class="facts"><dt>Name</dt><dd id="r-name">–</dd><dt id="r-id-label">Address</dt><dd id="r-id">–</dd><dt>Protocol</dt><dd id="r-protocol">–</dd></dl>
+  <div class="label">Connection</div><div id="r-state" class="service-pills"></div>
+  <ul class="status-legend" aria-label="Receiving device color legend">
+   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Connected / has control</li>
+   <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Waiting / no control / output off</li>
+  </ul>
+  <p class="small" id="r-note"></p></div>
  <div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
   <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
   <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
@@ -118,8 +140,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 <section id="set" role="tabpanel" aria-labelledby="tab-set" tabindex="0" hidden>
  <h2>04 / System configuration</h2>
  <div class="card"><div class="label">Outputs</div>
-  <div class="row"><label for="c-outputProtocol">Output protocol</label><select id="c-outputProtocol"><option value="ble-ftms">BLE FTMS</option><option value="ant-fec">ANT+ FE-C</option><option value="off">Off</option></select></div>
-  <p class="small" id="c-outputHint">ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.</p>
+  <p class="small">The output format is selected under Devices → Bridge.</p>
   <div class="row"><label for="c-ftmsName">FTMS output name</label><input id="c-ftmsName" maxlength="20"></div>
   <div class="row"><label for="c-ftmsOutputProfile">Output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option><option value="step-climber">Step climber</option><option value="stair-climber">Stair climber</option></select></div>
   <p class="small">Every profile is sent with its native FTMS data characteristic or ANT+ FE-C equipment type. The dashboard shows the effective profile.</p>
@@ -158,7 +179,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
 "use strict";
 const $=id=>document.getElementById(id);
 let status={},scan={devices:[],adapters:[]},pending={};
-let serviceMasks={ftms:0,ant:0},antAvailable=false,configuredFtmsServices=0;
+let serviceMasks={ftms:0,ant:0},antAvailable=false,configuredFtmsServices=0,outputDirty=false,configuredOutput="ble-ftms";
 const outputServices={ftms:[["ftms","FTMS",1],["cps","CPS",2],["hr","HR",4],["csc","CSC",8],["rsc","RSC",16]],ant:[["fec","FE-C",1],["power","Power",2],["hr","HR",4],["speed-cadence","Speed / cadence",8],["sdm","Footpod",16]]};
 function outputEntries(kind){return kind==="ftms"?(status.ftmsOutput||{}).services||[]:(status.antOutput||{}).channels||[]}
 function outputEntry(kind,id){return outputEntries(kind).find(e=>e.id===id)}
@@ -180,12 +201,42 @@ function renderServiceControls(){
 }
 function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined&&text!==null)e.textContent=String(text);if(cls)e.className=cls;return e}
 function pill(text,kind){return el("span",text,"pill"+(kind?" "+kind:""))}
+function fact(id,value,na){const node=$(id);node.classList.toggle("na",!!na);fill(node,[typeof value==="string"?document.createTextNode(value):value])}
+function renderBridge(){
+ const f=status.ftmsOutput||{},a=status.antOutput||{},op=$("c-outputProtocol").value,applied=op===(status.outputProtocol||"ble-ftms");
+ fact("b-name",f.name?el("b",f.name):"–",!f.name);
+ fact("b-ant",a.deviceNumber?"#"+a.deviceNumber+(a.available?"":" · no ANT+ hardware"):"–",!a.deviceNumber||!a.available);
+ $("b-sent-label").textContent=op==="ant-fec"?"Sent ANT+ channels":"Sent services / characteristics";
+ let groups;
+ if(op==="ble-ftms")groups=(f.services||[]).filter(sv=>sv.enabled).map(sv=>{const kind=applied&&sv.active?"ok":"pending",svc=pill(sv.name+(sv.uuid?" · "+sv.uuid:""),"sensor");if(sv.uuid)svc.title=fullUuid(sv.uuid);
+  return[svc,...(sv.characteristics||[]).map(ch=>{const b=pill((ch.name||ch.uuid)+" ("+ch.uuid+") · "+String(ch.properties||"").toUpperCase(),kind);b.title=fullUuid(sv.uuid)+" / "+fullUuid(ch.uuid);return b})]});
+ else if(op==="ant-fec")groups=(a.channels||[]).filter(ch=>ch.enabled).map(ch=>{const open=applied&&ch.open;return[pill(ch.name,"sensor"),pill("device type "+ch.deviceType+" · device #"+(a.deviceNumber||0)+" · "+(open?"OPEN":"PENDING"),open?"ok":"pending")]});
+ else groups=[[pill("output off – nothing is sent","pending")]];
+ if(!groups.length)groups=[[pill("none","pending")]];
+ fill($("b-sent"),groups.map(items=>{const g=el("div",null,"service-pills service-group");g.append(...items);return g}));
+ $("b-note").textContent=applied?"BLE services and ANT+ channels are selected under Settings.":"Not applied yet: press Apply to switch the output format.";}
+function renderReceiver(){
+ const f=status.ftmsOutput||{},a=status.antOutput||{},op=status.outputProtocol||"ble-ftms";
+ if(op==="ble-ftms"){
+  fact("r-name",f.client?"not transmitted over BLE":"–",true);$("r-id-label").textContent="Address";
+  fact("r-id",f.clientAddress?f.clientAddress+" ("+(f.clientAddressType||"public")+")":"–",!f.clientAddress);fact("r-protocol","BLE FTMS");
+  fill($("r-state"),[pill(f.client?"app connected":f.advertising?"advertising – waiting for app":"not advertising",f.client?"ok":"pending"),pill(f.control?"app has control":"no app control",f.control?"ok":"pending")]);
+  $("r-note").textContent="BLE apps (Zwift, MyWhoosh, …) connect without sending a device name; phones often use a private random address.";
+ }else if(op==="ant-fec"){
+  fact("r-name",a.display?"ANT+ display / app":"–",!a.display);$("r-id-label").textContent="Device number";
+  fact("r-id",a.display?"not transmitted by ANT+ displays":"–",true);fact("r-protocol","ANT+ FE-C");
+  fill($("r-state"),[pill(a.display?"display connected":"waiting for display",a.display?"ok":"pending"),pill(a.control?"display has control":"no display control",a.control?"ok":"pending")]);
+  $("r-note").textContent="ANT+ displays listen to the bridge channel (device #"+(a.deviceNumber||0)+") and only acknowledge it; they send no device number of their own.";
+ }else{
+  fact("r-name","–",true);$("r-id-label").textContent="Address";fact("r-id","–",true);fact("r-protocol","Off");
+  fill($("r-state"),[pill("output off","pending")]);$("r-note").textContent="Select an output format under Bridge to connect an app or display.";
+ }}
 function uuidLabel(uuid){return /^0000[0-9a-f]{4}-0000-1000-8000-00805f9b34fb$/i.test(uuid)?uuid.slice(4,8):uuid}
 function fullUuid(uuid){const short=/^(?:0x)?([0-9a-f]{4})$/i.exec(uuid);return short?"0000"+short[1].toLowerCase()+"-0000-1000-8000-00805f9b34fb":uuid}
 function fill(node,items){node.replaceChildren(...items)}
 function toast(msg,ok){const t=$("toast");t.textContent=msg;t.className=ok===undefined?"":ok?"ok":"bad";t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",4000)}
 const tabs=Array.from(document.querySelectorAll('nav [role="tab"]'));
-function selectTab(b){tabs.forEach(t=>{const active=t===b;t.classList.toggle("active",active);t.setAttribute("aria-selected",String(active));t.tabIndex=active?0:-1;const panel=$(t.dataset.tab);panel.classList.toggle("active",active);panel.hidden=!active});if(b.dataset.tab==="set")loadConfig();
+function selectTab(b){tabs.forEach(t=>{const active=t===b;t.classList.toggle("active",active);t.setAttribute("aria-selected",String(active));t.tabIndex=active?0:-1;const panel=$(t.dataset.tab);panel.classList.toggle("active",active);panel.hidden=!active});if(b.dataset.tab==="set"||b.dataset.tab==="dev")loadConfig();
 // #ifdef DEBUG_WEB
  if(b.dataset.tab==="debug")loadDebug();
 // #endif
@@ -230,10 +281,10 @@ function renderStatus(s){
  else if(op==="ant-fec")fill($("s-out"),[pill("ANT+ FE-C",a.open?"ok":""),pill(a.stick?"stick: "+(a.hardware||"connected"):(a.available?"no ANT+ USB stick":"no ANT+ hardware"),a.stick?"ok":"warn"),pill("link: "+(a.link||"-")),pill("device #"+(a.deviceNumber||0)),pill("profile: "+(a.profile||"bike")),pill(a.display?"display connected":"no display",a.display?"ok":""),pill(a.control?"display has control":"no display control")]);
  else fill($("s-out"),[pill("off")]);
  const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
- const p=i.paired;fill($("paired"),p?[el("b",p.name||"(no name)")," ",el("span",p.address+" ("+p.addressType+") · "+p.adapter,"small")]:[el("span","none – scan and pair a device")]);
+ const p=i.paired;fact("p-name",p?el("b",p.name||"(no name)"):"none – scan and pair a device",!p);fact("p-address",p?p.address+" ("+p.addressType+")":"–",!p);fact("p-adapter",p?p.adapter:"–",!p);
  fill($("paired-advertised"),p&&(p.advertisedServices||[]).length?p.advertisedServices.map(uuid=>{const b=pill((p.advertisedServiceNames||{})[uuid]||uuidLabel(uuid),"sensor");b.title=fullUuid(uuid);return b}):[pill("none reported","pending")]);
  fill($("paired-subscriptions"),p&&(p.subscriptions||[]).length?p.subscriptions.map(sub=>{const b=pill((sub.name||sub.service)+" · "+(sub.characteristicName?sub.characteristicName+" ("+uuidLabel(sub.characteristic)+")":uuidLabel(sub.characteristic))+" · "+(sub.indicate?"INDICATE":"NOTIFY")+" · "+sub.state+(sub.reason?" ("+sub.reason+")":""),sub.state==="ok"||sub.state==="subscribed"?"ok":sub.state==="failed"?"bad":"pending");b.title=fullUuid(sub.service)+" / "+fullUuid(sub.characteristic);return b}):[pill("none","pending")]);
- renderServiceControls();
+ renderServiceControls();renderBridge();renderReceiver();
  $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
  $("unsaved").textContent=s.unsaved?"unsaved changes":"saved";$("fw").textContent=s.version||"";
  $("btn-scan").disabled=!i.bleAvailable;}
@@ -254,21 +305,23 @@ function renderScan(sc){
 let cfgHttps=location.protocol==="https:";
 function renderConfig(c){
  $("c-ftmsName").value=c.ftmsName||"";$("c-simulatedTrainer").checked=!!c.simulatedTrainer;
- const fec=$("c-outputProtocol").querySelector('option[value="ant-fec"]');fec.disabled=!c.antAvailable;$("c-outputProtocol").value=c.outputProtocol||"ble-ftms";
+ const fec=$("c-outputProtocol").querySelector('option[value="ant-fec"]');fec.disabled=!c.antAvailable;configuredOutput=c.outputProtocol||"ble-ftms";if(!outputDirty)$("c-outputProtocol").value=configuredOutput;
  fec.hidden=!c.antAvailable;antAvailable=!!c.antAvailable;configuredFtmsServices=c.ftmsOutputServices||0;serviceMasks={ftms:configuredFtmsServices,ant:c.antOutputServices||0};renderServiceControls();
  $("c-outputHint").textContent=c.antAvailable?"ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.":"ANT+ FE-C is not available on this hardware.";
  cfgHttps=c.https!==false;$("c-https").checked=cfgHttps;
- $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";
+ $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";renderBridge();
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
  $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
  $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}
  async function loadConfig(){try{renderConfig(await(await fetch("/api/config")).json())}catch(e){toast("could not load settings",false)}}
 $("btn-scan").onclick=()=>run("scan",{seconds:30},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
 $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run("disconnect");$("btn-sim").onclick=()=>run("simulate");
+$("c-outputProtocol").onchange=()=>{outputDirty=$("c-outputProtocol").value!==configuredOutput;renderBridge()};
+$("btn-output").onclick=async()=>{const r=await run("config",{outputProtocol:$("c-outputProtocol").value,save:true});if(r&&r.ok){outputDirty=false;loadConfig()}};
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
 $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
  const r=await run("control",{control:$("ctl-kind").value,value:v},true);if(r){$("ctl-result").textContent=r.message;$("ctl-result").className="small "+(r.ok?"ok":"bad")}};
-$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,outputProtocol:$("c-outputProtocol").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ftmsOutputServices:serviceMasks.ftms,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
+$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ftmsOutputServices:serviceMasks.ftms,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
 if(antAvailable)b.antOutputServices=serviceMasks.ant;
  b.https=$("c-https").checked;
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
@@ -334,7 +387,7 @@ function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss:/
 // #ifdef DEBUG_WEB
  ws.onopen=()=>{if(!$("debug").hidden)loadDebug()};
 // #endif
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select,#set button"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m);
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select,#set button,#c-outputProtocol"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m);
 // #ifdef DEBUG_WEB
   if(m.type==="debug")renderDebug(m);
 // #endif
@@ -342,6 +395,7 @@ function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss:/
  ws.onclose=()=>{$("conn").textContent="offline";$("conn").className="pill bad";setTimeout(connectWs,2000)}}
 fetch("/api/status").then(r=>r.json()).then(s=>{if(s.type)renderStatus(s)}).catch(()=>{});
 fetch("/api/scan/results").then(r=>r.json()).then(s=>{if(s.devices)renderScan(s)}).catch(()=>{});
+fetch("/api/config").then(r=>r.json()).then(c=>{if(c.type)renderConfig(c)}).catch(()=>{});
 connectWs();
 </script>
 </body>
