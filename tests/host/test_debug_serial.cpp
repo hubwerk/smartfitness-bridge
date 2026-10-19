@@ -324,6 +324,7 @@ void testConcurrentProducers() {
 }  // namespace
 
 void testDebugBle();
+void testDebugAnt();
 
 int main() {
     testMountAndBoot();
@@ -357,6 +358,28 @@ int main() {
     assert(fake::file.find("[BLE-IN] stats: notifications=") != std::string::npos);
     assert(fake::file.find("[BLE-IN] data stale") != std::string::npos);
     assert(fake::file.find("[BLE-IN] data fresh") != std::string::npos);
+    assert(fake::file == Serial.output);
+    reset();
+    debugweb::begin();
+    testDebugAnt();
+    pump();
+    assert(lost == 0);
+    assert(fake::file.find("[ANT-IN] #1 +0 ms ch=- msg=0x6f len=1: 20") != std::string::npos);
+    assert(fake::file.find("+25 ms ch=0 device=1 type=17 msg=0x4f len=9: 00 31 ff ff ff ff ff 20 03 page=49 targetPower=200.00") != std::string::npos);
+    assert(fake::file.find("[ANT-OUT] ch=0 device=1 type=17 msg=0x4e len=9:") != std::string::npos);
+    assert(fake::file.find("page=16 speed=18.00 km/h hr=120.00") != std::string::npos);
+    assert(fake::file.find("page=25 power=150.00 W cadence=80.00 rpm") != std::string::npos);
+    assert(fake::file.find("page=71 commandPage=49 sequence=0 status=pass(0x00) tx=accepted") != std::string::npos);
+    assert(fake::file.find("[ANT-CP] requested page=49 targetPower=200.00") != std::string::npos);
+    assert(fake::file.find("[ANT-CP] page=49 result=pass(0x00) command-status recorded") != std::string::npos);
+    assert(fake::file.find("responseTo=0x01 result=0x05 (radio transfer event, not trainer acceptance)") != std::string::npos);
+    assert(fake::file.find("tx=failed") != std::string::npos);
+    assert(fake::file.find("decode=failed (truncated page)") != std::string::npos);
+    assert(fake::file.find("ch=- msg=0x99 len=1: ab") != std::string::npos);
+    assert(fake::file.find("[ANT-IN] stats: messages=") != std::string::npos);
+    assert(fake::file.find("/5100 ms dropped=1 writeErrors=1 radioErrors=1 lastData=5075 ms stale=1") != std::string::npos);
+    assert(fake::file.find("msg=0x46 len=9: <network key redacted>") != std::string::npos);
+    assert(fake::file.find("b9 a5 21 fb") == std::string::npos);
     assert(fake::file == Serial.output);
     reset();
     std::cout << "debug serial tests passed\n";

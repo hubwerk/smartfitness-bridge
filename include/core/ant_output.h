@@ -74,6 +74,18 @@ private:
     void closeChannel();
     std::uint32_t now() const;
 
+#if defined(ARDUINO) && defined(DEBUG_WEB)
+    void logMessage(const char* direction, std::uint8_t id, const std::uint8_t* payload,
+                    std::size_t length, const char* result = "");
+    void logStats(std::uint32_t timestamp);
+    std::uint32_t debugSequence_ = 0;
+    std::uint32_t debugLastEventMs_ = 0;
+    std::uint32_t debugWindowMs_ = 0;
+    std::uint32_t debugMessages_ = 0;
+    std::uint32_t debugWriteErrors_ = 0;
+    std::uint32_t debugRadioErrors_ = 0;
+#endif
+
     smartfitness::ant::AntTransport* transport_ = nullptr;
     smartfitness::ant::MessageParser parser_;
     smartfitness::ant::fec::Encoder encoder_;
