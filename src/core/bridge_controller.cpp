@@ -470,6 +470,14 @@ StatusView BridgeController::statusView() const {
     ftms.name = ftms_.deviceName();
     ftms.advertising = ftms_.advertising();
     ftms.client = ftms_.clientConnected();
+    std::array<std::uint8_t, 6> clientBytes{};
+    std::uint8_t clientType = 0;
+    if (ftms.client && ftms_.clientAddress(clientBytes, clientType)) {
+        ble::BleAddress client;
+        client.bytes = clientBytes;
+        ftms.clientAddress = client.toString();
+        ftms.clientRandomAddress = clientType != 0;
+    }
     ftms.control = ftms_.controlGranted();
     ftms.restartRequired = ftms_.restartRequired();
     auto& ant = view.antOutput;

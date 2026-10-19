@@ -91,6 +91,10 @@ struct FtmsOutputView {
     std::string name;
     bool advertising = false;
     bool client = false;
+    // Connected client ("aa:bb:cc:dd:ee:ff"); empty without a client. BLE
+    // centrals do not advertise a name to the peripheral, so none is shown.
+    std::string clientAddress;
+    bool clientRandomAddress = false;
     bool control = false;
     bool restartRequired = false;
     std::vector<OutputServiceView> services;

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <utility>
+#include "bridge/output_gatt.hpp"
 
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -580,23 +581,27 @@ bool FtmsOutput::transportBegin() {
         }
         if (index == 0 || index == 2) {
             auto* location = sensor->createCharacteristic(
-                NimBLEUUID(static_cast<std::uint16_t>(0x2A5D)), NIMBLE_PROPERTY::READ);
+                NimBLEUUID(gatt::kSensorLocation), NIMBLE_PROPERTY::READ);
             location->setValue(ftms::Bytes{0});  // Other: virtual sensor has no physical location.
         }
         if (index == 2) {
             transport->cscControl = sensor->createCharacteristic(
-                NimBLEUUID(static_cast<std::uint16_t>(0x2A55)), NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::INDICATE);
+                NimBLEUUID(gatt::kScControlPoint), NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::INDICATE);
             transport->cscControl->setCallbacks(transport.get());
         }
         sensor->start();
     };
     const auto& capabilities = trainerState().capabilities;
     if (appliedServices_ & ble::kCps)
-        addSensor(0, 0x1818, 0x2A63, 0x2A65, sensorEncoder_.cyclingPowerFeature(capabilities, trainerState().profile));
-    if (appliedServices_ & ble::kHr) addSensor(1, 0x180D, 0x2A37, 0, {});
+        addSensor(0, gatt::kCyclingPowerService, gatt::kCyclingPowerMeasurement, gatt::kCyclingPowerFeature,
+                  sensorEncoder_.cyclingPowerFeature(capabilities, trainerState().profile));
+    if (appliedServices_ & ble::kHr) addSensor(1, gatt::kHeartRateService, gatt::kHeartRateMeasurement, 0, {});
     if (appliedServices_ & ble::kCsc)
-        addSensor(2, 0x1816, 0x2A5B, 0x2A5C, sensorEncoder_.cyclingSpeedCadenceFeature(capabilities, trainerState().profile));
-    if (appliedServices_ & ble::kRsc) addSensor(3, 0x1814, 0x2A53, 0x2A54, ble::SensorEncoder::runningFeature());
+        addSensor(2, gatt::kCyclingSpeedCadenceService, gatt::kCscMeasurement, gatt::kCscFeature,
+                  sensorEncoder_.cyclingSpeedCadenceFeature(capabilities, trainerState().profile));
+    if (appliedServices_ & ble::kRsc)
+        addSensor(3, gatt::kRunningSpeedCadenceService, gatt::kRscMeasurement, gatt::kRscFeature,
+                  ble::SensorEncoder::runningFeature());
     transport_ = std::move(transport);
     transportConfigureAdvertising();
     return true;
@@ -614,7 +619,8 @@ void FtmsOutput::transportConfigureAdvertising() {
     NimBLEAdvertisementData primary;
     primary.setFlags(0x06);
     std::vector<NimBLEUUID> uuids{NimBLEUUID(ftms::kServiceUuid)};
-    const std::uint16_t sensorUuids[]{0x1818, 0x180D, 0x1816, 0x1814};
+    const std::uint16_t sensorUuids[]{gatt::kCyclingPowerService, gatt::kHeartRateService,
+                                      gatt::kCyclingSpeedCadenceService, gatt::kRunningSpeedCadenceService};
     for (std::size_t index = 0; index < 4; ++index)
         if (services() & (2U << index)) uuids.emplace_back(sensorUuids[index]);
     primary.setCompleteServices16(uuids);

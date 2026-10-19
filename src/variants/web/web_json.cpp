@@ -2,7 +2,9 @@
 
 #include <ArduinoJson.h>
 #include <cmath>
+#include <cstdio>
 
+#include "bridge/output_gatt.hpp"
 #include "bridge_commands.h"
 #include "service_names.h"
 
@@ -19,6 +21,18 @@ void addMetric(JsonObject object, const char* key, const StatusView& status, Met
     const auto& sample = status.metric(metric);
     if (sample.valid) object[key] = std::round(static_cast<double>(sample.value) * 10.0) / 10.0;
     else object[key] = nullptr;
+}
+
+std::string uuid16(std::uint16_t uuid) {
+    char text[5];
+    std::snprintf(text, sizeof(text), "%04x", static_cast<unsigned>(uuid));
+    return text;
+}
+
+std::uint8_t outputServiceBit(const std::string& id) {
+    for (std::uint8_t bit = kOutputServiceDefault; bit <= kOutputServiceRunningSpeedCadence; bit <<= 1)
+        if (id == outputServiceId(bit)) return bit;
+    return 0;
 }
 }  // namespace
 
@@ -104,6 +118,12 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
     ftms["name"] = out.name;
     ftms["advertising"] = out.advertising;
     ftms["client"] = out.client;
+    if (out.clientAddress.empty()) {
+        ftms["clientAddress"] = nullptr;
+    } else {
+        ftms["clientAddress"] = out.clientAddress;
+        ftms["clientAddressType"] = out.clientRandomAddress ? "random" : "public";
+    }
     ftms["control"] = out.control;
     ftms["restartRequired"] = out.restartRequired;
     JsonArray services = ftms["services"].to<JsonArray>();
@@ -114,6 +134,15 @@ std::string statusJson(const StatusView& status, const NetworkStatus& network) {
         service["enabled"] = entry.enabled;
         service["available"] = entry.available;
         service["active"] = entry.active;
+        const auto bit = outputServiceBit(entry.id);
+        if (const auto uuid = outputServiceUuid(bit)) service["uuid"] = uuid16(uuid);
+        JsonArray characteristics = service["characteristics"].to<JsonArray>();
+        for (const auto& characteristic : outputCharacteristics(bit, out.profile)) {
+            JsonObject item = characteristics.add<JsonObject>();
+            item["uuid"] = uuid16(characteristic.uuid);
+            item["name"] = characteristicName(ble::Uuid::from16(characteristic.uuid));
+            item["properties"] = characteristic.properties;
+        }
     }
     const auto& antView = status.antOutput;
     JsonObject ant = document["antOutput"].to<JsonObject>();
