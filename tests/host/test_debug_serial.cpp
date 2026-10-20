@@ -20,6 +20,7 @@ void reset() {
     std::memset(queueToSerial, 0, sizeof(queueToSerial));
     absoluteStart = absoluteEnd = lost = 0;
     writable = started = serialOnly = false;
+    fileLogging = true;
     fake::isr = false;
     fake::mounted = true;
     fake::mutexAllocations = fake::mutexAllocationFailAt = 0;
@@ -321,6 +322,37 @@ void testConcurrentProducers() {
         }
     }
 }
+void testStopLogging() {
+    reset();
+    debugweb::begin();
+    assert(debugweb::loggingEnabled());
+    writeText("before\n");
+    fake::emit("[IDF] before\n");
+    debugweb::setLoggingEnabled(false);
+    assert(!debugweb::loggingEnabled());
+    writeText("console only\n");
+    fake::emit("[IDF] hidden\n");
+    pump();
+    assert(fake::file == "before\n[IDF] before\n[Debug] logging stopped via web interface\n");
+    assert(Serial.output.find("console only\n") != std::string::npos);
+    assert(Serial.output.find("[IDF] hidden\n") != std::string::npos);
+    const auto endWhileStopped = absoluteEnd;
+    debugweb::setLoggingEnabled(false);  // Idempotent: no second marker.
+    writeText(std::string(kQueueBytes + 10, 's'));  // Losses are reported on Serial only.
+    pump();
+    assert(absoluteEnd == endWhileStopped);
+    assert(Serial.output.find("LOST OUTPUT: 10") != std::string::npos);
+    char data[8];
+    assert(debugweb::readChunk(endWhileStopped, data, sizeof(data)).size == 0);
+
+    debugweb::setLoggingEnabled(true);
+    writeText("after\n");
+    pump();
+    assert(fake::file.substr(endWhileStopped) == "[Debug] logging resumed via web interface\nafter\n");
+    assert(fake::file.find("console only") == std::string::npos);
+    assert(fake::file.find("[IDF] hidden") == std::string::npos);
+    assert(fake::file.find("sss") == std::string::npos);
+}
 }  // namespace
 
 void testDebugBle();
@@ -335,6 +367,7 @@ int main() {
     testInitializationFallback();
     testEspLogForwarding();
     testConcurrentProducers();
+    testStopLogging();
     reset();
     debugweb::begin();
     testDebugBle();

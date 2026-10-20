@@ -681,6 +681,8 @@ def check_debug(browser, output, name, width, height):
     history = b"[Boot] ready\n"
     end = len(history)
     during_load = None
+    logging_enabled = True
+    logging_posts = []
 
     def push(data, start, reset=False):
         sockets[0].send(json.dumps({"type": "debug", "start": start,
@@ -692,10 +694,17 @@ def check_debug(browser, output, name, width, height):
         ws.send(json.dumps(STATUS))
 
     def route(request_route):
-        nonlocal during_load
+        nonlocal during_load, logging_enabled
         path = urlparse(request_route.request.url).path
         requests.append(path)
-        if path == "/":
+        if path == "/debug/logging":
+            assert request_route.request.method == "POST"
+            assert request_route.request.headers["content-type"] == "application/json"
+            body = json.loads(request_route.request.post_data)
+            logging_posts.append(body)
+            logging_enabled = body["enabled"]
+            request_route.fulfill(json={"enabled": logging_enabled})
+        elif path == "/":
             request_route.fulfill(body=web_content(True), content_type="text/html")
         elif path == "/debug/log":
             if during_load:
@@ -703,6 +712,7 @@ def check_debug(browser, output, name, width, height):
                 during_load = None
             request_route.fulfill(body=history, content_type="text/plain; charset=utf-8",
                                   headers={"X-Debug-End": str(end),
+                                           "X-Debug-Logging": "on" if logging_enabled else "off",
                                            "Content-Disposition": 'attachment; filename="debug.log"'})
         else:
             fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": CONFIG}
@@ -764,10 +774,27 @@ def check_debug(browser, output, name, width, height):
     page.locator("#tab-dash").click()
     page.locator("#tab-debug").click()
     expect(box).to_have_value(history.decode())
+    toggle, state = page.locator("#btn-debug-logging"), page.locator("#debug-state")
+    expect(toggle).to_have_text("Logging stoppen")
+    expect(toggle).to_have_attribute("aria-pressed", "false")
+    toggle.click()
+    expect(toggle).to_have_text("Logging fortsetzen")
+    expect(toggle).to_have_attribute("aria-pressed", "true")
+    expect(state).to_contain_text("Logging gestoppt")
+    assert logging_posts == [{"enabled": False}]
+    page.locator("#tab-dash").click()
+    page.locator("#tab-debug").click()  # history reload keeps the stopped state
+    expect(box).to_have_value(history.decode())
+    expect(toggle).to_have_text("Logging fortsetzen")
+    expect(state).to_contain_text("Logging gestoppt")
+    toggle.click()
+    expect(toggle).to_have_text("Logging stoppen")
+    expect(state).to_have_text("")
+    assert logging_posts == [{"enabled": False}, {"enabled": True}]
     assert not errors, f"Debug browser errors: {errors}"
     context.close()
     print(f"{name}: debug gating, history race, push/UTF-8/plain text, deduplication,"
-          " rotation, gap recovery, download, clear, scroll and no polling passed")
+          " rotation, gap recovery, download, stop/resume logging, clear, scroll and no polling passed")
 
 
 def main():
@@ -782,7 +809,7 @@ def main():
     args = parser.parse_args()
     normal, debug = web_content(), web_content(True)
     assert "DEBUG_WEB" not in normal and "DEBUG_WEB" not in debug
-    for marker in ("/debug/log", "debug-output", "renderDebug", "tab-debug"):
+    for marker in ("/debug/log", "debug-output", "renderDebug", "tab-debug", "btn-debug-logging"):
         assert marker not in normal and marker in debug, f"Conditional asset leak: {marker}"
     if not args.before_asset:
         assert not re.search(r"(?:linear|radial|conic)-gradient\(", ASSET.read_text(), re.I), \
