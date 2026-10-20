@@ -164,6 +164,7 @@ struct WebPortal::Impl {
             httpd_resp_set_hdr(request, "Content-Disposition", "attachment; filename=\"debug.log\"");
             response.offset = std::to_string(end);
             httpd_resp_set_hdr(request, "X-Debug-End", response.offset.c_str());
+            httpd_resp_set_hdr(request, "X-Debug-Logging", debugweb::loggingEnabled() ? "on" : "off");
             return true;
         }
         response.started = true;
@@ -175,6 +176,32 @@ struct WebPortal::Impl {
         if (!debugweb::streamLog(logSink, &response))
             return response.started ? ESP_FAIL : sendJson(request, 503, "{\"error\":\"debug log unavailable\"}");
         return httpd_resp_send_chunk(request, nullptr, 0);
+    }
+
+    // {"enabled":false} stops file logging (and the web output); true resumes it.
+    static esp_err_t debugLogging(httpd_req_t* request) {
+        std::string contentType;
+        std::string origin;
+        header(request, "Content-Type", contentType);
+        const bool hasOrigin = header(request, "Origin", origin);
+        const int policy = web::postRequestStatus(contentType, hasOrigin, origin, staIp(), apIp(),
+                                                  hasHeader(request, "Transfer-Encoding"), secureWeb);
+        if (policy != 200) {
+            return reject(request, policy, policy == 415 ? "{\"error\":\"Content-Type must be application/json\"}" :
+                policy == 403 ? "{\"error\":\"foreign origin\"}" : "{\"error\":\"chunked bodies not supported\"}");
+        }
+        if (request->content_len > ApiExchange::kMaxBodySize)
+            return reject(request, 413, "{\"error\":\"request body too large\"}");
+        std::string body;
+        if (readBody(request, body) != 200) {
+            sendJson(request, 400, "{\"error\":\"incomplete or invalid body\"}");
+            return ESP_FAIL;
+        }
+        JsonDocument document;
+        if (deserializeJson(document, body) || !document["enabled"].is<bool>())
+            return sendJson(request, 400, "{\"error\":\"expected {\\\"enabled\\\":true|false}\"}");
+        debugweb::setLoggingEnabled(document["enabled"].as<bool>());
+        return sendJson(request, 200, debugweb::loggingEnabled() ? "{\"enabled\":true}" : "{\"enabled\":false}");
     }
 
     void publishDebug() {
@@ -350,6 +377,7 @@ struct WebPortal::Impl {
             {"/api/*", HTTP_POST, apiPost, this, false, false, nullptr},
 #ifdef DEBUG_WEB
             {"/debug/log", HTTP_GET, debugLog, this, false, false, nullptr},
+            {"/debug/logging", HTTP_POST, debugLogging, this, false, false, nullptr},
 #endif
         };
         for (const httpd_uri_t& handler : handlers) httpd_register_uri_handler(server, &handler);
