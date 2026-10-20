@@ -177,7 +177,7 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
  <h2>05 / Debug</h2>
  <div class="card"><label for="debug-output" class="label">Debug-Output · max. 512 KB · gelöscht beim Neustart</label>
  <textarea id="debug-output" readonly spellcheck="false"></textarea></div>
- <div class="row"><button class="b" id="btn-debug-download">Logfile herunterladen</button><button class="b sec" id="btn-debug-clear">Anzeige leeren</button><span id="debug-state" class="small" role="status"></span></div>
+ <div class="row"><button class="b" id="btn-debug-download">Logfile herunterladen</button><button class="b sec" id="btn-debug-clear">Anzeige leeren</button><button class="b danger" id="btn-debug-logging" aria-pressed="false">Logging stoppen</button><span id="debug-state" class="small" role="status"></span></div>
 </section>
 <!-- #endif -->
 </main>
@@ -379,11 +379,16 @@ async function loadDebug(){
  if(debugLoading)return;debugLoading=true;debugQueue=[];debugQueuedBytes=0;debugOverflow=false;
  try{const response=await fetch("/debug/log",{cache:"no-store"});if(!response.ok)throw new Error("HTTP "+response.status);
   const offset=response.headers.get("X-Debug-End"),end=Number(offset);if(offset===null||!Number.isSafeInteger(end)||end<0)throw new Error("invalid log offset");
-  const bytes=new Uint8Array(await response.arrayBuffer());debugDecoder.decode();debugText(debugDecoder.decode(bytes,{stream:true}),true);debugEnd=end;$("debug-state").textContent="";
+  const bytes=new Uint8Array(await response.arrayBuffer());debugDecoder.decode();debugText(debugDecoder.decode(bytes,{stream:true}),true);debugEnd=end;debugLogging(response.headers.get("X-Debug-Logging")!=="off");
  }catch(e){$("debug-state").textContent="Log nicht verfügbar: "+e.message}
  finally{debugLoading=false;const queued=debugQueue;debugQueue=[];for(const message of queued)renderDebug(message);if(debugOverflow&&!debugLoading)loadDebug()}
 }
 $("btn-debug-clear").onclick=()=>debugText("",true);
+function debugLogging(enabled){const b=$("btn-debug-logging");b.textContent=enabled?"Logging stoppen":"Logging fortsetzen";b.className=enabled?"b danger":"b";b.setAttribute("aria-pressed",String(!enabled));$("debug-state").textContent=enabled?"":"Logging gestoppt – keine neuen Einträge im Logfile"}
+$("btn-debug-logging").onclick=async()=>{const b=$("btn-debug-logging"),enabled=b.getAttribute("aria-pressed")==="true";b.disabled=true;
+ try{const response=await fetch("/debug/logging",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});const j=await response.json();if(!response.ok)throw new Error(j.error||"HTTP "+response.status);debugLogging(j.enabled)}
+ catch(e){$("debug-state").textContent="Umschalten fehlgeschlagen: "+e.message}
+ finally{b.disabled=false}};
 $("btn-debug-download").onclick=async()=>{
  try{const response=await fetch("/debug/log",{cache:"no-store"});if(!response.ok)throw new Error("HTTP "+response.status);
   const url=URL.createObjectURL(await response.blob()),link=el("a");link.href=url;link.download="debug.log";document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);

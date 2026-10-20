@@ -16,6 +16,10 @@ struct Chunk {
 Chunk readChunk(std::uint64_t offset, char* data, std::size_t capacity);
 using LogSink = bool (*)(const char*, std::size_t, std::uint64_t, void*);
 bool streamLog(LogSink sink, void* context);
+// Stops/resumes file logging (and thus the web output) at runtime; the Serial
+// console is unaffected. Logging is enabled again after every reboot.
+void setLoggingEnabled(bool enabled);
+bool loggingEnabled();
 }  // namespace debugweb
 
 #ifdef ARDUINO

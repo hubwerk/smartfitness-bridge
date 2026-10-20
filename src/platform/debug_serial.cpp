@@ -9,6 +9,7 @@
 #include <freertos/task.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -22,6 +23,9 @@ constexpr char kPath[] = "/debug.log";
 // Headroom for raw BLE + decoded telemetry bursts and short log downloads.
 constexpr std::size_t kQueueBytes = 16 * 1024;
 constexpr std::size_t kBlockBytes = 1024;
+// Per-byte destination flags of the queued output.
+constexpr std::uint8_t kToSerial = 1;
+constexpr std::uint8_t kToFile = 2;
 std::uint8_t queue[kQueueBytes];
 std::uint8_t queueToSerial[kQueueBytes];
 std::size_t head = 0;
@@ -37,6 +41,9 @@ std::uint64_t absoluteEnd = 0;
 bool writable = false;
 bool started = false;
 bool serialOnly = false;
+// Cleared from the web interface: no further file entries (and thus no web
+// output); the Serial console keeps working. Not persisted across reboots.
+std::atomic<bool> fileLogging{true};
 vprintf_like_t uartVprintf = nullptr;
 thread_local bool inDebugVprintf = false;
 
@@ -194,6 +201,27 @@ void append(const std::uint8_t* data, std::size_t size) {
     }
 }
 
+std::size_t enqueue(const std::uint8_t* data, std::size_t size, std::uint8_t flags) {
+    portENTER_CRITICAL(&queueMux);
+    const std::size_t count = std::min(size, kQueueBytes - queued);
+    const std::size_t tail = (head + queued) % kQueueBytes;
+    const std::size_t first = std::min(count, kQueueBytes - tail);
+    std::memcpy(queue + tail, data, first);
+    std::memcpy(queue, data + first, count - first);
+    std::memset(queueToSerial + tail, flags, first);
+    std::memset(queueToSerial, flags, count - first);
+    queued += count;
+    lost += size - count;
+    portEXIT_CRITICAL(&queueMux);
+    if (workerTask) xTaskNotifyGive(workerTask);
+    return count;
+}
+
+std::uint8_t outputFlags(bool toSerial) {
+    return static_cast<std::uint8_t>((toSerial ? kToSerial : 0) |
+                                     (fileLogging.load(std::memory_order_relaxed) ? kToFile : 0));
+}
+
 void worker(void*) {
     std::uint8_t block[kBlockBytes];
     for (;;) {
@@ -210,9 +238,9 @@ void worker(void*) {
         while (remaining) {
             portENTER_CRITICAL(&queueMux);
             std::size_t count = std::min(remaining, sizeof(block));
-            const bool toSerial = queueToSerial[head] != 0;
+            const std::uint8_t flags = queueToSerial[head];
             for (std::size_t index = 1; index < count; ++index) {
-                if ((queueToSerial[(head + index) % kQueueBytes] != 0) != toSerial) {
+                if (queueToSerial[(head + index) % kQueueBytes] != flags) {
                     count = index;
                     break;
                 }
@@ -223,15 +251,16 @@ void worker(void*) {
             head = (head + count) % kQueueBytes;
             queued -= count;
             portEXIT_CRITICAL(&queueMux);
-            if (toSerial) serialWrite(block, count);
-            append(block, count);
+            if (flags & kToSerial) serialWrite(block, count);
+            if (flags & kToFile) append(block, count);
             remaining -= count;
         }
         if (dropped) {
             char marker[100];
             const std::size_t count = lossMarker(marker, dropped);
             serialWrite(marker, count);
-            append(reinterpret_cast<const std::uint8_t*>(marker), count);
+            if (fileLogging.load(std::memory_order_relaxed))
+                append(reinterpret_cast<const std::uint8_t*>(marker), count);
         }
         Lock lock(fsMutex);
         if (lock && logFile) logFile.flush();
@@ -249,38 +278,14 @@ std::size_t DebugSerial::write(const std::uint8_t* data, std::size_t size) {
     if (rejectIsr()) return 0;
     if (!data || !size) return 0;
     if (serialOnly) return fallbackWrite(data, size);
-    portENTER_CRITICAL(&queueMux);
-    const std::size_t count = std::min(size, kQueueBytes - queued);
-    const std::size_t tail = (head + queued) % kQueueBytes;
-    const std::size_t first = std::min(count, kQueueBytes - tail);
-    std::memcpy(queue + tail, data, first);
-    std::memcpy(queue, data + first, count - first);
-    std::memset(queueToSerial + tail, 1, first);
-    std::memset(queueToSerial, 1, count - first);
-    queued += count;
-    lost += size - count;
-    portEXIT_CRITICAL(&queueMux);
-    if (workerTask) xTaskNotifyGive(workerTask);
-    return count;
+    return enqueue(data, size, outputFlags(true));
 }
 
 std::size_t DebugSerial::writeLog(const std::uint8_t* data, std::size_t size) {
     if (rejectIsr()) return 0;
     if (!data || !size) return 0;
-    if (serialOnly) return size;
-    portENTER_CRITICAL(&queueMux);
-    const std::size_t count = std::min(size, kQueueBytes - queued);
-    const std::size_t tail = (head + queued) % kQueueBytes;
-    const std::size_t first = std::min(count, kQueueBytes - tail);
-    std::memcpy(queue + tail, data, first);
-    std::memcpy(queue, data + first, count - first);
-    std::memset(queueToSerial + tail, 0, first);
-    std::memset(queueToSerial, 0, count - first);
-    queued += count;
-    lost += size - count;
-    portEXIT_CRITICAL(&queueMux);
-    if (workerTask) xTaskNotifyGive(workerTask);
-    return count;
+    if (serialOnly || !fileLogging.load(std::memory_order_relaxed)) return size;
+    return enqueue(data, size, kToFile);
 }
 
 std::size_t DebugSerial::printf(const char* format, ...) {
@@ -325,6 +330,19 @@ void begin() {
     uartVprintf = esp_log_set_vprintf(debugVprintf);
     esp_log_level_set("*", static_cast<esp_log_level_t>(DEBUG_WEB_IDF_LEVEL));
 }
+
+void setLoggingEnabled(bool enabled) {
+    if (rejectIsr()) return;
+    static constexpr char kStopped[] = "[Debug] logging stopped via web interface\n";
+    static constexpr char kResumed[] = "[Debug] logging resumed via web interface\n";
+    if (fileLogging.load() == enabled) return;
+    // The stop marker is the last file entry; the resume marker the first one.
+    if (!enabled) debugSerial.write(reinterpret_cast<const std::uint8_t*>(kStopped), sizeof(kStopped) - 1);
+    fileLogging.store(enabled);
+    if (enabled) debugSerial.write(reinterpret_cast<const std::uint8_t*>(kResumed), sizeof(kResumed) - 1);
+}
+
+bool loggingEnabled() { return fileLogging.load(); }
 
 Chunk readChunk(std::uint64_t offset, char* data, std::size_t capacity) {
     Chunk result;

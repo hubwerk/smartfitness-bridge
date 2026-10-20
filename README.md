@@ -122,6 +122,10 @@ and ESP-IDF logs in the **Debug** tab. The tab loads the current log
 when opened and receives new output over the existing WebSocket (no polling).
 **Logfile herunterladen** downloads `/debug/log` as `debug.log`;
 **Anzeige leeren** only clears the browser display.
+**Logging stoppen** (`POST /debug/logging` with `{"enabled":false}`) stops the
+Debug-tab output and writes no further entries to `/debug.log` until
+**Logging fortsetzen** is pressed; the Serial console keeps logging. The stop and
+resume are marked in the log, and logging is enabled again after every reboot.
 The output includes state changes for BLE input, FTMS/ANT output, bridge source
 and output selection, Wi-Fi, executed API commands, and WebSocket clients.
 With `DEBUG_WEB`, every BLE input notification/indication is logged in the main
