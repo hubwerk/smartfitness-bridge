@@ -98,8 +98,15 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
    <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Pending / none reported</li>
    <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Subscription failed</li>
   </ul>
-  <div class="row"><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
- <div class="card device-card" id="card-bridge"><div class="label">Bridge · output</div>
+  <div class="row">--><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
+    <div class="label">Scan for Fitness devices · input</div>
+  <div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span>
+   <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
+   <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
+  <ul class="status-legend" aria-label="Bluetooth scan color legend">
+   <li><span class="legend-swatch gray" aria-hidden="true"></span>Unrelated device / unnamed device</li>
+  </ul>
+  <div class="card device-card" id="card-bridge"><div class="label">Bridge · output</div>
   <dl class="facts"><dt>BLE name (FTMS)</dt><dd id="b-name">–</dd><dt>ANT+ device number</dt><dd id="b-ant">–</dd>
    <dt><label for="c-outputProtocol">Output format</label></dt><dd class="control"><select id="c-outputProtocol"><option value="ble-ftms">BLE FTMS</option><option value="ant-fec">ANT+ FE-C</option><option value="off">Off</option></select><button class="b" id="btn-output">Apply</button></dd></dl>
   <p class="small" id="c-outputHint">ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.</p>
@@ -118,12 +125,12 @@ td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
    <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Waiting / no control / output off</li>
   </ul>
   <p class="small" id="r-note"></p></div>
- <div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
+ <!--<div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
   <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
   <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
  <ul class="status-legend" aria-label="Bluetooth scan color legend">
   <li><span class="legend-swatch gray" aria-hidden="true"></span>Unrelated device / unnamed device</li>
- </ul>
+ </ul>-->
 </section>
 <section id="ctl" role="tabpanel" aria-labelledby="tab-ctl" tabindex="0" hidden>
  <h2>03 / Trainer control</h2>
