@@ -17,6 +17,8 @@ void reset() {
     fsMutex = serialMutex = nullptr;
     workerTask = nullptr;
     head = queued = 0;
+    lineStart = true;
+    fake::now = 0;
     std::memset(queueToSerial, 0, sizeof(queueToSerial));
     absoluteStart = absoluteEnd = lost = 0;
     writable = started = serialOnly = false;
@@ -38,6 +40,26 @@ void reset() {
     fake::file.clear();
     fake::partition.assign(fake::partition.size(), 0xff);
     Serial.output.clear();
+}
+
+const std::string kStamp = "00:00:00.000 ";
+
+// Removes the uptime prefix ("HH:MM:SS.mmm ") from every line.
+std::string plain(const std::string& text) {
+    std::string result;
+    std::size_t start = 0;
+    while (start < text.size()) {
+        const std::size_t newline = text.find('\n', start);
+        const std::size_t end = newline == std::string::npos ? text.size() : newline + 1;
+        std::string line = text.substr(start, end - start);
+        const std::size_t colon = line.find(':');
+        if (colon >= 2 && line.size() > colon + 10 && line[colon + 3] == ':' && line[colon + 6] == '.' &&
+            line[colon + 10] == ' ' && line.find_first_not_of("0123456789") == colon)
+            line.erase(0, colon + 11);
+        result += line;
+        start = end;
+    }
+    return result;
 }
 
 void pump() {
@@ -116,24 +138,25 @@ void testBatchingReadsAndSnapshots() {
     for (char byte : std::string("hello")) DBG_SERIAL.write(static_cast<std::uint8_t>(byte));
     assert(fake::file.empty() && Serial.output.empty());
     pump();
-    assert(fake::file == "hello" && Serial.output == fake::file && fake::opens == 1);
+    assert(fake::file == kStamp + "hello" && Serial.output == fake::file && fake::opens == 1);
     char data[8]{};
-    const auto chunk = debugweb::readChunk(1, data, 3);
-    assert(chunk.start == 1 && chunk.end == 4 && chunk.size == 3 && !chunk.reset);
+    const auto chunk = debugweb::readChunk(kStamp.size() + 1, data, 3);
+    assert(chunk.start == kStamp.size() + 1 && chunk.end == kStamp.size() + 4 && chunk.size == 3 && !chunk.reset);
     assert(std::string(data, chunk.size) == "ell");
     writeText(" world");
     pump();
-    assert(fake::file == "hello world");  // Reading did not move the append cursor.
+    assert(fake::file == kStamp + "hello world");  // Reading did not move the append cursor.
     const auto future = debugweb::readChunk(UINT64_MAX, data, sizeof(data));
-    assert(future.start == 11 && future.end == 11 && !future.size);
+    const std::uint64_t size = kStamp.size() + 11;
+    assert(future.start == size && future.end == size && !future.size);
 
     Snapshot snapshot;
     snapshot.enqueue = true;
     assert(debugweb::streamLog(sink, &snapshot));
-    assert(snapshot.end == 11 && snapshot.text == "hello world");
-    assert(fake::file == "hello world");  // Producers never wait on the FS mutex.
+    assert(snapshot.end == size && snapshot.text == kStamp + "hello world");
+    assert(fake::file == kStamp + "hello world");  // Producers never wait on the FS mutex.
     pump();
-    assert(fake::file == "hello worldqueued during download");
+    assert(fake::file == kStamp + "hello worldqueued during download");
 
     for (unsigned failAt : {0u, 1u}) {
         Snapshot failed;
@@ -168,9 +191,9 @@ void testBleBurstHeadroom() {
 void testLossAndIsr() {
     reset();
     debugweb::begin();
-    assert(writeText(std::string(kQueueBytes + 50, 'x')) == kQueueBytes);
+    assert(writeText(std::string(kQueueBytes + 50, 'x')) == kQueueBytes - kStamp.size());
     pump();
-    assert(fake::file.find("LOST OUTPUT: 50") != std::string::npos);
+    assert(fake::file.find("LOST OUTPUT: " + std::to_string(50 + kStamp.size())) != std::string::npos);
     assert(fake::file == Serial.output);
 
     reset();
@@ -196,7 +219,7 @@ void testLossAndIsr() {
     debugweb::begin();
     assert(DBG_SERIAL.printf("value=%d", 42) == 8);
     pump();
-    assert(fake::file == "value=42");
+    assert(fake::file == kStamp + "value=42");
     const std::string longMessage(2000, 'z');
     assert(DBG_SERIAL.printf("%s", longMessage.c_str()) == 1023);
     pump();
@@ -206,7 +229,8 @@ void testLossAndIsr() {
 void testRotationAndFailure() {
     reset();
     debugweb::begin();
-    const std::string block(kQueueBytes, 'r');
+    // Each write is one stamped line that fills the whole queue.
+    const std::string block = std::string(kQueueBytes - kStamp.size() - 1, 'r') + "\n";
     const std::size_t blocks = debugweb::kMaxLogBytes / kQueueBytes + 1;
     for (std::size_t i = 0; i < blocks; ++i) {
         assert(writeText(block) == block.size());
@@ -215,13 +239,13 @@ void testRotationAndFailure() {
     }
     assert(fake::maxSize == debugweb::kMaxLogBytes);
     assert(absoluteStart == debugweb::kMaxLogBytes);
-    assert(absoluteEnd == blocks * kQueueBytes && fake::file == block);
+    assert(absoluteEnd == blocks * kQueueBytes && fake::file == kStamp + block);
     char data[8];
     const auto stale = debugweb::readChunk(0, data, sizeof(data));
     assert(stale.reset && stale.start == absoluteStart && stale.end == absoluteStart + sizeof(data));
     Snapshot snapshot;
     assert(debugweb::streamLog(sink, &snapshot));
-    assert(snapshot.end == absoluteEnd && snapshot.text == block && snapshot.calls == 1 + kQueueBytes / kBlockBytes);
+    assert(snapshot.end == absoluteEnd && snapshot.text == kStamp + block && snapshot.calls == 1 + kQueueBytes / kBlockBytes);
 
     fake::writeLimit = 2;
     writeText("lost to flash");
@@ -280,7 +304,8 @@ void testEspLogForwarding() {
     fake::currentTask = nullptr;
     pump();
 
-    assert(fake::file == "[IDF] ready\n[IDF] outer\napplication output\n[IDF] after application\n");
+    assert(plain(fake::file) == "[IDF] ready\n[IDF] outer\napplication output\n[IDF] after application\n");
+    assert(fake::file.find(kStamp + "[IDF] after application\n") != std::string::npos);
     assert(fake::file.find("nested logger message") == std::string::npos);
     assert(fake::file.find("[IDF] logger task") == std::string::npos);
     assert(Serial.output.find("\033[0;32m[IDF] ready\033[0m\n") != std::string::npos);
@@ -291,7 +316,7 @@ void testConcurrentProducers() {
     reset();
     debugweb::begin();
     // Leave the ring head near its end so concurrent writes also wrap around.
-    assert(writeText(std::string(6000, 'p')) == 6000);
+    assert(writeText(std::string(5999, 'p') + "\n") == 6000);
     pump();
     std::atomic<bool> start{false};
     std::vector<std::thread> producers;
@@ -305,11 +330,12 @@ void testConcurrentProducers() {
     }
     start.store(true, std::memory_order_release);
     for (auto& producer : producers) producer.join();
-    assert(queued == 4 * 128 * 8 && lost == 0);
-    assert(fake::file.size() == 6000);  // No producer performed filesystem I/O.
+    const std::size_t first = 6000 + kStamp.size();
+    assert(queued == 4 * 128 * (8 + kStamp.size()) && lost == 0);
+    assert(fake::file.size() == first);  // No producer performed filesystem I/O.
     pump();
-    assert(fake::file == Serial.output && fake::file.size() == 6000 + 4 * 128 * 8);
-    std::istringstream records(fake::file.substr(6000));
+    assert(fake::file == Serial.output && fake::file.size() == first + 4 * 128 * (8 + kStamp.size()));
+    std::istringstream records(plain(fake::file.substr(first)));
     std::set<std::string> received;
     std::string record;
     while (std::getline(records, record)) assert(received.insert(record).second);
@@ -333,7 +359,7 @@ void testStopLogging() {
     writeText("console only\n");
     fake::emit("[IDF] hidden\n");
     pump();
-    assert(fake::file == "before\n[IDF] before\n[Debug] logging stopped via web interface\n");
+    assert(plain(fake::file) == "before\n[IDF] before\n[Debug] logging stopped via web interface\n");
     assert(Serial.output.find("console only\n") != std::string::npos);
     assert(Serial.output.find("[IDF] hidden\n") != std::string::npos);
     const auto endWhileStopped = absoluteEnd;
@@ -341,17 +367,40 @@ void testStopLogging() {
     writeText(std::string(kQueueBytes + 10, 's'));  // Losses are reported on Serial only.
     pump();
     assert(absoluteEnd == endWhileStopped);
-    assert(Serial.output.find("LOST OUTPUT: 10") != std::string::npos);
+    assert(Serial.output.find("LOST OUTPUT: " + std::to_string(10 + kStamp.size())) != std::string::npos);
     char data[8];
     assert(debugweb::readChunk(endWhileStopped, data, sizeof(data)).size == 0);
 
     debugweb::setLoggingEnabled(true);
     writeText("after\n");
     pump();
-    assert(fake::file.substr(endWhileStopped) == "[Debug] logging resumed via web interface\nafter\n");
+    assert(plain(fake::file.substr(endWhileStopped)) == "[Debug] logging resumed via web interface\nafter\n");
     assert(fake::file.find("console only") == std::string::npos);
     assert(fake::file.find("[IDF] hidden") == std::string::npos);
     assert(fake::file.find("sss") == std::string::npos);
+}
+
+void testTimestamps() {
+    reset();
+    debugweb::begin();
+    fake::now = 3723456;  // 1 h 2 min 3.456 s
+    writeText("first\nsecond\npartial");
+    fake::now = 3723500;
+    writeText(" continued\n");
+    DBG_SERIAL.println("println");
+    fake::emit("[IDF] file only\n");
+    fake::now = 360000000;  // 100 h
+    DBG_SERIAL.printf("[Tag] %d\n", 7);
+    pump();
+    assert(fake::file == "01:02:03.456 first\n01:02:03.456 second\n01:02:03.456 partial continued\n"
+                         "01:02:03.500 println\r\n01:02:03.500 [IDF] file only\n100:00:00.000 [Tag] 7\n");
+    assert(Serial.output.find("01:02:03.456 first\n") != std::string::npos);
+    assert(Serial.output.find("100:00:00.000 [Tag] 7\n") != std::string::npos);
+
+    // Loss markers are stamped as well.
+    writeText(std::string(kQueueBytes + 5, 'x'));
+    pump();
+    assert(fake::file.find("\n100:00:00.000 [Debug] LOST OUTPUT: ") != std::string::npos);
 }
 }  // namespace
 
@@ -368,6 +417,7 @@ int main() {
     testEspLogForwarding();
     testConcurrentProducers();
     testStopLogging();
+    testTimestamps();
     reset();
     debugweb::begin();
     testDebugBle();

@@ -26,11 +26,14 @@ constexpr std::size_t kBlockBytes = 1024;
 // Per-byte destination flags of the queued output.
 constexpr std::uint8_t kToSerial = 1;
 constexpr std::uint8_t kToFile = 2;
+constexpr std::size_t kStampBytes = 24;
 std::uint8_t queue[kQueueBytes];
 std::uint8_t queueToSerial[kQueueBytes];
 std::size_t head = 0;
 std::size_t queued = 0;
 std::uint64_t lost = 0;
+// The next queued byte starts a new line and gets a timestamp first.
+bool lineStart = true;
 portMUX_TYPE queueMux = portMUX_INITIALIZER_UNLOCKED;
 SemaphoreHandle_t fsMutex = nullptr;
 SemaphoreHandle_t serialMutex = nullptr;
@@ -98,10 +101,22 @@ void recordLoss(std::size_t size) {
     portEXIT_CRITICAL(&queueMux);
 }
 
+// Uptime prefix of every queued line, e.g. "00:12:34.567 ".
+std::size_t timestamp(char (&stamp)[kStampBytes]) {
+    const unsigned long ms = millis();
+    const unsigned long seconds = ms / 1000;
+    const int length = std::snprintf(stamp, sizeof(stamp), "%02lu:%02lu:%02lu.%03lu ", seconds / 3600,
+                                     seconds / 60 % 60, seconds % 60, ms % 1000);
+    return length > 0 ? std::min(static_cast<std::size_t>(length), sizeof(stamp) - 1) : 0;
+}
+
 std::size_t lossMarker(char (&marker)[100], std::uint64_t dropped) {
-    return std::snprintf(marker, sizeof(marker),
-        "\n[Debug] LOST OUTPUT: %llu byte(s)/ISR call(s)\n",
+    char stamp[kStampBytes];
+    timestamp(stamp);
+    const int length = std::snprintf(marker, sizeof(marker),
+        "\n%s[Debug] LOST OUTPUT: %llu byte(s)/ISR call(s)\n", stamp,
         static_cast<unsigned long long>(dropped));
+    return length > 0 ? std::min(static_cast<std::size_t>(length), sizeof(marker) - 1) : 0;
 }
 
 std::size_t stripAnsi(char* text, std::size_t size) {
@@ -201,9 +216,8 @@ void append(const std::uint8_t* data, std::size_t size) {
     }
 }
 
-std::size_t enqueue(const std::uint8_t* data, std::size_t size, std::uint8_t flags) {
-    portENTER_CRITICAL(&queueMux);
-    const std::size_t count = std::min(size, kQueueBytes - queued);
+// Caller holds queueMux and guarantees room for count bytes.
+void push(const std::uint8_t* data, std::size_t count, std::uint8_t flags) {
     const std::size_t tail = (head + queued) % kQueueBytes;
     const std::size_t first = std::min(count, kQueueBytes - tail);
     std::memcpy(queue + tail, data, first);
@@ -211,10 +225,32 @@ std::size_t enqueue(const std::uint8_t* data, std::size_t size, std::uint8_t fla
     std::memset(queueToSerial + tail, flags, first);
     std::memset(queueToSerial, flags, count - first);
     queued += count;
-    lost += size - count;
+}
+
+// Returns the number of accepted payload bytes (timestamps not included).
+std::size_t enqueue(const std::uint8_t* data, std::size_t size, std::uint8_t flags) {
+    char stamp[kStampBytes];
+    const std::size_t stampSize = timestamp(stamp);
+    std::size_t accepted = 0;
+    portENTER_CRITICAL(&queueMux);
+    while (accepted < size) {
+        if (lineStart) {
+            if (kQueueBytes - queued <= stampSize) break;
+            push(reinterpret_cast<const std::uint8_t*>(stamp), stampSize, flags);
+            lineStart = false;
+        }
+        const auto* newline = static_cast<const std::uint8_t*>(std::memchr(data + accepted, '\n', size - accepted));
+        const std::size_t line = newline ? static_cast<std::size_t>(newline - (data + accepted)) + 1 : size - accepted;
+        const std::size_t count = std::min(line, kQueueBytes - queued);
+        push(data + accepted, count, flags);
+        accepted += count;
+        if (count < line) break;
+        lineStart = newline != nullptr;
+    }
+    lost += size - accepted;
     portEXIT_CRITICAL(&queueMux);
     if (workerTask) xTaskNotifyGive(workerTask);
-    return count;
+    return accepted;
 }
 
 std::uint8_t outputFlags(bool toSerial) {
