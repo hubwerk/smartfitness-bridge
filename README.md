@@ -51,7 +51,7 @@ passed both host tests and firmware build; the badge above tracks CI.
 | User interface | Wi-Fi + HTTPS web UI + REST/WebSocket API + Serial console | LVGL UI on the 240×240 round display (knob + touch) + Serial console |
 | Extra libraries | ArduinoJson (HTTPS server: ESP-IDF `esp_https_server` from the core) | LVGL, LovyanGFX, Adafruit NeoPixel |
 | Amazon Affiliate Link | [diymore ESP32-S3 N16R8](https://link.amazon/B04sCBCRH) | [ELECROW CrowPanel 1.28"](https://link.amazon/B0eHDSltG) |
-| Optional extension with ANT+ Stick (for direct compatibility with e.g. Garmin Ant+ watches) | [Coospo Ant+ USB Stick](https://link.amazon/B0dalQtFe) <br> USB-C to USB-A OTG Adapter: [LogiLink AU0055](https://link.amazon/B01z26VJ2)| [Coospo Ant+ USB Stick](https://link.amazon/B0dalQtFe) <br> USB-C to USB-A OTG Adapter: [Waveshare MX1.25 4Pin to USB Cable](https://link.amazon/B07BNj1lk) |
+| Optional extension with ANT+ Stick (for direct compatibility with e.g. Garmin Ant+ watches) | [Coospo Ant+ USB Stick](https://link.amazon/B0dalQtFe) <br> USB-C to USB-A OTG Adapter: [LogiLink AU0055](https://link.amazon/B01z26VJ2)| [Coospo Ant+ USB Stick](https://link.amazon/B0dalQtFe) <br> MX1.25 4Pin to USB Cable: [Waveshare MX1.25 4Pin to USB Cable](https://link.amazon/B07BNj1lk) |
 
 Exactly one variant flag must be defined; `include/variant.h` stops the build with
 `#error` otherwise. `src/main.cpp` contains the shared setup (config, BLE input,
