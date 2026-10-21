@@ -50,7 +50,8 @@ passed both host tests and firmware build; the badge above tracks CI.
 | Board | ESP32-S3 DevKitC-1 N16R8 | ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display (ESP32-S3R8, 8 MB PSRAM, 16 MB flash) |
 | User interface | Wi-Fi + HTTPS web UI + REST/WebSocket API + Serial console | LVGL UI on the 240×240 round display (knob + touch) + Serial console |
 | Extra libraries | ArduinoJson (HTTPS server: ESP-IDF `esp_https_server` from the core) | LVGL, LovyanGFX, Adafruit NeoPixel |
-| Amazon Affiliate Link | Anzeige: https://link.amazon/B04sCBCRH | Anzeige: https://link.amazon/B0eHDSltG |
+| Amazon Affiliate Link | [diymore ESP32-S3 N16R8](https://link.amazon/B04sCBCRH) | [ELECROW CrowPanel 1.28"](https://link.amazon/B0eHDSltG) |
+| Optional extension with ANT+ Stick (for direct compatibility with e.g. Garmin Ant+ watches) | (Coospo Ant+ USB Stick)][https://www.amazon.de/dp/B07D4J7KH6?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1] <br> USB-C to USB-A OTG Adapter: [LogiLink AU0055](https://link.amazon/B01z26VJ2)| (Coospo Ant+ USB Stick)][https://www.amazon.de/dp/B07D4J7KH6?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1] <br> USB-C to USB-A OTG Adapter: [LogiLink AU0055](https://link.amazon/B01z26VJ2) |
 
 Exactly one variant flag must be defined; `include/variant.h` stops the build with
 `#error` otherwise. `src/main.cpp` contains the shared setup (config, BLE input,
