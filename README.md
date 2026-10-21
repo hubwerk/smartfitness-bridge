@@ -126,6 +126,8 @@ when opened and receives new output over the existing WebSocket (no polling).
 Debug-tab output and writes no further entries to `/debug.log` until
 **Logging fortsetzen** is pressed; the Serial console keeps logging. The stop and
 resume are marked in the log, and logging is enabled again after every reboot.
+Every line in `/debug.log`, the Debug tab and the Serial console starts with the
+uptime since boot as `HH:MM:SS.mmm` (e.g. `00:12:34.567 [BLE] connected; ...`).
 The output includes state changes for BLE input, FTMS/ANT output, bridge source
 and output selection, Wi-Fi, executed API commands, and WebSocket clients.
 With `DEBUG_WEB`, every BLE input notification/indication is logged in the main
