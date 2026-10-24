@@ -66,6 +66,7 @@ private:
     void handleMessage(const smartfitness::ant::Message& message);
     void handleChannelEvent(const smartfitness::ant::Message& message);
     void handleDisplayPage(const smartfitness::ant::Page& page);
+    void dropPendingRequest();
     void sendNextPage(std::uint8_t channel);
     void requestCapabilities();
     void buildChannels();
@@ -115,9 +116,15 @@ private:
     bool displaySeenValid_ = false;
     std::uint32_t displaySeenMs_ = 0;
     bool controlApplied_ = false;
-    std::uint8_t pendingResponse_ = 0;  // page requested via page 70
-    std::uint8_t pendingRepeats_ = 0;
-    bool pendingAcknowledged_ = false;
+    // Pages requested via page 70, answered in arrival order.
+    struct PendingRequest {
+        std::uint8_t page = 0;
+        std::uint8_t repeats = 0;
+        bool acknowledged = false;
+    };
+    static constexpr std::size_t kMaxPendingRequests = 4;
+    std::array<PendingRequest, kMaxPendingRequests> pending_{};
+    std::size_t pendingCount_ = 0;
     std::uint32_t pagesSent_ = 0;
     smartfitness::ant::Page lastPage_{};
     Clock clock_;
