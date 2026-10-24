@@ -25,8 +25,8 @@ qdomyos-zwift vendor ports, reconnect/backoff, stale-data handling, FTMS output,
 Wi-Fi setup and web UI, a shared console/API command layer, NVS configuration, and
 a selectable output protocol: BLE FTMS, ANT+ FE-C with optional sensor channels
 (external ANT radio over USB on web builds or UART on either variant; see
-[ANT+ output](#ant-output)) or off. The UART transport is implemented but
-unverified on hardware.
+[ANT+ output](#ant-output)) or off. ANT+ FE-C over the USB stick is verified on
+hardware (see below); the UART transport is implemented but unverified on hardware.
 OTA is not implemented.
 
 **Hardware test status** (the single place where hardware verification is tracked;
@@ -36,7 +36,8 @@ see the [supported-device table](#supported-devices-and-new-protocols)):
 |------|--------|
 | CrowPanel HMI: display, rotary encoder (turning/direction), knob button | Verified |
 | End-to-end, **web** and **HMI** variant: **Wahoo KICKR** as FTMS input → subscribed characteristics shown in the HMI / web UI → bridge BLE FTMS output → **MyWhoosh** | Verified |
-| Other BLE equipment and supported-device entries, Zwift and other apps, trainer control from apps, ANT+ output, reconnect/persistence, radio coexistence under load, safe physical trainer operation, readability on the real IPS panel | Unverified |
+| End-to-end, **web** variant: **Wahoo KICKR** as FTMS input → bridge ANT+ FE-C output via USB ANT+ stick → **Garmin fenix 6 Pro** ([#73](https://github.com/hubwerk/smartfitness-bridge/issues/73)) | Verified |
+| Other BLE equipment and supported-device entries, Zwift and other apps, trainer control from apps, UART ANT transport, ANT+ sensor channels and other ANT+ displays, reconnect/persistence, radio coexistence under load, safe physical trainer operation, readability on the real IPS panel | Unverified |
 
 The post-PR-#10 [main CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38030185653)
 passed both host tests and firmware build; the badge above tracks CI.
@@ -561,7 +562,7 @@ output protocol, and app.
 
 | Manufacturer / model family | Device type | Input protocol / adapter IDs | Auto-detect or manual | Tested on hardware | Output tested (BLE FTMS / ANT+) | Tested with (device / app) |
 |---|---|---|---|---|---|---|
-| Standard FTMS fitness machines | Bike, treadmill, cross trainer, step/stair climber, rower | `ftms` | Auto | ✅ Wahoo KICKR only | ✅ BLE FTMS; ANT+ not tested | Wahoo KICKR via `ftms` / MyWhoosh (web and HMI; CrowPanel 1.28") |
+| Standard FTMS fitness machines | Bike, treadmill, cross trainer, step/stair climber, rower | `ftms` | Auto | ✅ Wahoo KICKR only | ✅ BLE FTMS; ✅ ANT+ | Wahoo KICKR via `ftms` / MyWhoosh (web and HMI; CrowPanel 1.28"); ANT+ → Garmin fenix 6 Pro (web, USB ANT+ stick; [#73](https://github.com/hubwerk/smartfitness-bridge/issues/73)) |
 | Standard fitness sensors | Cycling power, speed/cadence, heart rate | `cps`, `csc`, `hrs` | Auto | 🧪 | — | — |
 | Keiser M3i | Bike | `keiser-m3i` | Auto (broadcast) | 🧪 | — | — |
 | Echelon Connect, Row, Stride, Stride 4, stair climber | Bike, rower, treadmill, stair climber | `echelon`, `echelon-*` | Auto | 🧪 | — | — |
@@ -582,7 +583,8 @@ output protocol, and app.
 | BH, YPOO, Sole, Xterra, Octane Q37, SmartRow, Sunny | Elliptical, rower, stepper | `bh-elliptical`, `ypoo-*`, `sole-elliptical`, `xterra-xe88`, `octane-q37`, `smartrow`, `sunnyfit-stepper` | Auto and manual variants | 🧪 | — | — |
 
 Legend: ✅ tested on hardware · 🧪 host tests with synthetic data only · — no
-hardware-verified output. ANT+ output has not been tested on hardware. The
+hardware-verified output. ANT+ FE-C output is verified only via the USB ANT+ stick
+(web variant) with a Garmin fenix 6 Pro; the UART ANT transport is untested. The
 [supported-device guide](docs/supported-devices.md) has match rules, metrics,
 controls, and attribution.
 
@@ -660,7 +662,10 @@ Do not assume the fenix 6/6 Pro can consume/control this FTMS output.
 [HD-002](docs/hardware-decisions.md#hd-002-garmin-watches-eg-fenix-6-pro-and-bluetooth-ftms)
 records the CPS/HRS output and multi-client work needed for recording. Watches that
 support ANT+ FE-C trainers can use the [ANT+ output](#ant-output)
-(external USB or UART ANT radio; not verified on hardware).
+(external USB or UART ANT radio). ANT+ FE-C via the USB ANT+ stick (web variant)
+has been verified with a **Garmin fenix 6 Pro** (Wahoo KICKR as FTMS input, see
+[#73](https://github.com/hubwerk/smartfitness-bridge/issues/73)); UART ANT is not
+verified on hardware.
 
 ## Serial console
 The Serial monitor (115200 baud, newline-terminated) accepts the same commands as the web UI:
@@ -1268,8 +1273,9 @@ page 70 requests are answered for pages 16, 17, 18, the profile's specific page,
 requests are queued (up to 4 pages) and answered in order. FE-C has no
 speed target, so treadmill speed cannot be set over ANT+.
 
-**Limitations:** neither USB nor UART ANT operation is verified on hardware
-(external radio, Zwift, Garmin); USB supports only the Dynastream VID/PID class
+**Limitations:** USB ANT operation is verified on hardware only with FE-C to a
+Garmin fenix 6 Pro (web variant, [#73](https://github.com/hubwerk/smartfitness-bridge/issues/73));
+UART ANT operation, sensor channels, Zwift and other displays are not verified. USB supports only the Dynastream VID/PID class
 above, while UART requires compatible ANT network-processor firmware. Using the ANT+ network
 key in a product requires accepting the ANT+ adopter terms (override with
 `-DSF_ANT_NETWORK_KEY=…` for private networks).
@@ -1396,7 +1402,8 @@ green CI as hardware validation.
   setup, nRF Connect and BLE/Wi-Fi load tests.
 - API authentication and access protection.
 - CPS/HRS outputs and multi-client support for Garmin recording.
-- ANT+ FE-C hardware validation (COOSPO stick, Zwift/Garmin displays).
+- Further ANT+ hardware validation: UART ANT module, sensor channels and other
+  displays/apps such as Zwift (USB stick → Garmin fenix 6 Pro FE-C is verified).
 - More qdomyos-zwift device ports with attribution and byte-sample tests.
 - OTA updates and CI release builds with downloadable firmware.
 
