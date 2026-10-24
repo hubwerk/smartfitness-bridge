@@ -460,6 +460,20 @@ void testAntOutputLifecycle() {
     radio.injectEventTx();
     ant.loop();
     assert(radio.written.back().id == msg::kBroadcastData);
+    // Back-to-back requests queue: each page is sent as often as requested.
+    radio.injectPage(Page{70, 0xFF, 0xFF, 0xFF, 0xFF, 0x02, 80, 0x01});
+    ant.loop();
+    radio.injectPage(Page{70, 0xFF, 0xFF, 0xFF, 0xFF, 0x02, 54, 0x01});
+    ant.loop();
+    for (int index = 0; index < 5; ++index) {
+        radio.injectEventTx();
+        ant.loop();
+    }
+    const auto queued = radio.pages();
+    const std::size_t first = queued.size() - 5;
+    assert(queued[first][0] == 80 && queued[first + 1][0] == 80);
+    assert(queued[first + 2][0] == 54 && queued[first + 3][0] == 54);
+    assert(queued[first + 4][0] != 80 && queued[first + 4][0] != 54);
     now += AntOutput::kDisplaySeenMs;
     assert(!ant.displaySeen() && !ant.controlActive());
 

@@ -1264,7 +1264,8 @@ power, page 51 (track resistance, grade) → incline. Wind resistance (50) and u
 configuration (55) are acknowledged without a source command. Results are
 reported in page 71 (command status: pass / fail / not supported / rejected);
 page 70 requests are answered for pages 16, 17, 18, the profile's specific page,
-54, 71, 80 and 81. FE-C has no
+54, 71, 80 and 81, with the requested number of repeats (max 8). Back-to-back
+requests are queued (up to 4 pages) and answered in order. FE-C has no
 speed target, so treadmill speed cannot be set over ANT+.
 
 **Limitations:** neither USB nor UART ANT operation is verified on hardware

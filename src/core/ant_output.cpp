@@ -95,8 +95,7 @@ void AntOutput::begin() {
     parser_.reset();
     link_ = Link::WaitingForStick;
     retryPending_ = false;
-    pendingRepeats_ = 0;
-    pendingAcknowledged_ = false;
+    pendingCount_ = 0;
     openMask_ = 0;
     error_ = Error::None;
 #if defined(ARDUINO) && defined(DEBUG_WEB)
@@ -117,8 +116,7 @@ void AntOutput::setEnabled(bool enabled) {
         retryPending_ = false;
         displaySeenValid_ = false;
         controlApplied_ = false;
-        pendingRepeats_ = 0;
-        pendingAcknowledged_ = false;
+        pendingCount_ = 0;
         openMask_ = 0;
     }
 }
@@ -197,7 +195,7 @@ void AntOutput::startReset() {
     openMask_ = 0;
     displaySeenValid_ = false;
     controlApplied_ = false;
-    pendingRepeats_ = 0;
+    pendingCount_ = 0;
     encoder_.reset();
     sensorEncoder_.reset();
     buildChannels();
@@ -321,7 +319,7 @@ void AntOutput::handleMessage(const Message& message) {
             openMask_ = 0;
             displaySeenValid_ = false;
             controlApplied_ = false;
-            pendingRepeats_ = 0;
+            pendingCount_ = 0;
             channelLimit_ = 0;
             error_ = Error::None;
             encoder_.reset();
@@ -413,9 +411,16 @@ void AntOutput::handleDisplayPage(const Page& page) {
                      page[6], page[5] & 0x7F, page[5] >> 7, page[7]);
         if (page[7] != 0x01) return;  // only "request data page"
         const std::uint8_t repeats = static_cast<std::uint8_t>(page[5] & 0x7FU);
-        pendingResponse_ = page[6];
-        pendingAcknowledged_ = (page[5] & 0x80U) != 0;
-        pendingRepeats_ = repeats == 0 ? 1 : (repeats > kMaxRequestRepeats ? kMaxRequestRepeats : repeats);
+        const PendingRequest request{
+            page[6], repeats == 0 ? std::uint8_t{1} : (repeats > kMaxRequestRepeats ? kMaxRequestRepeats : repeats),
+            (page[5] & 0x80U) != 0};
+        std::size_t slot = 0;
+        while (slot < pendingCount_ && pending_[slot].page != request.page) ++slot;
+        if (slot == pendingCount_) {
+            if (pendingCount_ == kMaxPendingRequests) dropPendingRequest();  // oldest
+            slot = pendingCount_++;
+        }
+        pending_[slot] = request;  // a repeated request refreshes its entry
         return;
     }
     const auto control = fec::decodeControlPage(page);
@@ -489,16 +494,26 @@ void AntOutput::logStats(std::uint32_t timestamp) {
 }
 #endif
 
+void AntOutput::dropPendingRequest() {
+    for (std::size_t index = 1; index < pendingCount_; ++index) pending_[index - 1] = pending_[index];
+    if (pendingCount_ > 0) --pendingCount_;
+}
+
 void AntOutput::sendNextPage(std::uint8_t channel) {
     encoder_.update(trainerState(), profile(), now());
     sensorEncoder_.update(trainerState(), now());
     Page page{};
     bool requested = false;
+    bool acknowledged = false;
     const auto bit = channels_[channel].bit;
-    while (bit == kFec && pendingRepeats_ > 0 && !requested) {
-        requested = encoder_.requested(pendingResponse_, deviceNumber_, page);
-        if (!requested) pendingRepeats_ = 0;
-        else --pendingRepeats_;
+    while (bit == kFec && pendingCount_ > 0 && !requested) {
+        auto& head = pending_[0];
+        requested = encoder_.requested(head.page, deviceNumber_, page);
+        if (requested) {
+            acknowledged = head.acknowledged;
+            --head.repeats;
+        }
+        if (!requested || head.repeats == 0) dropPendingRequest();
     }
     if (!requested) {
         switch (bit) {
@@ -510,7 +525,7 @@ void AntOutput::sendNextPage(std::uint8_t channel) {
             default: return;
         }
     }
-    const std::uint8_t response = requested && pendingAcknowledged_ ? msg::kAcknowledgedData : msg::kBroadcastData;
+    const std::uint8_t response = acknowledged ? msg::kAcknowledgedData : msg::kBroadcastData;
     if (!send(encodeMessage(response, channel, page))) return;
     lastPage_ = page;
     ++pagesSent_;
