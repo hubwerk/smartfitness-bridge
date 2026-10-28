@@ -104,9 +104,13 @@ that input profile, not just a successful host test.
 | Schwinn IC4/IC8 and matching Bowflex bikes | BLE FTMS data | Bike data as reported, including speed, cadence, power, and heart rate | None (read-only) | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | Yesoul bikes | BLE advertisement / vendor data | Cadence, power, resistance; speed derived from cadence | None | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | iFit / NordicTrack / ProForm bikes | BLE FTMS or vendor GATT | Power, cadence, resistance; profile-dependent speed and incline | Resistance; incline on compatible profiles | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
-| Tacx Neo / Flux and Elite trainers | BLE vendor GATT / Cycling Power and Speed-Cadence services | Power, cadence, speed, optional heart rate | Power, resistance or simulated grade (model-dependent) | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Tacx Neo / Flux and Elite (legacy, DR, Misuro B+) trainers | BLE vendor GATT / Cycling Power and Speed-Cadence services | Power, cadence, speed, optional heart rate | Power, resistance or simulated grade (model-dependent) | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | Wahoo KICKR legacy trainers | BLE Cycling Power / Speed-Cadence and vendor GATT | Power, cadence, speed, optional heart rate | Power, resistance, simulated grade | Implemented; host-tested | Not separately verified | Not separately verified |
-| Other supported BLE bikes | BLE vendor GATT; see device guide | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent resistance or read-only | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Nautilus / Schwinn 170/270 / Bowflex bikes | BLE vendor GATT | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent resistance or read-only | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Sportstech / SportsPlus / Carefitness / Pafers bikes (incl. Sportstech SX600) | BLE vendor GATT | Speed, cadence, power, resistance, and heart rate as reported | Model-dependent resistance | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| FitPlus / S-Node / Merach / Virtufit / H9110 Osaka bikes | BLE FTMS or vendor GATT | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent; S-Node is read-only | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Toorx / TRX App Gate bikes, including i-Running / iConsole+, Reebok, Adidas, DKN, Tunturi, Casall, FAL-SPORTS, FitHiWay, Hertz, Enerfit, Hammer, JLL, Fytter, Asviva, Hop-Sport, Taurua, Changyow | BLE vendor GATT (TRX App Gate) | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent resistance | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Flywheel, Life Fitness (IC5/IC8), Sole, Kettler, Technogym, Inspire, Keep, MCF, XCX, Chrono, Volava, Ultrasport, Skandika, PitPat, Freebeat, MEPANEL, Apex, NPE CABLE, CycleOps, Joroto/BGYM, Renpho, Horizon GR7, LifeSpan bikes | BLE vendor GATT or FTMS; see device guide | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent resistance or read-only | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 
 ### Treadmill
 
@@ -118,17 +122,23 @@ that input profile, not just a successful host test.
 | Domyos / Decathlon treadmills | BLE vendor GATT | Speed, incline, optional heart rate | Speed and incline only while already running | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | Echelon Stride / Stride 4 | BLE vendor GATT | Speed, incline, optional heart rate | Incline; no remote speed/start/stop | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | FitShow / FitPlus / NoblePro treadmills | BLE vendor GATT | Speed, incline, and model-dependent time, steps, and heart rate | Speed and incline only while already running | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
-| Horizon, Spirit, Sole, and WalkingPad treadmills | BLE vendor GATT | Speed and model-dependent incline | Model-dependent speed/incline; no belt start on connect | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
-| Other supported BLE treadmills | BLE vendor GATT; see device guide | Model-dependent speed, incline, and optional heart rate | Model-dependent; safety-gated | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Horizon (incl. Paragon X), Spirit, Sole, and Kingsmith / WalkingPad treadmills | BLE vendor GATT | Speed and model-dependent incline | Model-dependent speed/incline; no belt start on connect | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Sportstech / FitHome treadmills (F15, F31, WP100, WP200) | BLE vendor GATT (`0xFFF0`); manual pairing only | Speed and incline as reported | Model-dependent speed/incline; safety-gated | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Toorx / TRX App Gate treadmills, including V-RUN, K80, i-Running, Reebok, Adidas, DKN, JTX, Flow Fitness | BLE vendor GATT (TRX App Gate) | Speed, incline, and model-dependent distance, time, and heart rate | Model-dependent speed/incline | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Nautilus / Schwinn / Bowflex treadmills (T628, 688a service) | BLE vendor GATT | Speed and incline | Model-dependent | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Pafers / BH i.Boxster treadmills | BLE vendor GATT; manual pairing | Speed and incline as reported | Model-dependent | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| TRUE, Assault, WDWAY, Technogym MyRun, LifeSpan, Octane (Zero Runner ZR7/ZR8), ZiPro, ESLinker, Sperax, Focus, DeerRun/PitPat, Activio, Wahoo KICKR RUN treadmills | BLE vendor GATT or FTMS; see device guide | Model-dependent speed, incline, and optional heart rate | Model-dependent; safety-gated | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Life Fitness / ShuaA5 treadmills | BLE FTMS data | Speed, incline, and fields reported by the device | Life Fitness read-only; ShuaA5 model-dependent | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 
 ### Cross trainer / elliptical
 
 | Manufacturer / model | BLE protocol | Transmitted values / services | Controllable values | Implementation | FTMS output tested | ANT+ output tested |
 |---|---|---|---|---|---|---|
 | Standard FTMS cross trainers | FTMS (`0x1826`, Cross Trainer Data `0x2ACE`) | Fields sent by the device, including speed, cadence, resistance, incline, power, energy, and heart rate | Feature/range-gated speed, incline, resistance, and power | Implemented; host-tested | Not separately verified | Not separately verified |
-| iFit / NordicTrack / ProForm ellipticals | BLE vendor GATT | Cadence, speed, resistance; profile-dependent incline, power, and heart rate | Resistance; incline on compatible profiles | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| iFit / NordicTrack / ProForm ellipticals (incl. FreeStride) | BLE vendor GATT | Cadence, speed, resistance; profile-dependent incline, power, and heart rate | Resistance; incline on compatible profiles | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | Domyos / Echelon / Nautilus ellipticals | BLE vendor GATT | Model-dependent speed, cadence, resistance, and heart rate | Resistance or read-only, depending on model | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
-| Sportstech / Toorx and other supported ellipticals | BLE vendor GATT; see device guide | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent resistance/incline | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Sportstech / Toorx / TRX App Gate (iConsole+, FAL-SPORTS, JTX) ellipticals | BLE vendor GATT; see device guide | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent resistance/incline | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| BH, YPOO / Merach, Sole, Xterra XE88, Octane Q37, TRUE, FEIER, Schwinn 411/510E, Gymstick ellipticals | BLE vendor GATT or FTMS; see device guide | Model-dependent speed, cadence, power, resistance, and heart rate | Model-dependent resistance or read-only | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 
 ### Step climber
 
@@ -151,7 +161,10 @@ that input profile, not just a successful host test.
 | Standard FTMS rowers | FTMS (`0x1826`, Rower Data `0x2AD1`) | Fields sent by the device, including stroke rate/count, speed, pace, distance, resistance, power, energy, and heart rate | Feature/range-gated resistance and power | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | Concept2 PM5 rower / SkiErg | BLE vendor GATT | Speed, stroke rate, power, heart rate, elapsed time, distance, pace, and stroke count as available | None; mechanical damper is not controlled by the bridge | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | iFit / ProForm / NordicTrack rowers | BLE vendor GATT | Stroke rate, speed/pace, power, resistance, and distance as reported | Resistance on compatible profiles | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
-| Echelon / Domyos / FitPlus / Sportstech rowers | BLE vendor GATT | Model-dependent stroke rate, speed/pace, power, resistance, and heart rate | Model-dependent resistance | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Echelon / Domyos / FitPlus (Merach R28) / Sportstech rowers | BLE vendor GATT | Model-dependent stroke rate, speed/pace, power, resistance, and heart rate | Model-dependent resistance | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| SportsPlus / Carefitness / VMAX / Pafers rowers | BLE vendor GATT | Stroke rate, speed/pace, power, resistance, and heart rate as reported | Model-dependent resistance | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| Toorx / TRX App Gate rowers (iConsole+, Merach NovaRow R50) | BLE vendor GATT | Model-dependent stroke rate, speed/pace, power, and resistance | Model-dependent resistance | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+| SmartRow | BLE vendor GATT | Stroke rate, power, distance, and pace as reported | None | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 
 ### Fitness sensors
 
@@ -160,6 +173,15 @@ that input profile, not just a successful host test.
 | Cycling Power sensors | Cycling Power Service (`0x1818`) | Power and cadence when crank data is present | None | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | Cycling Speed and Cadence sensors | CSC Service (`0x1816`) | Speed and cadence when wheel/crank data is present | None | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
 | Heart rate monitors | Heart Rate Service (`0x180D`) | Heart rate | None | Implemented; host-tested | Not hardware-verified | Not hardware-verified |
+
+Entries marked manual in the device guide (for example Sportstech / FitHome
+treadmills) are selected in the adapter list while pairing.
+
+### Not supported
+
+Peloton/DFC, Bluetooth Classic (RFCOMM), ANT+/USB/Wi-Fi/ADB inputs, accessories
+without fitness data, and Kinetic (licensed protocol) are not supported. See
+[the supported-device guide](docs/supported-devices.md) for details.
 
 FTMS characteristics include only fields supported by the selected profile and
 present in the incoming data. ANT+ FE-C output requires an external ANT radio;
