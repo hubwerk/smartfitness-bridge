@@ -52,7 +52,7 @@ the radio cannot be reprogrammed to speak ANT.
   module reset polarity, voltage and pull requirements.
 - Verify all selected GPIOs against the board revision's schematic, connector
   routing and peripheral conflicts. The commented
-  [PlatformIO example](../README.md#uart-ant-module-crowpanel-recommended-path-hardware-unverified)
+  [PlatformIO example](developer-guide.md#uart-ant-module-crowpanel-recommended-path-hardware-unverified)
   intentionally uses `<verified TX GPIO>` / `<verified RX GPIO>` placeholders
   with `TODO(verify)` rather than asserting numeric pins are safe.
 
