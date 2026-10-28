@@ -72,7 +72,7 @@ cross-checked against [`deniskie/ha-sportstech-walkingpad-integration`](https://
 (MIT) at revision `f2f102710f3a7ca8c0671ea32316cb18b35274fd`. Its
 `manifest.json` matches `0xFFF0`, but this generic service is not used for
 automatic matching. See [license and
-attribution](../README.md#license-and-attribution) and [HD-005](hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports).
+attribution](developer-guide.md#license-and-attribution) and [HD-005](hardware-decisions.md#hd-005-gpl-30-licensing-for-qdomyos-zwift-ports).
 
 ## Initial BLE vendor protocols
 
@@ -421,7 +421,7 @@ these additional vendor protocols is verified on hardware.
   inputs, not ambiguous machines or other profiles; stale treadmill
   telemetry disables controls until fresh data restores readiness.
   Disconnect/stale data never send stop/speed; physical controls and the safety
-  key remain primary. See [FTMS output](../README.md#ftms-output-bluetooth-le).
+  key remain primary. See [FTMS output](developer-guide.md#ftms-output-bluetooth-le).
 
 ## FTMS machine profiles and data fields
 
@@ -498,4 +498,4 @@ power (all profiles except treadmill). The Feature characteristic only
 announces fields the selected profile can carry and the source supports.
 
 For the extension steps (`SourceProtocol`, precise registry priorities, byte-sample
-host tests and attribution headers), see [adding new protocols](../README.md#supported-devices-and-new-protocols).
+host tests and attribution headers), see [adding new protocols](developer-guide.md#supported-devices-and-new-protocols).
