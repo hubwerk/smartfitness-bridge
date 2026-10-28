@@ -70,6 +70,21 @@ The bridge reconnects to its saved input after reboot. Use **Disconnect** or
 **Unpair** from Devices when needed. For safety, treadmill controls are only
 available when the device is already running and reporting fresh data.
 
+## Hardware variants and accessories
+
+The bridge works with either board using Bluetooth FTMS; no extra peripheral is
+needed for that output. ANT+ FE-C requires an external ANT radio. Affiliate links
+are provided for convenience and are not an endorsement.
+
+| Variant | Board (PlatformIO environment) | Base peripherals | Optional ANT+ hardware and affiliate links |
+|---|---|---|---|
+| Web | [ESP32-S3 DevKitC-1 N16R8](https://link.amazon/B04sCBCRH) (`esp32s3dev`) | USB data cable for flashing; no extra hardware for BLE FTMS | [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [USB-C to USB-A OTG adapter (LogiLink AU0055)](https://link.amazon/B01z26VJ2). USB-stick ANT+ output is hardware-verified on this variant. |
+| HMI | [ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display](https://link.amazon/B0eHDSltG) (`crowpanel128`) | USB data cable for flashing; display and controls are integrated; no extra hardware for BLE FTMS | ANT+ requires a separate UART ANT module, wiring, and a custom build with UART pins configured; this path is not hardware-verified. The previously listed [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [MX1.25 4-pin to USB cable (Waveshare)](https://link.amazon/B07BNj1lk) are **not a recommended or verified CrowPanel USB-host setup**. |
+
+Use the USB-C connection to flash the CrowPanel. Do not assume its USB port can
+host an ANT+ stick; see the [hardware notes](docs/developer-guide.md#crowpanel-usb-host-is-not-recommended-schematic-verification-required)
+before planning any ANT+ wiring or accessories.
+
 ## Supported equipment by fitness profile
 
 These are BLE input protocols. Measurements are forwarded using the selected
