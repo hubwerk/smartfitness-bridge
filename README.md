@@ -76,10 +76,12 @@ The bridge works with either board using Bluetooth FTMS; no extra peripheral is
 needed for that output. ANT+ FE-C requires an external ANT radio. Affiliate links
 are provided for convenience and are not an endorsement.
 
-| Variant | Board (PlatformIO environment) | Base peripherals | Optional ANT+ hardware and affiliate links |
-|---|---|---|---|
-| Web | [ESP32-S3 DevKitC-1 N16R8](https://link.amazon/B04sCBCRH) (`esp32s3dev`) | USB data cable for flashing; no extra hardware for BLE FTMS | [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [USB-C to USB-A OTG adapter (LogiLink AU0055)](https://link.amazon/B01z26VJ2). USB-stick ANT+ output is hardware-verified on this variant. |
-| HMI | [ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display](https://link.amazon/B0eHDSltG) (`crowpanel128`) | USB data cable for flashing; display and controls are integrated; no extra hardware for BLE FTMS | ANT+ via UART requires the same [Coospo ANT+ module](https://link.amazon/B0dalQtFe) as the web variant, plus this [UART adapter](https://link.amazon/B0ikuHkY1), wiring, and a custom build with UART pins configured. This setup is not hardware-verified. The USB-stick path on the CrowPanel is **not recommended or verified**. |
+| | Web | HMI |
+|---|---|---|
+| **Board (PlatformIO environment)** | [ESP32-S3 DevKitC-1 N16R8](https://link.amazon/B04sCBCRH) (`esp32s3dev`) | [ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display](https://link.amazon/B0eHDSltG) (`crowpanel128`) |
+| **Base peripherals** | USB data cable for flashing; no extra hardware for BLE FTMS | USB data cable for flashing; display and controls are integrated; no extra hardware for BLE FTMS |
+| **Optional ANT+ hardware and affiliate links** | [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [USB-C to USB-A OTG adapter (LogiLink AU0055)](https://link.amazon/B01z26VJ2). USB-stick ANT+ output is hardware-verified on this variant. | ANT+ via UART requires the same [Coospo ANT+ module](https://link.amazon/B0dalQtFe) as the web variant, plus this [UART adapter](https://link.amazon/B0ikuHkY1), wiring, and a custom build with UART pins configured. This setup is not hardware-verified. The USB-stick path on the CrowPanel is **not recommended or verified**. |
+| **Example** | <img src="docs/hmi/web/01-dashboard-desktop.png" alt="Web variant dashboard" width="480"> | <img src="docs/hmi/hmi/01-dashboard-bike.png" alt="CrowPanel HMI dashboard" width="240"> |
 
 Use the USB-C connection to flash the CrowPanel. Do not assume its USB port can
 host an ANT+ stick; see the [hardware notes](docs/developer-guide.md#crowpanel-usb-host-is-not-recommended-schematic-verification-required)
