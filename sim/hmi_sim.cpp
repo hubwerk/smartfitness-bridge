@@ -73,6 +73,7 @@ void checkLcars() {
     assert(lv_color_to_u32(lv_obj_get_style_bg_color(button, LV_PART_MAIN)) ==
            lv_color_to_u32(lv_color_hex(lcars::Lavender)));
     assert(lv_obj_get_style_shadow_width(button, LV_PART_MAIN) == 0);
+    assert(lv_obj_get_style_radius(button, LV_PART_MAIN) == 10);
     lv_obj_add_state(button, LV_STATE_FOCUSED);
     // Focus colors switch immediately: no fading highlight on the old item.
     assert(lv_obj_get_style_border_width(button, LV_PART_MAIN) == 2);
@@ -89,7 +90,7 @@ void checkLcars() {
         assert(width.num + pad.num == lcars::FocusRing);
     }
     lv_obj_delete(button);
-    std::printf("LCARS palette, focus, and Latin-1 fonts passed\n");
+    std::printf("Momentum palette, focus, and Latin-1 fonts passed\n");
 }
 
 void pump(std::uint32_t ms) {

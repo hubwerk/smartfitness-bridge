@@ -43,7 +43,7 @@ void apply(lv_theme_t*, lv_obj_t* object) {
         lv_obj_set_style_text_font(object, &sf_antonio_20, LV_PART_SELECTED);
     }
     if (lv_obj_check_type(object, &lv_keyboard_class)) {
-        lv_obj_set_style_bg_color(object, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(object, lv_color_hex(Black), 0);
         lv_obj_set_style_radius(object, 12, 0);
         lv_obj_set_style_bg_color(object, lv_color_hex(Lavender), LV_PART_ITEMS);
         lv_obj_set_style_text_color(object, lv_color_black(), LV_PART_ITEMS);
@@ -138,7 +138,7 @@ void pill(lv_obj_t* object, std::uint32_t color) {
     lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_grad_dir(object, LV_GRAD_DIR_NONE, 0);
     lv_obj_set_style_text_color(object, lv_color_black(), 0);
-    lv_obj_set_style_radius(object, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(object, 10, 0);
     lv_obj_set_style_shadow_width(object, 0, 0);
     lv_obj_set_style_border_width(object, 0, 0);
     lv_obj_set_style_border_width(object, 2, LV_STATE_FOCUSED);
@@ -210,8 +210,8 @@ Gauge gauge(lv_obj_t* parent) {
         const auto start = static_cast<std::uint32_t>(135 + i * 270 / segments.size());
         const auto end = static_cast<std::uint32_t>(135 + (i + 1) * 270 / segments.size() - 3);
         lv_arc_set_bg_angles(arc, start, end);
-        lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
-        lv_obj_set_style_arc_rounded(arc, false, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(arc, 5, LV_PART_MAIN);
+        lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
         lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
         lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
         segments[i] = arc;
@@ -223,7 +223,7 @@ Gauge gauge(lv_obj_t* parent) {
 void setGauge(const Gauge& segments, float ratio, bool alert) {
     const auto lit = static_cast<std::size_t>(std::min(1.0F, std::max(0.0F, ratio)) * segments.size());
     for (std::size_t i = 0; i < segments.size(); ++i) {
-        lv_obj_set_style_arc_color(segments[i], lv_color_hex(alert ? Alert : (i < lit ? LightBlue : Tan)),
+        lv_obj_set_style_arc_color(segments[i], lv_color_hex(alert ? Alert : (i < lit ? Orange : Tan)),
                                    LV_PART_MAIN);
         lv_obj_set_style_arc_opa(segments[i], alert || i < lit ? LV_OPA_COVER : LV_OPA_40, LV_PART_MAIN);
     }

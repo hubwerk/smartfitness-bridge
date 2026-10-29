@@ -1,9 +1,10 @@
-# LCARS-inspired user interfaces
+# Momentum / A little less interface. A lot more movement.
 
-One original, LCARS-inspired design system serves the **CrowPanel 1.28" round
+One reduced, sport-inspired design system serves the **CrowPanel 1.28" round
 240×240 HMI** (`crowpanel128`, LVGL 9.2.2) and the **self-contained web app**
-(`esp32s3dev`). The visual reference is the warm, flat, condensed design language
-of TNG-era interfaces; these are not reproductions of screen assets.
+(`esp32s3dev`). Charcoal surfaces, warm-white readouts and one electric-lime
+accent bring the focus back to effort. The tone is encouraging, not competitive:
+no invented scores, goals, workout history or claims about a rider's performance.
 
 The HMI display, rotary encoder (turning/direction), and knob press have been tested
 and work on the real CrowPanel. Gallery images are simulator renders with fixed
@@ -14,7 +15,12 @@ API contracts, BLE and FTMS behavior are unchanged.
 
 ## Shared design system
 
-The tokens below are the design specification. HMI implementation:
+| Web / desktop | Web / phone |
+|---|---|
+| ![Momentum dashboard](web/00-momentum-desktop.png) | ![Momentum mobile dashboard](web/00-momentum-mobile.png) |
+
+The tokens below are the design specification. HMI implementation (legacy
+`lcars` identifiers are retained to avoid changing screen/control contracts):
 [`lcars_theme.h`](../../include/variants/hmi/lcars_theme.h) and
 [`lcars_theme.cpp`](../../src/variants/hmi/lcars_theme.cpp).
 Web implementation: CSS custom properties in
@@ -23,17 +29,24 @@ There are no gradients, shadows, textured materials or external web resources.
 
 | Token | Colour | Role |
 |---|---|---|
-| Black | `#000000` | Background and negative space; text on coloured pills |
-| Orange | `#FF9900` | Primary frame and navigation |
-| Golden | `#FFAA00` | Active/pressed controls |
-| Peach | `#FFCC99` | Navigation and highlighted selection |
-| Tan | `#CC9966` | Secondary frame segments, inactive gauge |
-| Lavender | `#CC99CC` | Secondary actions and targets |
-| Violet | `#9999FF` | Sensor/list data |
-| Light blue | `#99CCFF` | Telemetry and readouts |
-| Blue | `#5566FF` | Data accents |
-| Alert | `#CC4444` | Failure, disconnect, stale data, stop and destructive actions |
-| White | `#FFFFFF` | Keyboard/knob focus border; web `:focus-visible` outline |
+| Charcoal | `#111512` | Background / negative space |
+| Surface | `#1B211D` | Web cards and secondary actions |
+| Line | `#354039` | Web borders and meter track |
+| Warm white | `#F3F4ED` | Readouts and primary text |
+| Sage | `#A8B3AA` | Secondary text and neutral status fills |
+| Mist | `#BAC8BD` | HMI secondary actions and service fills |
+| Electric lime | `#D2F65A` | Primary action, selected tab, power tile, active gauge, ready status |
+| Soft lime | `#E1FF87` | Pressed/selected controls |
+| Coral | `#FF9990` | Errors, stop, disconnect and destructive actions |
+| Amber | `#F4CC77` | Web warnings, stale data and retry backoff |
+| White | `#FFFFFF` | HMI keyboard/knob focus border |
+
+Use one dominant accent per view; neutral surfaces do the grouping. Web spacing
+uses a 4 px base, 12 px grid gaps, 16 px card radii and 44 px minimum controls.
+Power is highlighted only when a finite power measurement is actually present.
+Other machine profiles retain their native metrics; missing data is never
+replaced with a fictitious workout. The original inline route illustration is
+decorative, hidden from assistive technology and omitted on phones.
 
 ### Typography and licence
 
@@ -45,45 +58,49 @@ Both variants subset `U+0020–007E` and `U+00A0–00FF`, including digits and G
 umlauts. HMI text sizes are **16 and 20 px**; the **48 px** readout subsets digits
 and numeric punctuation only. Fonts use 4-bit antialiasing, uncompressed LVGL
 bitmaps. LVGL's Montserrat 14 is retained only as a symbol fallback.
-Web uses a **9,292-byte WOFF2**, embedded as a data URL in the HTML and gzipped
-with the page into flash; it never makes a font request. The whole compressed
-page grows **5,334 → 17,522 bytes (+12,188 B)**; the font payload contributes
-**10,299 B** of that compressed asset.
+Web uses system sans-serif for body text and controls (14 px), with Antonio
+reserved for the expressive headline and tabular numeric readouts (48 px,
+100 px for primary desktop power). The existing **9,292-byte WOFF2** is embedded
+as a data URL and gzipped with the page into flash; it never makes a font request.
+The screenshot script prints the current compressed asset size.
 
-UI labels are displayed uppercase; editable names and underlying device/adapter
-identifiers retain their values. Text on bright fills is black; body data is light blue or
-peach on black. Error indicators also include text, not colour alone.
+HMI labels and web section/metric labels are uppercase; web actions and body text
+use sentence case. Editable names and underlying device/adapter identifiers
+retain their values. Text on bright fills is dark; readouts are warm white on
+charcoal. Error indicators also include text, not colour alone.
 
 ### Shapes and states
 
-- HMI: the header is a filled orange pill band behind the uppercase title,
+- HMI: the header is a filled lime pill band behind the uppercase title,
   which is drawn inverse (black), like the dashboard state pill. There is no
   top arc, elbow, vertical sidebar or bottom frame, so the gauge ring runs
   uninterrupted across the top.
-- Web: intentionally retains the swept elbow, title bar and desktop sidebar
-  (responsive navigation pills on phones). This HMI revision does not change it.
-- Navigation/action pills: solid fills, rounded endcaps, right-aligned labels.
+- Web: no decorative rails, elbows or multicolour navigation. A quiet tab bar
+  uses a lime underline for selection. Four metric columns become two on phones;
+  the primary power tile spans two rows on desktop and two columns on phones.
+  Supporting bridge, input, output and network details remain available below.
+- Actions: solid fills, 10 px corners, left-aligned HMI labels.
   Ordinary HMI action targets are at least 36 px tall; touch adjustment helpers
   are 44×44 px. The existing compact text keyboard is also operable by knob;
   use the larger preset pills when possible.
 - Data: large central digits, small unit, labelled secondary/status readouts;
-  blue segments fill an arc (HMI) or a linear gauge (web).
+  lime segments fill a thin 5 px arc (HMI) or a linear gauge (web).
 - Signal strength (HMI): a 4-bar pictogram (`lcars::signalBars`) replaces the
   numeric RSSI in scan results (black on the pill, left of the label) and device
-  details (light blue). Bars lit: ≥ −60 dBm 4, ≥ −70 dBm 3, ≥ −80 dBm 2, else 1;
+  details (warm white). Bars lit: ≥ −60 dBm 4, ≥ −70 dBm 3, ≥ −80 dBm 2, else 1;
   unlit bars stay visible at 30 % opacity so the level reads by shape.
-- Focus: brighter selection with a white outline, including `:focus-visible`.
-  On the HMI the knob cursor is a 2 px white inner border plus a 2 px orange
-  ring 1 px outside the focused pill/roller/keyboard (light blue while
+- Focus: web `:focus-visible` uses a 2 px lime outline with a 4 px offset.
+  On the HMI the knob cursor is a 2 px white inner border plus a 2 px lime
+  ring 1 px outside the focused pill/roller/keyboard (warm white while
   editing). Lists, button rows and the roller keep 3 px of padding
   (`lcars::FocusRing`) so the ring is never clipped. Keyboard keys use the
   inner border only. The dashboard, whose whole circle is the only knob
   target, draws no ring on the panel edge.
-  Pressed: golden colour swap. Disabled: dimmed and non-actionable.
-- HMI red alert colours only the header band for disconnected/stale status,
+  Pressed: soft-lime colour swap. Disabled: dimmed and non-actionable.
+- HMI coral alert colours only the header band for disconnected/stale status,
   command rejection, speed confirmation and factory reset. The scrollbar and
   telemetry gauge retain their normal colours. Stop/destructive action pills
-  keep their existing semantic red. No blinking is required.
+  keep their semantic coral. No blinking is required.
 - HMI status snapshots remain at **200 ms (≤5 Hz)**; scan refresh remains 1 Hz.
   Web respects `prefers-reduced-motion`.
 
@@ -100,7 +117,7 @@ touching lines (the unit sits on the value's baseline), the adapter roller
 shows three complete rows, and the adjustment +/- helpers stay inside the
 gauge ring.
 Scrollable lists and the adapter/model roller have a **left curved scrollbar**:
-a dim lavender 4 px track and orange 6 px thumb follow the left circular edge.
+a dim sage 4 px track and lime 6 px thumb follow the left circular edge.
 Thumb length represents the visible fraction (minimum 8° for very long content);
 position represents the clamped scroll offset. It updates with swipe scrolling,
 encoder focus/roller movement and content/layout changes. LVGL's straight
@@ -108,15 +125,14 @@ scrollbar is disabled. Non-scrollable content hides the arc completely:
 dashboard and short confirmation dialogs leave the left side without a scrollbar.
 Lists settle their layout before scrolling to focused pills and preserve
 the existing encoder focus order. The outside of each simulator PNG is masked
-grey to show the physical round boundary. The rectangular web frame uses a
-sidebar on desktop and a navigation pill row on narrow phones.
+grey to show the physical round boundary. Web tabs remain in a single row on
+desktop and narrow phones.
 
-### Legal boundary
+### Assets
 
-**“LCARS-inspired” only:** original shapes and colours plus the freely licensed
-font. No Star Trek/Starfleet logos, insignia, registry imagery, copied screen
-assets, sounds or branded product identity are included. No affiliation or
-endorsement is implied.
+The route artwork and brand mark are original inline shapes/text. The existing
+Antonio font retains its SIL Open Font License. No external images, trackers,
+font requests or new runtime dependencies are introduced.
 
 ## Navigation
 
@@ -192,7 +208,7 @@ endorsement is implied.
 **Devices → Input services** shows the paired device's advertised UUIDs (`ADV`,
 violet) and subscription attempts (`SUB`). Each subscription names its service,
 characteristic and mode (`NTF` notification / `IND` indication), with textual
-`OK` (light blue), `FAIL` (alert) or `PENDING` (tan) state. These are diagnostics,
+`OK` (warm white), `FAIL` (coral) or `PENDING` (sage) state. These are diagnostics,
 not controls. Every row is a focusable, wrapping pill so the knob can scroll
 through all entries without touch. Scan-device details also show advertised
 services. Unknown UUIDs retain a shortened identifier.
@@ -224,9 +240,9 @@ Changes use `SetOutputServices` with transport `ant`; Save persists them.
 **Settings → ANT+ status** (also reachable from Output services) shows the live
 link, detected hardware, device number, open/channel-limit counts, individual
 channel enablement/broadcast/data state, and display/control activity. These
-light-blue, read-only pills are fully scrollable by knob. Module detection is
+warm-white, read-only pills are fully scrollable by knob. Module detection is
 explicit even when output is off. No module, a waiting selected output or a
-reported error uses an LCARS alert header and alert status pill;
+reported error uses a coral alert header and alert status pill;
 it does not claim that a display is connected merely because a channel is open.
 Labels have English and German translations. The gallery uses simulated UART
 module data; it is not evidence of a physical radio connection.
@@ -279,11 +295,11 @@ sample data. They are historical references, not regenerated by the update scrip
 
 | HMI before | HMI after |
 |---|---|
-| ![Original HMI](before/hmi-dashboard.png) | ![LCARS-inspired HMI](hmi/01-dashboard-bike.png) |
+| ![Original HMI](before/hmi-dashboard.png) | ![Momentum HMI](hmi/01-dashboard-bike.png) |
 
 | Web before | Web after |
 |---|---|
-| ![Original web](before/web-dashboard-desktop.png) | ![LCARS-inspired web](web/01-dashboard-desktop.png) |
+| ![Original web](before/web-dashboard-desktop.png) | ![Momentum web](web/01-dashboard-desktop.png) |
 
 ## Regeneration
 
@@ -308,7 +324,7 @@ live subscription/availability/mask/restart redraws, retained knob focus, and
 English/German layouts at every focus position. A geometric layout check on every
 screenshot (and on every dashboard metric of every machine profile at its
 widest value) fails if the focus ring is clipped, if drawn elements or text
-ink overlap each other or the LCARS arcs, if a roller row is cut, or if
+ink overlap each other or the gauge arcs, if a roller row is cut, or if
 anything leaves the round panel. The web script routes
 the actual HTML and deterministic API/WebSocket fixtures inside the browser
 (no external server or hardware) and uses the pinned Chromium version.
@@ -341,4 +357,5 @@ WOFF2 using Brotli, generates LVGL C arrays using `lv_font_conv`, and refreshes
 the single embedded web-font payload.
 
 See [HD-008](../hardware-decisions.md#hd-008-shared-lcars-inspired-interface-design)
-for memory impact and the decision boundary.
+for the historical font/memory decision and implementation boundary. Momentum
+reuses those assets and screen structures, replacing the former visual language.

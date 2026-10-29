@@ -14,17 +14,18 @@ LV_FONT_DECLARE(sf_antonio_48);
 
 namespace hmi::lcars {
 
-constexpr std::uint32_t Black = 0x000000;
-constexpr std::uint32_t Orange = 0xFF9900;
-constexpr std::uint32_t Golden = 0xFFAA00;
-constexpr std::uint32_t Peach = 0xFFCC99;
-constexpr std::uint32_t Tan = 0xCC9966;
-constexpr std::uint32_t Lavender = 0xCC99CC;
-constexpr std::uint32_t Violet = 0x9999FF;
-constexpr std::uint32_t LightBlue = 0x99CCFF;
-constexpr std::uint32_t Blue = 0x5566FF;
-constexpr std::uint32_t Gray = 0x888888;
-constexpr std::uint32_t Alert = 0xCC4444;
+// Legacy token names keep the screen code stable; values follow Momentum.
+constexpr std::uint32_t Black = 0x111512;
+constexpr std::uint32_t Orange = 0xD2F65A;
+constexpr std::uint32_t Golden = 0xE1FF87;
+constexpr std::uint32_t Peach = 0xE1FF87;
+constexpr std::uint32_t Tan = 0xA8B3AA;
+constexpr std::uint32_t Lavender = 0xBAC8BD;
+constexpr std::uint32_t Violet = 0xBAC8BD;
+constexpr std::uint32_t LightBlue = 0xF3F4ED;
+constexpr std::uint32_t Blue = 0xD2F65A;
+constexpr std::uint32_t Gray = 0xA8B3AA;
+constexpr std::uint32_t Alert = 0xFF9990;
 constexpr std::size_t GaugeSegments = 24;
 // Knob focus cursor drawn around the focused widget (outline width + gap).
 // Containers of focusable widgets keep at least this much padding so the

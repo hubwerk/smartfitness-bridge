@@ -372,7 +372,7 @@ void HmiUi::build(bool keepFocus) {
 
 lv_obj_t* HmiUi::makeScreen(const std::string& title) {
     root_ = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(root_, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(root_, lv_color_hex(lcars::Black), 0);
     lv_obj_remove_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
     if (!title.empty()) header_ = lcars::frame(root_, title, screen_ == Screen::Confirm);
     if (screen_ != Screen::Dashboard) {
@@ -415,7 +415,7 @@ lv_obj_t* HmiUi::addButton(lv_obj_t* parent, const std::string& text, std::funct
     lv_label_set_text(label, lcars::uppercase(text).c_str());
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, lv_pct(100));
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_text_color(label, lv_color_black(), 0);
     lv_obj_center(label);
     bind(button, LV_EVENT_FOCUSED, [button](lv_event_t*) {
@@ -460,7 +460,7 @@ void HmiUi::buildDashboard() {
     lv_group_add_obj(group_, pad);
 
     dash_.segments = lcars::gauge(pad);
-    header_ = lcars::frame(pad, "OPERATIONS", false);
+    header_ = lcars::frame(pad, "MOMENTUM", false);
 
     // Stacked from top (line box y) so that no two text lines touch between
     // the header band (y 30..57) and the bottom gap of the gauge.

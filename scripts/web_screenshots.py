@@ -329,11 +329,21 @@ def render(browser, output, name, width, height):
     assert page.evaluate("document.fonts.size") == 1, "Missing embedded font face"
     assert page.evaluate("document.fonts.check('18px Antonio')"), "Embedded font did not load"
     assert page.evaluate("[...document.fonts][0].status") == "loaded"
-    expect(page.locator(".lcars-rail")).to_have_attribute("aria-hidden", "true")
+    expect(page.locator(".brand-mark")).to_have_attribute("aria-hidden", "true")
+    expect(page.locator(".route-art")).to_have_attribute("aria-hidden", "true")
+    expect(page.locator(".intro h2")).to_have_text("Less setup.More movement.")
+    expect(page.locator(".metric.primary #m-power")).to_have_text("214")
+    assert page.locator(".metric.primary").evaluate(
+        "e => getComputedStyle(e).backgroundColor") == "rgb(210, 246, 90)"
+    assert page.locator("body").evaluate(
+        "e => getComputedStyle(e).backgroundColor") == "rgb(17, 21, 18)"
+    assert page.locator(".metric.primary").evaluate(
+        "e => getComputedStyle(e).gridColumnStart") == ("span 2" if width < 650 else "auto")
     assert page.evaluate("""() => [...document.querySelectorAll('*')].every(element =>
         ['', '::before', '::after'].every(pseudo =>
             getComputedStyle(element, pseudo || null).backgroundImage === 'none'))"""), \
         "Decorative backgrounds must use flat solid shapes"
+    page.screenshot(path=str(output / f"00-momentum-{name}.png"), full_page=True)
     page.evaluate("""() => {
         window.__completed = [];
         const originalFinish = finish;
@@ -352,7 +362,7 @@ def render(browser, output, name, width, height):
     # Roving tab focus, wrapping arrows and Home/End automatic activation.
     tab = page.locator("#tab-dash")
     tab.focus()
-    assert tab.evaluate("e => getComputedStyle(e).outlineColor") == "rgb(255, 255, 255)"
+    assert tab.evaluate("e => getComputedStyle(e).outlineColor") == "rgb(210, 246, 90)"
     for key, panel in [("ArrowRight", "dev"), ("End", "set"), ("Home", "dash"),
                        ("ArrowLeft", "set"), ("ArrowRight", "dash")]:
         page.keyboard.press(key)
@@ -374,6 +384,7 @@ def render(browser, output, name, width, height):
     expect(page.locator("#metrics .metric")).to_have_count(1)
     expect(page.locator("#m-cadence")).to_have_text("86")
     assert page.locator("#m-power, #m-heartRate").count() == 0
+    assert page.locator(".metric.primary").count() == 0
     empty = json.loads(json.dumps(STATUS))
     empty["telemetry"] = {}
     sockets[0].send(json.dumps(empty))
@@ -391,7 +402,7 @@ def render(browser, output, name, width, height):
     expect(page.locator("#s-bridge")).to_contain_text("no control")
     expect(page.locator("#ctl-state")).to_contain_text("control not available")
     assert page.locator("#s-input .bad").evaluate(
-        "e => getComputedStyle(e).backgroundColor") == "rgb(204, 68, 68)"
+        "e => getComputedStyle(e).backgroundColor") == "rgb(255, 153, 144)"
     check_legend_colors(page)
 
     panel_names = {"dash": "dashboard", "dev": "devices", "ctl": "control", "set": "settings"}
@@ -415,13 +426,13 @@ def render(browser, output, name, width, height):
                 "title", PAIRED["subscriptions"][2]["service"] + " / " +
                 PAIRED["subscriptions"][2]["characteristic"])
             assert page.locator("#paired-advertised .sensor").first.evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(153, 153, 255)"
+                "e => getComputedStyle(e).backgroundColor") == "rgb(186, 200, 189)"
             assert page.locator("#paired-subscriptions .pending").evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(204, 153, 102)"
+                "e => getComputedStyle(e).backgroundColor") == "rgb(168, 179, 170)"
             assert page.locator("#paired-subscriptions .ok").evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(153, 204, 255)"
+                "e => getComputedStyle(e).backgroundColor") == "rgb(210, 246, 90)"
             assert page.locator("#paired-subscriptions .bad").evaluate(
-                "e => getComputedStyle(e).textTransform") == "uppercase"
+                "e => getComputedStyle(e).textTransform") == "none"
             # Input, bridge and receiving device share one card layout.
             cards = page.locator("#dev .device-card")
             expect(cards).to_have_count(3)
@@ -471,7 +482,7 @@ def render(browser, output, name, width, height):
             expect(page.locator("#ctl-result")).to_have_text("control: disconnected")
             assert commands[-1] == ("control", {"control": "power", "value": 999})
             assert page.locator("#ctl-result").evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(204, 68, 68)"
+                "e => getComputedStyle(e).backgroundColor") == "rgb(255, 153, 144)"
             assert page.locator("#ctl-result").evaluate(
                 "e => getComputedStyle(e).backgroundColor") == page.locator(
                     "#ctl .legend-swatch.bad").evaluate(
@@ -538,12 +549,12 @@ def render(browser, output, name, width, height):
     expect(ble_group.locator('[data-service="rsc"]')).to_be_disabled()
     expect(ble_group.locator('[data-service="rsc"]')).to_contain_text("NO DATA")
     assert ble_group.locator('[data-service="cps"]').evaluate(
-        "e => getComputedStyle(e).backgroundColor") == "rgb(255, 170, 0)"
+        "e => getComputedStyle(e).backgroundColor") == "rgb(225, 255, 135)"
     ble_group.locator('[data-service="cps"]').click()
     expect(ble_group.locator('[data-service="cps"]')).to_have_attribute("aria-pressed", "false")
     expect(page.locator("#c-ftmsRestart")).to_contain_text("Save + restart to apply this BLE service selection")
     assert ble_group.locator('[data-service="cps"]').evaluate(
-        "e => getComputedStyle(e).backgroundColor") == "rgb(204, 153, 102)"
+        "e => getComputedStyle(e).backgroundColor") == "rgb(17, 21, 18)"
     ant_group.locator('[data-service="power"]').focus()
     page.keyboard.press("Space")
     expect(page.locator("#c-antWarning")).to_be_visible()

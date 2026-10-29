@@ -65,8 +65,10 @@ never starts Wi-Fi.
 
 ## User interfaces
 
-Both variants share an **LCARS-inspired** palette, Antonio typography, swept
-frames, pill controls and telemetry gauges. Existing commands and safety
+Both variants share **Momentum**, a reduced charcoal, warm-white and electric-lime
+design system. The web uses system sans-serif labels, Antonio readouts, quiet cards
+and an effort-first dashboard; the HMI uses round-safe controls and a thin lime gauge.
+Both remain self-contained with no external assets. Existing commands and safety
 confirmations are unchanged. The screenshots are simulator/browser renders, not
 photographs; for hardware test status see
 [Overview and project status](#overview-and-project-status).
