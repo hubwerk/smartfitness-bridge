@@ -3,9 +3,9 @@
 [![CI](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml)
 
 The bridge reads supported fitness equipment over Bluetooth Low Energy (BLE) and
-forwards its measurements to a training app or display using Bluetooth FTMS or
-ANT+ FE-C. It runs on an ESP32-S3 DevKitC-1 N16R8 (web interface) or an ELECROW
-CrowPanel 1.28" (local display).
+forwards its measurements to a training app or display using Bluetooth FTMS.
+The web variant also supports ANT+ FE-C. It runs on an ESP32-S3 DevKitC-1 N16R8
+(web interface) or an ELECROW CrowPanel 1.28" (local display).
 
 > **Testing status:** Wahoo KICKR FTMS input → BLE FTMS output → MyWhoosh has
 > been verified on both board variants. Wahoo KICKR input → ANT+ FE-C output →
@@ -45,8 +45,6 @@ the board's 16 MB flash layout; do not select a different partition scheme.
    live measurements.
 4. Choose Bluetooth FTMS or ANT+ FE-C output in **Settings**. For ANT+ on the
    web variant, connect a supported USB ANT+ stick through the USB host port.
-   The CrowPanel requires an externally wired UART ANT module and a custom build
-   with its UART pins configured; that hardware path is not yet verified.
 5. Connect your training app or display to the bridge and start a workout from
    that app. The bridge does not start treadmill belts.
 
@@ -55,10 +53,7 @@ the board's 16 MB flash layout; do not select a different partition scheme.
 1. Wake the fitness device and disconnect other apps from it.
 2. Use the rotary control or touchscreen to open **Devices**, scan, select the
    device, and pair. Confirm that the dashboard shows live measurements.
-3. Open **Settings** and select the output protocol. ANT+ on the CrowPanel
-   requires an externally wired UART ANT module and a custom build with its
-   UART pins configured; that hardware path is not yet verified. The CrowPanel
-   USB ANT+ path is not recommended.
+3. Open **Settings** and select Bluetooth FTMS output.
 4. Connect your training app or display to the bridge and start the workout
    from that app. The HMI variant does not use Wi-Fi.
 
@@ -73,19 +68,17 @@ available when the device is already running and reporting fresh data.
 ## Hardware variants and accessories
 
 The bridge works with either board using Bluetooth FTMS; no extra peripheral is
-needed for that output. ANT+ FE-C requires an external ANT radio. Affiliate links
-are provided for convenience and are not an endorsement.
+needed for that output. ANT+ FE-C on the web variant requires an external ANT
+radio. Affiliate links are provided for convenience and are not an endorsement.
 
 | | Web | HMI |
 |---|---|---|
 | **Board (PlatformIO environment)** | [ESP32-S3 DevKitC-1 N16R8](https://link.amazon/B04sCBCRH) (`esp32s3dev`) | [ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display](https://link.amazon/B0eHDSltG) (`crowpanel128`) |
 | **Base peripherals** | USB data cable for flashing; no extra hardware for BLE FTMS | USB data cable for flashing; display and controls are integrated; no extra hardware for BLE FTMS |
-| **Optional ANT+ hardware and affiliate links** | [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [USB-C to USB-A OTG adapter (LogiLink AU0055)](https://link.amazon/B01z26VJ2). USB-stick ANT+ output is hardware-verified on this variant. | ANT+ via UART requires the same [Coospo ANT+ module](https://link.amazon/B0dalQtFe) as the web variant, plus this [UART adapter](https://link.amazon/B0ikuHkY1), wiring, and a custom build with UART pins configured. This setup is not hardware-verified. The USB-stick path on the CrowPanel is **not recommended or verified**. |
+| **Optional ANT+ hardware and affiliate links** | [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [USB-C to USB-A OTG adapter (LogiLink AU0055)](https://link.amazon/B01z26VJ2). USB-stick ANT+ output is hardware-verified on this variant. | — |
 | **Example** | <img src="docs/hmi/web/01-dashboard-desktop.png" alt="Web variant dashboard" width="480"> | <img src="docs/hmi/hmi/01-dashboard-bike.png" alt="CrowPanel HMI dashboard" width="240"> |
 
-Use the USB-C connection to flash the CrowPanel. Do not assume its USB port can
-host an ANT+ stick; see the [hardware notes](docs/developer-guide.md#crowpanel-usb-host-is-not-recommended-schematic-verification-required)
-before planning any ANT+ wiring or accessories.
+Use the USB-C connection to flash the CrowPanel.
 
 ## Supported equipment by fitness profile
 
@@ -186,9 +179,9 @@ without fitness data, and Kinetic (licensed protocol) are not supported. See
 [the supported-device guide](docs/supported-devices.md) for details.
 
 FTMS characteristics include only fields supported by the selected profile and
-present in the incoming data. ANT+ FE-C output requires an external ANT radio;
-the USB-stick path is hardware-verified only on the web variant. The CrowPanel
-UART ANT path and ANT+ sensor channels are not hardware-verified. See the
+present in the incoming data. ANT+ FE-C output on the web variant requires an
+external ANT radio; the USB-stick path is hardware-verified, while UART ANT and
+ANT+ sensor channels are not hardware-verified. See the
 [developer guide](docs/developer-guide.md) for architecture, APIs, detailed
 protocol data, development instructions, and hardware decisions.
 

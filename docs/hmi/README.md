@@ -179,14 +179,6 @@ endorsement is implied.
 |---|
 | ![BLE restart required](hmi/30-output-services-restart.png) |
 
-| ANT+ UART module detected | ANT+ channels | No ANT+ module |
-|---|---|---|
-| ![Detected ANT+ module](hmi/31-ant-detected.png) | ![ANT+ channel diagnostics](hmi/32-ant-channels.png) | ![Waiting for ANT+ module](hmi/33-ant-no-module.png) |
-
-| ANT+ channel selection | Duplicate-power warning |
-|---|---|
-| ![ANT+ Auto and channel controls](hmi/34-ant-services.png) | ![FE-C and Power warning](hmi/35-ant-duplicate-power.png) |
-
 ### Service diagnostics and settings
 
 **Devices → Input services** shows the paired device's advertised UUIDs (`ADV`,
@@ -210,31 +202,12 @@ Changes use the shared `SetOutputServices` command with transport `ftms`.
 Save persists the selection. BLE service changes use a boot-only GATT topology;
 an explicit save-and-restart hint is always visible and the live
 `restartRequired` flag adds a definite warning.
-**Settings → Output** cycles **BLE FTMS → ANT+ → Off** when the live status
-reports an available ANT transport, including when its module is not detected.
-Without a transport, it keeps the **BLE FTMS → Off** cycle.
-With a transport, **Output services** also offers ANT+ Auto and independent
-FE-C/Power/HR/Speed-cadence/Footpod toggles. Auto is mask `0` (FE-C baseline);
-explicit bits are `1/2/4/8/16`. Unlike BLE FTMS, FE-C can be disabled when another
-channel remains selected. Disabling the last channel is rejected with a hint
-to choose Auto explicitly. Source-unavailable off channels cannot be enabled.
-Each control shows broadcasting, available or no-data state, and selecting both
-FE-C and Power shows an alert warning to pair only one power source in the app.
-Changes use `SetOutputServices` with transport `ant`; Save persists them.
-**Settings → ANT+ status** (also reachable from Output services) shows the live
-link, detected hardware, device number, open/channel-limit counts, individual
-channel enablement/broadcast/data state, and display/control activity. These
-light-blue, read-only pills are fully scrollable by knob. Module detection is
-explicit even when output is off. No module, a waiting selected output or a
-reported error uses an LCARS alert header and alert status pill;
-it does not claim that a display is connected merely because a channel is open.
-Labels have English and German translations. The gallery uses simulated UART
-module data; it is not evidence of a physical radio connection.
+**Settings → Output** cycles **BLE FTMS → Off**.
 Dashboard and Devices show compact `OUT`
 summaries of enabled services; enablement alone does not imply live data.
 New service strings include English and German translations.
 See [HD-009](../hardware-decisions.md#hd-009-selectable-ble-services-and-ant-output-channels)
-for schema migration, boot-frozen GATT and ANT radio/channel decisions.
+for schema migration and boot-frozen GATT decisions.
 
 ## Web gallery
 

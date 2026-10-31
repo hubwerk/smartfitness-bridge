@@ -3,7 +3,7 @@
 ## HD-001: ANT+ is not possible with the built-in ESP32-S3 radio
 
 **Status:** Accepted; USB stick (web default) and UART transports implemented;
-ANT hardware operation remains unverified
+USB FE-C operation verified on the web variant, UART hardware unverified
 
 ### Context
 The original goal includes ANT+ FE-C output. The ESP32-S3 radio supports Wi-Fi and Bluetooth LE 5 only.
@@ -12,16 +12,15 @@ silicon (e.g. Nordic nRF52 with SoftDevice S212/S340, nRF24AP2). Espressif provi
 the radio cannot be reprogrammed to speak ANT.
 
 ### Decision
-1. **The output protocol is selectable:** BLE FTMS (default), ANT+ FE-C or off
+1. **The output protocol is selectable:** BLE FTMS (default) or off, with
+   ANT+ FE-C also available on the web variant
    (`OutputProtocol`, current config schema v6). Only one output is active at a time.
-   Existing selectable FE-C and sensor channels are retained; UART/HMI support
-   does not change the configuration schema.
+   Existing selectable FE-C and sensor channels are retained.
 2. **Web builds default to a USB ANT+ stick on the ESP32-S3 USB-OTG port (USB host mode)** speaking the
    ANT serial protocol. Integration basis: COOSPO ANT+ USB stick (Dynastream ANTUSB2/ANTUSB-m
    class, USB `0fcf:1008` / `0fcf:1009`, one vendor interface with bulk IN/OUT endpoints).
-3. **Either variant uses UART1 when both `SF_ANT_UART_TX` and
-   `SF_ANT_UART_RX` are defined.** UART is the recommended CrowPanel ANT path;
-   without these flags HMI has no ANT transport. GPIO assignments remain
+3. **Web builds use UART1 when both `SF_ANT_UART_TX` and
+   `SF_ANT_UART_RX` are defined.** GPIO assignments remain
    **unverified schematic placeholders**, not safe numeric pin recommendations.
    Use an external D52/nRF24AP2 ANT serial/network processor, or an nRF52 with a
    compatible ANT SoftDevice **and ANT network-processor firmware** exposing
@@ -34,10 +33,7 @@ the radio cannot be reprogrammed to speak ANT.
 - Cross ESP32 `SF_ANT_UART_TX` → module RX and module TX →
   ESP32 `SF_ANT_UART_RX`; connect common GND. Use **3.3 V logic**; never
   connect raw 5 V to ESP32 GPIOs.
-- Supply the module per its datasheet. If using CrowPanel `OUT_5V`, its GPIO2
-  gate must be set **HIGH before transport begin**.
-  **TODO(verify):** OUT_5V routing, enable polarity, connector and load limits
-  on the actual board schematic. Use a suitable regulator or suitable 3.3 V
+- Supply the module per its datasheet. Use a suitable regulator or suitable 3.3 V
   supply as the module requires; bare modules are **not** assumed 5 V tolerant.
 - UART1 defaults to **57600 baud**; `SF_ANT_UART_BAUD` also supports
   **50000, 38400, 19200 and 4800**. Match the module's configured baud.
@@ -52,42 +48,21 @@ the radio cannot be reprogrammed to speak ANT.
   module reset polarity, voltage and pull requirements.
 - Verify all selected GPIOs against the board revision's schematic, connector
   routing and peripheral conflicts. The commented
-  [PlatformIO example](developer-guide.md#uart-ant-module-crowpanel-recommended-path-hardware-unverified)
+  [PlatformIO example](developer-guide.md#uart-ant-module-web-variant-hardware-unverified)
   intentionally uses `<verified TX GPIO>` / `<verified RX GPIO>` placeholders
   with `TODO(verify)` rather than asserting numeric pins are safe.
-
-### CrowPanel USB host is not recommended — verify on schematic
-
-The CrowPanel USB electrical design has **not** been verified for hosting an ANT
-stick; an OTG adapter alone does not establish suitability. Before any redesign:
-
-- **TODO(verify on schematic):** connector routing to native S3 **GPIO19/20**
-  versus a USB-UART bridge.
-- **TODO(verify on schematic):** provision of **VBUS 5 V output**, switching,
-  current limiting and power budget; do not assume a power-input port can source.
-- **TODO(verify on schematic):** USB-C **CC sink termination** and changes
-  required for a compliant host/source role.
-- **TODO(verify on schematic):** possible **backfeed with an external supply**
-  and other USB power sources; determine required isolation.
-- **TODO(verify on schematic):** potential **loss of USB flashing/console**
-  when native USB is repurposed and the remaining recovery/programming path.
 
 ### Consequences
 - `AntOutput` (core, host-tested) implements FE-C and selectable sensor channels behind
   `smartfitness::ant::AntTransport`; `AntUsbTransport` (web variant) implements it with the
   ESP-IDF USB Host Library (two tasks on core 0, non-blocking buffers to the main loop).
-  The shared UART transport uses UART1 and is selected by the TX/RX build flags
-  on either variant; web retains USB by default.
+  The UART transport uses UART1 and is selected by the TX/RX build flags
+  on the web variant, which retains USB by default.
 - **Wiring/power (DevKitC-1):** stick on the port labelled **USB** via an OTG adapter; bridge the
   **USB-OTG** solder jumper so the 5 V rail feeds VBUS; power, flash and use the Serial console
   through the **UART** port (`ARDUINO_USB_CDC_ON_BOOT=0` for the web variant).
-- HMI exposes the existing full multi-channel selection and per-channel status
-  when its ANT transport is configured, through shared commands/snapshots.
-  Without a configured transport it shows **ANT unavailable**. Transport
-  configuration does not prove a module is connected or responding.
 - Garmin/Zwift interoperability, USB hot-plugging, UART reset/nRTS/startup and
-  BLE/Wi-Fi/radio coexistence need hardware tests. No schematic verification or
-  working ANT hardware is claimed.
+  BLE/Wi-Fi/radio coexistence need further hardware tests.
 
 ## HD-002: Garmin watches (e.g. fenix 6 Pro) and Bluetooth FTMS
 
@@ -371,9 +346,7 @@ hardware measurements.
   focus targets so long diagnostics never require touch; status includes text
   as well as violet/light-blue/alert/tan colours. The UI submits shared
   `SetOutputServices` commands, keeps FTMS mandatory, treats Auto as baseline
-  only, and exposes BLE restart requirements. CrowPanel displays ANT unavailability
-  when no transport is configured; UART builds expose the full ANT controls/status.
-  No new fonts or runtime libraries
+  only, and exposes BLE restart requirements. No new fonts or runtime libraries
   are introduced.
 
 ## HD-009: Selectable BLE services and ANT+ output channels
@@ -427,9 +400,7 @@ NimBLE stack, so rebuilding the server must not tear down the central connection
   dropping selected channels. Only FE-C accepts controls, through the existing
   core control/safety gate; standalone sensor channels are telemetry-only.
 - Keep transport/configuration logic in the shared core and radio adapters.
-  Web and HMI consume snapshots and submit shared commands. CrowPanel HMI shows
-  **ANT unavailable** without a configured transport; with UART configured it
-  exposes the existing full multi-channel selection and status. This adds no
+  Web and HMI consume snapshots and submit shared commands. This adds no
   configuration-schema change.
   Both interfaces distinguish selected, available and active services and explain
   BLE save/restart requirements.
