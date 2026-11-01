@@ -14,18 +14,21 @@ LV_FONT_DECLARE(sf_antonio_48);
 
 namespace hmi::lcars {
 
-constexpr std::uint32_t Black = 0x000000;
-constexpr std::uint32_t Orange = 0xFF9900;
-constexpr std::uint32_t Golden = 0xFFAA00;
-constexpr std::uint32_t Peach = 0xFFCC99;
-constexpr std::uint32_t Tan = 0xCC9966;
-constexpr std::uint32_t Lavender = 0xCC99CC;
-constexpr std::uint32_t Violet = 0x9999FF;
-constexpr std::uint32_t LightBlue = 0x99CCFF;
-constexpr std::uint32_t Blue = 0x5566FF;
-constexpr std::uint32_t Gray = 0x888888;
-constexpr std::uint32_t Alert = 0xCC4444;
-constexpr std::size_t GaugeSegments = 24;
+// Historical names are retained for the existing diagnostic widgets.
+constexpr std::uint32_t Black = 0x07111D;
+constexpr std::uint32_t Orange = 0x142E43;
+constexpr std::uint32_t Golden = 0x16364A;
+constexpr std::uint32_t Peach = 0x204560;
+constexpr std::uint32_t Tan = 0x112638;
+constexpr std::uint32_t Lavender = 0x0D1E2E;
+constexpr std::uint32_t Violet = 0x102638;
+constexpr std::uint32_t LightBlue = 0xF1F6FC;
+constexpr std::uint32_t Blue = 0x53B9FF;
+constexpr std::uint32_t Gray = 0x16232D;
+constexpr std::uint32_t Alert = 0x78313B;
+constexpr std::uint32_t Muted = 0x9BB5CA;
+constexpr std::uint32_t Border = 0x2B465D;
+constexpr std::size_t GaugeSegments = 1;
 // Knob focus cursor drawn around the focused widget (outline width + gap).
 // Containers of focusable widgets keep at least this much padding so the
 // cursor is never clipped.
@@ -46,7 +49,7 @@ lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert);
 void scrollbar(lv_obj_t* container);
 void pill(lv_obj_t* object, std::uint32_t color = Lavender);
 Gauge gauge(lv_obj_t* parent);
-void setGauge(const Gauge& segments, float ratio, bool alert = false);
+void setGauge(const Gauge& segments, float ratio, bool alert = false, std::uint32_t color = Blue);
 // Signal pictogram with `level` (0..SignalBarCount) lit bars in `color`.
 lv_obj_t* signalBars(lv_obj_t* parent, int level, std::uint32_t color);
 

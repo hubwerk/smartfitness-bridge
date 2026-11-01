@@ -37,6 +37,12 @@ enum class Screen : std::uint8_t {
     AntStatus,
     FtmsName,
     Keyboard,
+    Training,
+    Connections,
+    Output,
+    Receiver,
+    Advanced,
+    History,
 };
 
 struct HmiActions {
@@ -95,6 +101,13 @@ private:
 
     void buildDashboard();
     void buildMenu();
+    void buildTraining();
+    void buildConnections();
+    void buildOutput();
+    void buildReceiver();
+    void buildAdvanced();
+    void buildHistory();
+    void updateHistory();
     void buildDevices();
     void buildDeviceDetail();
     void buildAdapterPicker();
@@ -141,6 +154,13 @@ private:
     std::vector<std::function<void(lv_event_t*)>> callbacks_;
 
     MetricCycler metric_;
+    bool metricSelected_ = false;
+    TrainingHistory telemetryHistory_;
+    lv_obj_t* chart_ = nullptr;
+    lv_chart_series_t* series_ = nullptr;
+    lv_obj_t* chartRange_ = nullptr;
+    lv_obj_t* chartEmpty_ = nullptr;
+    std::uint32_t chartUpdated_ = 0;
     struct DashboardWidgets {
         lcars::Gauge segments{};
         lv_obj_t* name = nullptr;
@@ -149,6 +169,12 @@ private:
         lv_obj_t* state = nullptr;
         lv_obj_t* target = nullptr;
         lv_obj_t* info = nullptr;
+        struct Secondary {
+            lv_obj_t* name = nullptr;
+            lv_obj_t* value = nullptr;
+            lv_obj_t* unit = nullptr;
+        };
+        std::array<Secondary, 2> secondary{};
     } dash_;
 
     smartfitness::ScanDeviceView device_;

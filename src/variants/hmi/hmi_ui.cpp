@@ -1,6 +1,7 @@
 #include "hmi_ui.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 #include "ble_input_adapter.h"
@@ -17,10 +18,68 @@ constexpr lv_coord_t kScreenSize = 240;
 constexpr lv_coord_t kListWidth = 174;
 constexpr lv_coord_t kListHeight = 136;
 constexpr std::uint32_t kToastMs = 2500;
+// Below the chart's 156px content width: LVGL's dense-column renderer can
+// draw spurious vertical extrema at gaps. Each visible bucket covers 2s.
+constexpr std::size_t kHistoryChartPoints = 151;
+constexpr std::uint32_t kHistoryChartStepMs = TrainingHistory::WindowMs / (kHistoryChartPoints - 1);
 
 std::string withValue(Str label, const std::string& value) { return std::string(tr(label)) + ": " + value; }
 
 std::string percent(std::uint8_t value) { return std::to_string(value) + " %"; }
+
+std::uint32_t sportColor(MachineProfile profile) {
+    switch (profile) {
+        case MachineProfile::Treadmill: return 0xFF912F;
+        case MachineProfile::Rower: return 0x35D77A;
+        case MachineProfile::CrossTrainer: return 0xAE88FF;
+        case MachineProfile::StepClimber: return 0x25C9C0;
+        case MachineProfile::StairClimber: return 0xF3BE4F;
+        default: return 0x3982F6;
+    }
+}
+
+// Keep complete numbers inside their reserved lanes, including wide counters.
+void fitText(lv_obj_t* label, const std::string& text, int width, int maxSize) {
+    const lv_font_t* fonts[] = {&lv_font_montserrat_40, &lv_font_montserrat_28, &lv_font_montserrat_20,
+                               &lv_font_montserrat_16, &lv_font_montserrat_14, &lv_font_montserrat_12};
+    const int sizes[] = {40, 28, 20, 16, 14, 12};
+    lv_label_set_text(label, text.c_str());
+    for (std::size_t i = 0; i < 6; ++i) {
+        if (sizes[i] > maxSize) continue;
+        lv_point_t size{};
+        lv_text_get_size(&size, text.c_str(), fonts[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        lv_obj_set_style_text_font(label, fonts[i], 0);
+        if (size.x <= width) break;
+    }
+    lv_obj_set_width(label, width);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+}
+
+std::string compactMetric(const MetricView& sample, Metric metric) {
+    if (!sample.valid || !std::isfinite(sample.value)) return "--";
+    if (metric == Metric::ElapsedTime || metric == Metric::RemainingTime) return formatMetric(sample, metric);
+    const float value = metric == Metric::Distance ? sample.value / 1000.0F : sample.value;
+    if (std::fabs(value) < 10000) return formatMetric(sample, metric);
+    char text[16];
+    std::snprintf(text, sizeof(text), "%.1e", static_cast<double>(value));
+    std::string result = text;
+    const auto exponent = result.find('e');
+    if (exponent != std::string::npos) {
+        if (result[exponent + 1] == '+') result.erase(exponent + 1, 1);
+        if (result[exponent + 1] == '0') result.erase(exponent + 1, 1);
+    }
+    return result;
+}
+
+Str secondaryName(Metric metric) {
+    switch (metric) {
+        case Metric::Cadence: return Str::ShortCadence;
+        case Metric::Distance: return Str::ShortDistance;
+        case Metric::Incline: return Str::ShortIncline;
+        case Metric::PositiveElevationGain: return Str::ShortElevation;
+        default: return metricFormat(metric).name;
+    }
+}
 
 bool focusableBeyond(lv_obj_t* item, int step) {
     lv_obj_t* list = lv_obj_get_parent(item);
@@ -73,7 +132,7 @@ void HmiUi::begin(lv_indev_t* encoder, const HmiSettings& settings, HmiActions a
     lv_label_set_long_mode(toast_, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(toast_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(toast_, &sf_antonio_16, 0);
-    lv_obj_set_style_text_color(toast_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(toast_, lv_color_hex(lcars::LightBlue), 0);
     lv_obj_set_style_bg_opa(toast_, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(toast_, 18, 0);
     lv_obj_set_style_pad_all(toast_, 6, 0);
@@ -89,8 +148,15 @@ void HmiUi::begin(lv_indev_t* encoder, const HmiSettings& settings, HmiActions a
 // --- data -------------------------------------------------------------------
 
 void HmiUi::setStatus(const StatusView& status) {
+    if (trainingSource(status_) != trainingSource(status)) {
+        metric_ = {};
+        metricSelected_ = false;
+        if (screen_ == Screen::History) rebuildPending_ = true;
+    }
     status_ = status;
+    telemetryHistory_.record(status_, lv_tick_get());
     if (screen_ == Screen::Dashboard && dash_.value) updateDashboard();
+    if (screen_ == Screen::History && chart_ && lv_tick_get() - chartUpdated_ >= 1000) updateHistory();
 }
 
 void HmiUi::setScan(const ScanView& scan) { scan_ = scan; }
@@ -107,7 +173,7 @@ void HmiUi::showResult(const Command&, const CommandResult& result) {
     std::string text = result.message.empty() ? std::string(tr(Str::Ok)) : result.message;
     if (text.size() > 120) text = text.substr(0, 117) + "...";
     lv_label_set_text(toast_, lcars::uppercase(text).c_str());
-    lv_obj_set_style_bg_color(toast_, lv_color_hex(lcars::Lavender), 0);
+    lv_obj_set_style_bg_color(toast_, lv_color_hex(toastAlert_ ? lcars::Alert : lcars::Lavender), 0);
     lv_obj_remove_flag(toast_, LV_OBJ_FLAG_HIDDEN);
     lv_timer_reset(toastTimer_);
     lv_timer_resume(toastTimer_);
@@ -167,14 +233,14 @@ void HmiUi::openFactoryReset() {
     state.title = Str::ConfirmResetTitle;
     state.text = tr(Str::ConfirmResetText1);
     state.confirmLabel = Str::Continue;
-    state.returnTo = Screen::Settings;
+    state.returnTo = Screen::Advanced;
     state.action = [this] {
         resetSequence_.confirm();
         ConfirmState second;
         second.title = Str::ConfirmResetTitle;
         second.text = tr(Str::ConfirmResetText2);
         second.confirmLabel = Str::Erase;
-        second.returnTo = Screen::Settings;
+        second.returnTo = Screen::Advanced;
         second.action = [this] {
             if (resetSequence_.confirm()) submit(makeCommand(CommandType::FactoryReset));
         };
@@ -188,7 +254,7 @@ void HmiUi::openRestart() {
     state.title = Str::ConfirmRestartTitle;
     state.text = tr(Str::ConfirmRestartText);
     state.confirmLabel = Str::Restart;
-    state.returnTo = Screen::Settings;
+    state.returnTo = Screen::Advanced;
     state.action = [this] { submit(makeCommand(CommandType::Restart)); };
     confirm(state);
 }
@@ -267,6 +333,8 @@ std::string HmiUi::signature() const {
             for (const bool supported : status_.controls) sig += supported ? "1" : "0";
             break;
         case Screen::Settings:
+        case Screen::Output:
+        case Screen::Advanced:
         case Screen::OutputServices:
         case Screen::AntStatus:
             sig += config_.ftmsName + std::to_string(static_cast<int>(config_.outputProtocol)) +
@@ -290,6 +358,10 @@ std::string HmiUi::signature() const {
                        std::to_string(ant.channelLimit) + std::to_string(ant.display) +
                        std::to_string(ant.control) + ":" + std::to_string(static_cast<int>(ant.profile));
             }
+            break;
+        case Screen::Receiver:
+            sig = outputLabel(status_) + status_.ftmsOutput.clientAddress +
+                  std::to_string(status_.ftmsOutput.control) + std::to_string(status_.antOutput.control);
             break;
         default:
             break;
@@ -337,6 +409,8 @@ void HmiUi::build(bool keepFocus) {
     callbacks_.clear();
     dash_ = {};
     roller_ = rollerInfo_ = adjustValue_ = textArea_ = nullptr;
+    chart_ = chartRange_ = chartEmpty_ = nullptr;
+    series_ = nullptr;
     adjustSegments_ = {};
 
     switch (screen_) {
@@ -354,6 +428,12 @@ void HmiUi::build(bool keepFocus) {
         case Screen::AntStatus: buildAntStatus(); break;
         case Screen::FtmsName: buildFtmsName(); break;
         case Screen::Keyboard: buildKeyboard(); break;
+        case Screen::Training: buildTraining(); break;
+        case Screen::Connections: buildConnections(); break;
+        case Screen::Output: buildOutput(); break;
+        case Screen::Receiver: buildReceiver(); break;
+        case Screen::Advanced: buildAdvanced(); break;
+        case Screen::History: buildHistory(); break;
     }
     builtSignature_ = signature();
     if (!keepFocus) focus = defaultFocus_;
@@ -372,7 +452,7 @@ void HmiUi::build(bool keepFocus) {
 
 lv_obj_t* HmiUi::makeScreen(const std::string& title) {
     root_ = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(root_, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(root_, lv_color_hex(lcars::Black), 0);
     lv_obj_remove_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
     if (!title.empty()) header_ = lcars::frame(root_, title, screen_ == Screen::Confirm);
     if (screen_ != Screen::Dashboard) {
@@ -415,8 +495,8 @@ lv_obj_t* HmiUi::addButton(lv_obj_t* parent, const std::string& text, std::funct
     lv_label_set_text(label, lcars::uppercase(text).c_str());
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, lv_pct(100));
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_color(label, lv_color_black(), 0);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(lcars::LightBlue), 0);
     lv_obj_center(label);
     bind(button, LV_EVENT_FOCUSED, [button](lv_event_t*) {
         lv_obj_update_layout(button);
@@ -460,10 +540,8 @@ void HmiUi::buildDashboard() {
     lv_group_add_obj(group_, pad);
 
     dash_.segments = lcars::gauge(pad);
-    header_ = lcars::frame(pad, "OPERATIONS", false);
-
-    // Stacked from top (line box y) so that no two text lines touch between
-    // the header band (y 30..57) and the bottom gap of the gauge.
+    header_ = lcars::frame(pad, profileLabel(status_.input.profile), false);
+    lv_obj_set_y(header_, 34);
     auto label = [pad](const lv_font_t* font, lv_coord_t y, lv_color_t color) {
         lv_obj_t* obj = lv_label_create(pad);
         lv_obj_set_style_text_font(obj, font, 0);
@@ -473,17 +551,24 @@ void HmiUi::buildDashboard() {
         return obj;
     };
     const lv_color_t data = lv_color_hex(lcars::LightBlue);
-    dash_.state = label(&sf_antonio_16, 63, data);
-    lv_obj_set_style_bg_opa(dash_.state, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(dash_.state, 10, 0);
-    lv_obj_set_style_pad_hor(dash_.state, 8, 0);
-    dash_.name = label(&sf_antonio_16, 84, data);
-    dash_.value = label(&sf_antonio_48, 103, data);
-    dash_.unit = label(&sf_antonio_16, 0, data);  // placed next to the value
-    dash_.target = label(&sf_antonio_16, 148, lv_color_hex(lcars::Lavender));
-    dash_.info = label(&sf_antonio_16, 166, data);
-    lv_obj_set_width(dash_.info, 148);
+    dash_.state = label(&lv_font_montserrat_12, 62, lv_color_hex(lcars::Muted));
+    dash_.name = label(&lv_font_montserrat_12, 81, data);
+    dash_.value = label(&lv_font_montserrat_40, 103, data);
+    dash_.unit = label(&lv_font_montserrat_12, 146, data);
+    dash_.target = label(&sf_antonio_16, 167, lv_color_hex(lcars::Muted));
+    dash_.info = label(&lv_font_montserrat_12, 190, lv_color_hex(lcars::Muted));
+    lv_obj_set_width(dash_.info, 132);
     lv_label_set_long_mode(dash_.info, LV_LABEL_LONG_WRAP);
+    for (std::size_t i = 0; i < dash_.secondary.size(); ++i) {
+        auto& side = dash_.secondary[i];
+        const int x = i == 0 ? -68 : 68;  // centres x=52 and x=188
+        side.name = label(&lv_font_montserrat_12, 94, lv_color_hex(lcars::Muted));
+        side.value = label(&lv_font_montserrat_20, 111, data);
+        side.unit = label(&lv_font_montserrat_12, 136, lv_color_hex(lcars::Muted));
+        lv_obj_align(side.name, LV_ALIGN_TOP_MID, x, 94);
+        lv_obj_align(side.value, LV_ALIGN_TOP_MID, x, 111);
+        lv_obj_align(side.unit, LV_ALIGN_TOP_MID, x, 136);
+    }
 
     bind(pad, LV_EVENT_KEY, [this](lv_event_t* event) {
         const std::uint32_t key = lv_event_get_key(event);
@@ -505,50 +590,51 @@ void HmiUi::buildDashboard() {
 
 void HmiUi::cycleMetric(int detents) {
     metric_.step(status_, detents);
+    metricSelected_ = true;
     updateDashboard();
 }
 
 void HmiUi::updateDashboard() {
     if (!dash_.value) return;
-    const Metric metric = metric_.current(status_);
-    if (metric == Metric::Count) {
-        lv_label_set_text(dash_.name, lcars::uppercase(tr(Str::ServiceNoData)).c_str());
-        lv_label_set_text(dash_.value, "--");
-        lv_label_set_text(dash_.unit, "");
-        lcars::setGauge(dash_.segments, 0.0F);
-        lv_label_set_text(dash_.state, lcars::uppercase(tr(stateLabel(status_.state))).c_str());
-        lv_obj_set_style_bg_color(dash_.state, lv_color_hex(lcars::LightBlue), 0);
-        lv_obj_set_style_text_color(dash_.state, lv_color_black(), 0);
-        lv_label_set_text(dash_.target, lcars::uppercase(targetLabel(status_)).c_str());
-        const std::string info = outputServicesLabel(status_) + "\n" + outputLabel(status_);
-        lv_label_set_text(dash_.info, lcars::uppercase(info).c_str());
-        return;
-    }
-    const MetricFormat& format = metricFormat(metric);
-    const MetricView& sample = status_.metric(metric);
-    lv_label_set_text(dash_.name, lcars::uppercase(tr(format.name)).c_str());
-    lv_label_set_text(dash_.value, formatMetric(sample, metric).c_str());
-    lv_label_set_text(dash_.unit, lcars::uppercase(format.unit).c_str());
-    // Value and unit share one baseline, centered as a pair.
-    constexpr lv_coord_t kUnitGap = 4;
-    lv_obj_update_layout(dash_.unit);
+    const auto profile = status_.input.profile;
+    const auto metrics = trainingMetrics(profile);
+    Metric metric = metricSelected_ ? metric_.current(status_) : metrics[0];
+    if (metric == Metric::Count) metric = metrics[0];
+    const auto format = trainingFormat(metric, profile);
+    const bool fresh = !status_.input.stale && status_.state != RuntimeState::Disconnected;
+    auto sample = status_.metric(metric);
+    sample.valid = sample.valid && fresh;
+    fitText(dash_.name, tr(format.name), 110, 12);
+    fitText(dash_.value, compactMetric(sample, metric), 80, 40);
+    fitText(dash_.unit, format.unit, 80, 12);
     lv_obj_update_layout(dash_.value);
-    const lv_coord_t unitWidth = lv_obj_get_width(dash_.unit);
-    const lv_coord_t shift = unitWidth > 0 ? (unitWidth + kUnitGap) / 2 : 0;
-    lv_obj_align(dash_.value, LV_ALIGN_TOP_MID, -shift, 103);
-    lv_obj_align_to(dash_.unit, dash_.value, LV_ALIGN_OUT_RIGHT_BOTTOM, kUnitGap,
-                    sf_antonio_16.base_line - sf_antonio_48.base_line);
+    lv_obj_align(dash_.value, LV_ALIGN_TOP_MID, 0, 123 - lv_obj_get_height(dash_.value) / 2);
     float ratio = 0.0F;
-    if (sample.valid && format.gaugeMax > format.gaugeMin)
-        ratio = (sample.value - format.gaugeMin) / (format.gaugeMax - format.gaugeMin);
-    lcars::setGauge(dash_.segments, ratio);
-
-    lv_label_set_text(dash_.state, lcars::uppercase(tr(stateLabel(status_.state))).c_str());
-    lv_obj_set_style_bg_color(dash_.state, lv_color_hex(lcars::LightBlue), 0);
-    lv_obj_set_style_text_color(dash_.state, lv_color_black(), 0);
-    lv_label_set_text(dash_.target, lcars::uppercase(targetLabel(status_)).c_str());
-    const std::string info = outputServicesLabel(status_) + "\n" + outputLabel(status_);
-    lv_label_set_text(dash_.info, lcars::uppercase(info).c_str());
+    if (sample.valid && std::isfinite(sample.value) && format.gaugeMax > format.gaugeMin) {
+        const float value = metric == Metric::Distance ? sample.value / 1000.0F : sample.value;
+        ratio = (value - format.gaugeMin) / (format.gaugeMax - format.gaugeMin);
+    }
+    const auto accent = sportColor(profile);
+    lcars::setGauge(dash_.segments, ratio, false, accent);
+    lv_obj_set_style_text_color(dash_.value, lv_color_hex(accent), 0);
+    lv_label_set_text(lv_obj_get_child(header_, 0), lcars::uppercase(profileLabel(profile)).c_str());
+    fitText(dash_.state, tr(status_.input.stale ? Str::Stale : stateLabel(status_.state)), 156, 12);
+    std::size_t sideIndex = 0;
+    for (const auto secondary : metrics) {
+        if (secondary == metric || sideIndex == dash_.secondary.size()) continue;
+        auto& side = dash_.secondary[sideIndex++];
+        auto value = status_.metric(secondary);
+        value.valid = value.valid && fresh;
+        fitText(side.name, tr(secondaryName(secondary)), 44, 12);
+        fitText(side.value, compactMetric(value, secondary), 46, 20);
+        fitText(side.unit, trainingFormat(secondary, profile).unit, 44, 12);
+    }
+    const auto& elapsed = status_.metric(Metric::ElapsedTime);
+    const std::string time = elapsed.valid && fresh ? formatMetric(elapsed, Metric::ElapsedTime) : "--";
+    fitText(dash_.target, std::string(tr(Str::MetricElapsed)) + "  " + time, 132, 14);
+    if (metric == Metric::ElapsedTime) lv_obj_add_flag(dash_.target, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(dash_.target, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(dash_.info, tr(Str::HintDashboard));
 }
 
 // --- menu -------------------------------------------------------------------
@@ -556,17 +642,117 @@ void HmiUi::updateDashboard() {
 void HmiUi::buildMenu() {
     makeScreen(tr(Str::Menu));
     lv_obj_t* list = makeList(root_);
-    lcars::pill(addButton(list, tr(Str::Dashboard), [this] { navigate(Screen::Dashboard); }), lcars::Orange);
-    lcars::pill(addButton(list, tr(Str::Devices), [this] { navigate(Screen::Devices); }), lcars::Peach);
-    lcars::pill(addButton(list, tr(Str::Control), [this] { navigate(Screen::Control); }), lcars::Golden);
-    lcars::pill(addButton(list, tr(Str::Settings), [this] { navigate(Screen::Settings); }), lcars::Tan);
-    addLabel(list, tr(Str::HintBack));
+    addButton(list, tr(Str::Training), [this] { navigate(Screen::Training); });
+    addButton(list, tr(Str::Connections), [this] { navigate(Screen::Connections); });
+    addButton(list, tr(Str::Settings), [this] { navigate(Screen::Settings); });
+}
+
+void HmiUi::buildTraining() {
+    makeScreen(tr(Str::Training));
+    auto* list = makeList(root_);
+    addButton(list, tr(Str::Dashboard), [this] { navigate(Screen::Dashboard); });
+    addButton(list, tr(Str::Control), [this] { navigate(Screen::Control); });
+    addButton(list, tr(Str::History), [this] { navigate(Screen::History); });
+}
+
+void HmiUi::buildConnections() {
+    makeScreen(tr(Str::Connections));
+    auto* list = makeList(root_);
+    addButton(list, tr(Str::Devices), [this] { navigate(Screen::Devices); });
+    addButton(list, tr(Str::OutputProtocol), [this] { navigate(Screen::Output); });
+    addButton(list, tr(Str::Receiver), [this] { navigate(Screen::Receiver); });
+}
+
+void HmiUi::buildReceiver() {
+    makeScreen(tr(Str::Receiver));
+    auto* list = makeList(root_);
+    addButton(list, outputLabel(status_), [] {});
+    if (status_.outputProtocol == OutputProtocol::BleFtms && status_.ftmsOutput.client) {
+        addButton(list, status_.ftmsOutput.clientAddress.empty() ? tr(Str::Unknown) :
+                  status_.ftmsOutput.clientAddress, [] {});
+        addButton(list, withValue(Str::AntControlStatus, onOff(status_.ftmsOutput.control)), [] {});
+    }
+    if (status_.outputProtocol == OutputProtocol::AntFec)
+        addButton(list, tr(Str::AntStatus), [this] { navigate(Screen::AntStatus); });
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildHistory() {
+    makeScreen(tr(Str::History));
+    const auto metric = trainingMetrics(status_.input.profile)[0];
+    auto* title = addLabel(root_, tr(trainingFormat(metric, status_.input.profile).name), &lv_font_montserrat_12);
+    lv_obj_set_width(title, 164);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 63);
+    chart_ = lv_chart_create(root_);
+    lv_obj_set_size(chart_, 164, 76);
+    lv_obj_align(chart_, LV_ALIGN_TOP_MID, 0, 82);
+    lv_obj_set_style_bg_color(chart_, lv_color_hex(lcars::Lavender), 0);
+    lv_obj_set_style_border_width(chart_, 0, 0);
+    lv_obj_set_style_pad_all(chart_, 4, 0);
+    lv_obj_set_style_line_color(chart_, lv_color_hex(lcars::Border), 0);
+    lv_obj_set_style_size(chart_, 2, 2, LV_PART_INDICATOR);
+    lv_obj_remove_flag(chart_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_chart_set_div_line_count(chart_, 3, 3);
+    lv_chart_set_range(chart_, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
+    lv_chart_set_point_count(chart_, kHistoryChartPoints);
+    series_ = lv_chart_add_series(chart_, lv_color_hex(sportColor(status_.input.profile)), LV_CHART_AXIS_PRIMARY_Y);
+    chartEmpty_ = lv_label_create(chart_);
+    lv_obj_set_style_text_font(chartEmpty_, &lv_font_montserrat_12, 0);
+    lv_label_set_text(chartEmpty_, tr(Str::HistoryEmpty));
+    lv_obj_center(chartEmpty_);
+    chartRange_ = addLabel(root_, "", &lv_font_montserrat_12);
+    lv_obj_align(chartRange_, LV_ALIGN_TOP_MID, 0, 162);
+    auto* window = addLabel(root_, tr(Str::HistoryWindow), &lv_font_montserrat_12);
+    lv_obj_set_width(window, 150);
+    lv_obj_align(window, LV_ALIGN_TOP_MID, 0, 174);
+    auto* button = addButton(root_, tr(Str::Back), [this] { back(); });
+    lv_obj_set_width(button, 100);
+    lv_obj_align(button, LV_ALIGN_TOP_MID, 0, 190);
+    updateHistory();
+}
+
+void HmiUi::updateHistory() {
+    chartUpdated_ = lv_tick_get();
+    float minimum = 0, maximum = 0;
+    bool any = false;
+    for (std::size_t i = 0; i < telemetryHistory_.size(); ++i) {
+        const auto& point = telemetryHistory_.at(i);
+        if (!point.valid || chartUpdated_ - point.time > TrainingHistory::WindowMs) continue;
+        minimum = any ? std::min(minimum, point.value) : point.value;
+        maximum = any ? std::max(maximum, point.value) : point.value;
+        any = true;
+    }
+    lv_chart_set_all_value(chart_, series_, LV_CHART_POINT_NONE);
+    auto* values = lv_chart_get_y_array(chart_, series_);
+    std::array<bool, kHistoryChartPoints> gaps{};
+    for (std::size_t i = 0; i < telemetryHistory_.size(); ++i) {
+        const auto& point = telemetryHistory_.at(i);
+        const auto age = chartUpdated_ - point.time;
+        if (age > TrainingHistory::WindowMs) continue;
+        const auto index = kHistoryChartPoints - 1 - age / kHistoryChartStepMs;
+        if (!point.valid) {
+            gaps[index] = true;
+            continue;
+        }
+        values[index] = maximum > minimum
+            ? static_cast<int32_t>((static_cast<double>(point.value) - minimum) * 1000 /
+                                   (static_cast<double>(maximum) - minimum))
+            : 500;
+    }
+    for (std::size_t i = 0; i < gaps.size(); ++i)
+        if (gaps[i]) values[i] = LV_CHART_POINT_NONE;
+    if (any) lv_obj_add_flag(chartEmpty_, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(chartEmpty_, LV_OBJ_FLAG_HIDDEN);
+    const auto format = trainingFormat(trainingMetrics(status_.input.profile)[0], status_.input.profile);
+    fitText(chartRange_, any ? formatValue(minimum, format.decimals) + " - " +
+                formatValue(maximum, format.decimals) + " " + format.unit : "--", 164, 12);
+    lv_chart_refresh(chart_);
 }
 
 // --- devices ----------------------------------------------------------------
 
 void HmiUi::buildDevices() {
-    makeScreen("SENSOR ARRAY");
+    makeScreen(tr(Str::Devices));
     lv_obj_t* list = makeList(root_);
     std::string paired = tr(Str::NotPaired);
     if (status_.input.paired.valid) {
@@ -575,7 +761,6 @@ void HmiUi::buildDevices() {
         if (!status_.input.paired.adapter.empty()) paired += " (" + status_.input.paired.adapter + ")";
     }
     addLabel(list, paired + "\n" + inputLabel(status_) + " - " + tr(stateLabel(status_.state)));
-    addLabel(list, outputServicesLabel(status_));
     if (status_.input.paired.valid)
         lcars::pill(addButton(list, tr(Str::InputServices), [this] { navigate(Screen::InputServices); }), lcars::Violet);
     if (!scan_.bleAvailable) addLabel(list, tr(Str::BleUnavailable));
@@ -604,9 +789,6 @@ void HmiUi::buildDevices() {
             confirm(state);
         });
     }
-    addButton(list, tr(Str::StartSimulation), [this] { submit(makeCommand(CommandType::Simulate)); });
-    addButton(list, withValue(Str::SimTrainer, onOff(config_.simulatedTrainer)),
-              [this] { submit(makeFlag(CommandType::Trainer, !config_.simulatedTrainer)); });
 
     std::string results = std::string(tr(Str::Results)) + " (" + std::to_string(scan_.devices.size()) + ")";
     if (scan_.scanning) results += " - " + std::string(tr(Str::Scanning));
@@ -621,7 +803,7 @@ void HmiUi::buildDevices() {
         constexpr lv_coord_t kIconGap = 6;
         const lv_coord_t padLeft = lv_obj_get_style_pad_left(entry, LV_PART_MAIN);
         lv_obj_set_style_pad_left(entry, padLeft + lcars::SignalBarsWidth + kIconGap, 0);
-        lv_obj_align(lcars::signalBars(entry, signalLevel(dev.rssi), lcars::Black), LV_ALIGN_LEFT_MID,
+        lv_obj_align(lcars::signalBars(entry, signalLevel(dev.rssi), lcars::LightBlue), LV_ALIGN_LEFT_MID,
                      -(lcars::SignalBarsWidth + kIconGap), 0);
     }
     addButton(list, tr(Str::Back), [this] { back(); });
@@ -639,7 +821,7 @@ void HmiUi::buildDeviceDetail() {
                                                 : device_.adapter + " (" + tr(Str::Detected) + ")"));
     if (!device_.services.empty()) {
         lv_obj_t* adv = addLabel(list, advertisedServicesLabel(device_.services));
-        lv_obj_set_style_text_color(adv, lv_color_hex(lcars::Violet), 0);
+        lv_obj_set_style_text_color(adv, lv_color_hex(lcars::Muted), 0);
     }
     if (!device_.adapter.empty()) {
         addButton(list, tr(Str::Pair), [this] {
@@ -712,7 +894,7 @@ void HmiUi::buildAdapterPicker() {
 // --- control ----------------------------------------------------------------
 
 void HmiUi::buildControl() {
-    makeScreen("CONTROL");
+    makeScreen(tr(Str::Control));
     lv_obj_t* list = makeList(root_);
     std::string state = std::string(tr(stateLabel(status_.state))) + "\n" + targetLabel(status_);
     if (!status_.canControl) state += "\n" + std::string(tr(Str::ControlUnavailable));
@@ -744,12 +926,13 @@ void HmiUi::buildControl() {
 void HmiUi::buildAdjust() {
     const ControlSpec& spec = controlSpec(editor_.control());
     makeScreen(tr(spec.name));
+    lv_obj_set_y(header_, 34);
     adjustSegments_ = lcars::gauge(root_);
     for (auto* segment : adjustSegments_) lv_obj_move_to_index(segment, 0);
 
     lv_obj_t* pad = lv_obj_create(root_);
     lv_obj_remove_style_all(pad);
-    lv_obj_set_size(pad, 120, 84);
+    lv_obj_set_size(pad, 112, 84);
     lv_obj_align(pad, LV_ALIGN_TOP_MID, 0, 62);
     lv_obj_add_flag(pad, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
@@ -781,7 +964,7 @@ void HmiUi::buildAdjust() {
         lv_obj_align(button, align, x, -18);
         lv_obj_t* label = lv_label_create(button);
         lv_label_set_text(label, text);
-        lv_obj_set_style_text_color(label, lv_color_black(), 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(lcars::LightBlue), 0);
         lv_obj_center(label);
         bind(button, LV_EVENT_CLICKED, [this, detents](lv_event_t*) {
             editor_.step(detents);
@@ -790,14 +973,14 @@ void HmiUi::buildAdjust() {
         lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
     };
     // Inside the gauge ring and clear of the value pad.
-    stepButton("-", LV_ALIGN_LEFT_MID, 16, -1);
-    stepButton("+", LV_ALIGN_RIGHT_MID, -16, 1);
+    stepButton("-", LV_ALIGN_LEFT_MID, 19, -1);
+    stepButton("+", LV_ALIGN_RIGHT_MID, -19, 1);
 
     lv_obj_t* hint = lv_label_create(root_);
     lv_label_set_text(hint, lcars::uppercase(tr(Str::HintAdjust)).c_str());
     lv_obj_set_style_text_font(hint, &sf_antonio_16, 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(hint, lv_color_hex(lcars::Peach), 0);
+    lv_obj_set_style_text_color(hint, lv_color_hex(lcars::Muted), 0);
     lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 147);
 
     lv_obj_t* row = lv_obj_create(root_);
@@ -867,20 +1050,10 @@ void HmiUi::buildConfirm() {
 // --- settings ---------------------------------------------------------------
 
 void HmiUi::buildSettings() {
-    makeScreen("SETTINGS");
+    makeScreen(tr(Str::Settings));
     lv_obj_t* list = makeList(root_);
     addLabel(list, tr(config_.unsaved ? Str::Unsaved : Str::SavedState));
-    addButton(list, withValue(Str::FtmsName, config_.ftmsName), [this] { navigate(Screen::FtmsName); });
-    addButton(list, withValue(Str::OutputProtocol, outputProtocolLabel(config_.outputProtocol)), [this] {
-        submit(makeText(CommandType::OutputProtocol,
-                        outputProtocolName(nextOutputProtocol(config_.outputProtocol, status_.antOutput.available))));
-    });
-    addButton(list, withValue(Str::FtmsProfile, ftmsProfileLabel(config_.ftmsOutputProfile)), [this] {
-        submit(makeText(CommandType::FtmsProfile, ftmsOutputProfileName(nextFtmsProfile(config_.ftmsOutputProfile))));
-    });
-    addButton(list, tr(Str::OutputServices), [this] { navigate(Screen::OutputServices); });
-    if (status_.antOutput.available)
-        addButton(list, tr(Str::AntStatus), [this] { navigate(Screen::AntStatus); });
+    addButton(list, withValue(Str::Firmware, config_.version), [] {});
     addButton(list, withValue(Str::Brightness, percent(settings_.brightness)), [this] {
         HmiSettings next = settings_;
         next.brightness = nextBrightness(settings_.brightness);
@@ -897,10 +1070,36 @@ void HmiUi::buildSettings() {
         changeSettings(next);
     });
     addButton(list, tr(Str::Save), [this] { submit(makeCommand(CommandType::Save)); });
+    addButton(list, tr(Str::Advanced), [this] { navigate(Screen::Advanced); });
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildOutput() {
+    makeScreen(tr(Str::OutputProtocol));
+    auto* list = makeList(root_);
+    addButton(list, withValue(Str::FtmsName, config_.ftmsName), [this] { navigate(Screen::FtmsName); });
+    addButton(list, withValue(Str::OutputProtocol, outputProtocolLabel(config_.outputProtocol)), [this] {
+        submit(makeText(CommandType::OutputProtocol,
+                        outputProtocolName(nextOutputProtocol(config_.outputProtocol, status_.antOutput.available))));
+    });
+    addButton(list, withValue(Str::FtmsProfile, ftmsProfileLabel(config_.ftmsOutputProfile)), [this] {
+        submit(makeText(CommandType::FtmsProfile, ftmsOutputProfileName(nextFtmsProfile(config_.ftmsOutputProfile))));
+    });
+    addButton(list, tr(Str::OutputServices), [this] { navigate(Screen::OutputServices); });
+    if (status_.antOutput.available)
+        addButton(list, tr(Str::AntStatus), [this] { navigate(Screen::AntStatus); });
+    addButton(list, tr(Str::Back), [this] { back(); });
+}
+
+void HmiUi::buildAdvanced() {
+    makeScreen(tr(Str::Advanced));
+    auto* list = makeList(root_);
+    addButton(list, tr(Str::StartSimulation), [this] { submit(makeCommand(CommandType::Simulate)); });
+    addButton(list, withValue(Str::SimTrainer, onOff(config_.simulatedTrainer)),
+              [this] { submit(makeFlag(CommandType::Trainer, !config_.simulatedTrainer)); });
     addButton(list, tr(Str::Load), [this] { submit(makeCommand(CommandType::Load)); });
     lcars::pill(addButton(list, tr(Str::FactoryReset), [this] { openFactoryReset(); }), lcars::Alert);
     addButton(list, tr(Str::Restart), [this] { openRestart(); });
-    addLabel(list, std::string(tr(Str::Firmware)) + " " + config_.version);
     addButton(list, tr(Str::Back), [this] { back(); });
 }
 
@@ -915,7 +1114,7 @@ void HmiUi::buildInputServices() {
     if (paired.subscriptions.empty()) addLabel(list, "SUB -");
     for (const auto& sub : paired.subscriptions) {
         const Str state = subscriptionStateLabel(sub.state);
-        const auto color = state == Str::ServiceOk ? lcars::LightBlue :
+        const auto color = state == Str::ServiceOk ? lcars::Golden :
                            state == Str::ServiceFail ? lcars::Alert : lcars::Tan;
         lcars::pill(addButton(list, subscriptionLabel(sub), [] {}), color);
     }
@@ -1009,7 +1208,7 @@ void HmiUi::buildAntStatus() {
     // Focusable readouts let the encoder reach every diagnostic without touch.
     auto readout = [this, list](const std::string& text, bool alert = false) {
         auto* row = addButton(list, text, [] {});
-        lcars::pill(row, alert ? lcars::Alert : lcars::LightBlue);
+        lcars::pill(row, alert ? lcars::Alert : lcars::Lavender);
         if (alert) lv_obj_set_style_bg_color(row, lv_color_hex(lcars::Alert), LV_STATE_FOCUSED);
     };
     std::string stateText = tr(state);
@@ -1045,7 +1244,7 @@ void HmiUi::buildFtmsName() {
         if (name == config_.ftmsName) current = static_cast<std::uint32_t>(index);
         addButton(list, (name == config_.ftmsName ? std::string(LV_SYMBOL_OK " ") : std::string()) + name, [this, name] {
             submit(makeText(CommandType::FtmsName, name));
-            returnTo(Screen::Settings);
+            returnTo(Screen::Output);
         });
     }
     addButton(list, std::string(LV_SYMBOL_KEYBOARD " ") + tr(Str::Keyboard), [this] { navigate(Screen::Keyboard); });
@@ -1074,7 +1273,7 @@ void HmiUi::buildKeyboard() {
     lv_group_add_obj(group_, keyboard);
     bind(keyboard, LV_EVENT_READY, [this](lv_event_t*) {
         submit(makeText(CommandType::FtmsName, lv_textarea_get_text(textArea_)));
-        returnTo(Screen::Settings);
+        returnTo(Screen::Output);
     });
     bind(keyboard, LV_EVENT_CANCEL, [this](lv_event_t*) { back(); });
 }

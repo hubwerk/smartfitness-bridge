@@ -475,6 +475,16 @@ int checkRoller(lv_obj_t* roller, const char* screen) {
     return issues;
 }
 
+double luminance(lv_color_t color) {
+    const auto rgb = lv_color_to_u32(color);
+    const auto channel = [](std::uint32_t value) {
+        const double c = value / 255.0;
+        return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * channel((rgb >> 16) & 255) + 0.7152 * channel((rgb >> 8) & 255) +
+           0.0722 * channel(rgb & 255);
+}
+
 void checkLayout(const char* screen) {
     std::vector<Element> elements;
     std::vector<Ring> rings;
@@ -491,6 +501,20 @@ void checkLayout(const char* screen) {
         }
         const bool text = lv_obj_check_type(a.obj, &lv_label_class) &&
                           lv_obj_get_style_bg_opa(a.obj, LV_PART_MAIN) == LV_OPA_TRANSP;
+        if (text) {
+            auto* background = lv_obj_get_parent(a.obj);
+            while (background && lv_obj_get_style_bg_opa(background, LV_PART_MAIN) != LV_OPA_COVER)
+                background = lv_obj_get_parent(background);
+            if (background) {
+                const auto foreground = luminance(lv_obj_get_style_text_color(a.obj, LV_PART_MAIN));
+                const auto back = luminance(lv_obj_get_style_bg_color(background, LV_PART_MAIN));
+                const auto contrast = (std::max(foreground, back) + 0.05) / (std::min(foreground, back) + 0.05);
+                if (contrast < 4.5) {
+                    std::printf("  %s: %s has low text contrast %.2f\n", screen, a.name.c_str(), contrast);
+                    ++issues;
+                }
+            }
+        }
         const int radius =
             text ? 0
                  : std::min<int>(lv_obj_get_style_radius(a.obj, LV_PART_MAIN),
@@ -582,6 +606,8 @@ StatusView bikeStatus() {
     setMetric(status, Metric::Cadence, 88.0F);
     setMetric(status, Metric::Speed, 31.4F);
     setMetric(status, Metric::HeartRate, 132.0F);
+    setMetric(status, Metric::Distance, 18600.0F);
+    setMetric(status, Metric::ElapsedTime, 1935.0F);
     status.hasTarget = true;
     status.target = {Control::Power, 180.0F};
     status.input.bleSelected = true;
@@ -618,6 +644,8 @@ StatusView treadmillStatus() {
     setMetric(status, Metric::Speed, 3.0F);
     setMetric(status, Metric::Incline, 1.5F);
     setMetric(status, Metric::HeartRate, 104.0F);
+    setMetric(status, Metric::Distance, 2450.0F);
+    setMetric(status, Metric::ElapsedTime, 900.0F);
     status.input.bleSelected = true;
     status.input.bleAvailable = true;
     status.input.profile = MachineProfile::Treadmill;
@@ -720,6 +748,144 @@ void checkDashboardMetrics() {
     std::printf("dashboard layout of all profiles and metrics passed\n");
 }
 
+void checkTrainingSpacing() {
+    std::vector<Element> elements;
+    std::vector<Ring> rings;
+    collect(lv_screen_active(), elements, rings);
+    assert(rings.size() == 1 && rings[0].inner == 104);
+    int secondaryLabels = 0;
+    for (const auto& element : elements) {
+        if (!lv_obj_check_type(element.obj, &lv_label_class)) continue;
+        lv_area_t area{};
+        lv_obj_get_coords(element.obj, &area);
+        const int centre = (area.x1 + area.x2 + 1) / 2;
+        if (centre != 52 && centre != 188) continue;
+        ++secondaryLabels;
+        assert(lv_obj_get_width(element.obj) <= 46);
+        for (const int x : {element.full.x1, element.full.x2 + 1})
+            for (const int y : {element.full.y1, element.full.y2 + 1}) {
+                const float dx = x - 120.0F, dy = y - 120.0F;
+                assert(104.0F - std::sqrt(dx * dx + dy * dy) >= 8.0F);
+            }
+        if (area.y1 == 111) {
+            lv_point_t textSize{};
+            lv_text_get_size(&textSize, lv_label_get_text(element.obj),
+                            lv_obj_get_style_text_font(element.obj, LV_PART_MAIN),
+                            0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            assert(textSize.x <= lv_obj_get_content_width(element.obj));
+        }
+    }
+    assert(secondaryLabels >= 4);
+}
+
+void checkTrainingDesign() {
+    const MachineProfile profiles[] = {MachineProfile::IndoorBike, MachineProfile::Treadmill,
+        MachineProfile::Rower, MachineProfile::CrossTrainer, MachineProfile::StepClimber, MachineProfile::StairClimber};
+    const char* shots[] = {"36-training-bike", "37-training-treadmill", "38-training-rower",
+                          "39-training-cross", "40-training-step", "41-training-stair"};
+    for (const auto lang : {Language::English, Language::German}) {
+        setLanguage(lang);
+        for (std::size_t p = 0; p < 6; ++p) {
+            auto status = profiles[p] == MachineProfile::Treadmill ? treadmillStatus() : bikeStatus();
+            status.input.profile = profiles[p];
+            status.input.paired.address = "design-" + std::to_string(p);
+            if (profiles[p] == MachineProfile::Rower) setMetric(status, Metric::Cadence, 28);
+            setMetric(status, Metric::Resistance, 8);
+            setMetric(status, Metric::PositiveElevationGain, 126);
+            setMetric(status, Metric::Floors, 28);
+            setMetric(status, Metric::StepCount, 1560);
+            g_ui.setStatus(status);
+            g_ui.navigate(Screen::Dashboard);
+            pump(50);
+            const auto metric = trainingMetrics(profiles[p])[0];
+            const auto format = trainingFormat(metric, profiles[p]);
+            std::vector<Element> elements;
+            std::vector<Ring> rings;
+            collect(lv_screen_active(), elements, rings);
+            bool primary = false;
+            for (const auto& element : elements) {
+                if (lv_obj_check_type(element.obj, &lv_label_class) &&
+                    std::string(lv_label_get_text(element.obj)) == tr(format.name)) primary = true;
+            }
+            assert(primary);
+            checkTrainingSpacing();
+            if (lang == Language::English) shot(shots[p]);
+            else if (p == 0) shot("42-training-german");
+            for (const float extreme : {9999.9F, -9999.9F, 3.4e38F, -3.4e38F, NAN, INFINITY}) {
+                for (const auto m : trainingMetrics(profiles[p])) setMetric(status, m, extreme);
+                g_ui.setStatus(status);
+                pump(20);
+                checkLayout("training-wide-values");
+                checkTrainingSpacing();
+            }
+        }
+        // Every new menu is reachable with the encoder in either language.
+        for (const auto screen : {Screen::Training, Screen::Connections, Screen::Output,
+                                  Screen::Receiver, Screen::Settings, Screen::Advanced}) {
+            g_ui.navigate(screen);
+            pump(50);
+            const auto count = lv_group_get_obj_count(lv_indev_get_group(g_knob));
+            for (std::uint32_t i = 0; i < count; ++i) {
+                checkLayout("training-navigation");
+                turn(1);
+            }
+        }
+    }
+    setLanguage(Language::English);
+    auto status = bikeStatus();
+    status.input.paired.address = "history-fixture";
+    g_ui.setStatus(status);
+    g_ui.navigate(Screen::Dashboard);
+    pump(50);
+    // Fixture-only history, including a real gap. Firmware never synthesises data.
+    for (int i = 0; i <= 300; ++i) {
+        g_now += 1000;
+        setMetric(status, Metric::Power, 180 + 35 * std::sin(i / 20.0F));
+        status.input.stale = i >= 120 && i <= 140;
+        g_ui.setStatus(status);
+    }
+    press();
+    press();
+    turn(2);
+    press();
+    assert(g_ui.current() == Screen::History);
+    shot("43-history");
+    lv_obj_t* chart = nullptr;
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(lv_screen_active()); ++i) {
+        auto* child = lv_obj_get_child(lv_screen_active(), static_cast<int>(i));
+        if (lv_obj_check_type(child, &lv_chart_class)) chart = child;
+    }
+    assert(chart && lv_chart_get_point_count(chart) == 151);
+    auto* series = lv_chart_get_series_next(chart, nullptr);
+    auto* values = lv_chart_get_y_array(chart, series);
+    int gaps = 0, valid = 0;
+    for (std::size_t i = 0; i < lv_chart_get_point_count(chart); ++i) {
+        if (values[i] == LV_CHART_POINT_NONE) ++gaps;
+        else ++valid;
+    }
+    assert(gaps >= 10 && valid > 130);
+    status.input.paired.address = "new-device";
+    status.telemetry = {};
+    g_ui.setStatus(status);
+    pump(50);
+    shot("44-history-empty");
+    setLanguage(Language::German);
+    g_ui.navigate(Screen::Training);
+    pump(50);
+    g_ui.navigate(Screen::History);
+    shot("45-history-german");
+    setLanguage(Language::English);
+    for (const auto screen : {Screen::Training, Screen::Connections, Screen::Output,
+                              Screen::Receiver, Screen::Advanced}) {
+        g_ui.navigate(screen);
+        const std::string name = "46-navigation-" + std::to_string(static_cast<int>(screen));
+        shot(name.c_str());
+    }
+    g_ui.navigate(Screen::Dashboard);
+    pump(50);
+    std::printf("six sport defaults, EN/DE navigation, 8px secondary clearance and history gaps passed\n");
+}
+
 bool lastCommand(CommandType type) { return !g_commands.empty() && g_commands.back().type == type; }
 
 // --- knob-only walkthrough -------------------------------------------------------
@@ -730,7 +896,9 @@ void knobWalkthrough() {
     assert(g_ui.current() == Screen::Dashboard);
     press();
     assert(g_ui.current() == Screen::Menu);
-    turn(2);  // Dashboard -> Devices -> Control
+    press();  // Training
+    assert(g_ui.current() == Screen::Training);
+    turn(1);  // Live values -> Training control
     press();
     assert(g_ui.current() == Screen::Control);
     press();  // first control of a treadmill: speed
@@ -750,15 +918,20 @@ void knobWalkthrough() {
     assert(lastCommand(CommandType::Control) && g_commands.back().control == Control::Speed &&
            std::fabs(g_commands.back().value - 3.5F) < 1e-4F);
     hold();
+    assert(g_ui.current() == Screen::Training);
+    hold();
     assert(g_ui.current() == Screen::Menu);
     hold();
     assert(g_ui.current() == Screen::Dashboard);
 
-    // Settings -> factory reset needs two confirmations.
+    // Connections -> output configuration.
     press();
-    turn(3);
+    turn(1);
     press();
-    assert(g_ui.current() == Screen::Settings);
+    assert(g_ui.current() == Screen::Connections);
+    turn(1);
+    press();
+    assert(g_ui.current() == Screen::Output);
     turn(1);  // Output: BLE FTMS -> Off (fixture has no ANT transport)
     press();
     assert(lastCommand(CommandType::OutputProtocol) && g_commands.back().text == "off");
@@ -782,8 +955,17 @@ void knobWalkthrough() {
     assert(g_commands.size() == beforeUnavailable);
     checkLayout("output-services-unavailable");
     hold();
+    assert(g_ui.current() == Screen::Output);
+    hold();
+    hold();
+    assert(g_ui.current() == Screen::Menu);
+    turn(2);
+    press();
     assert(g_ui.current() == Screen::Settings);
-    turn(9);  // name -> factory reset (new services entry included)
+    turn(5);  // Advanced
+    press();
+    assert(g_ui.current() == Screen::Advanced);
+    turn(3);  // Factory reset still requires two confirmations.
     press();
     assert(g_ui.current() == Screen::Confirm);
     turn(1);
@@ -791,12 +973,14 @@ void knobWalkthrough() {
     assert(g_ui.current() == Screen::Confirm && !lastCommand(CommandType::FactoryReset));
     turn(1);
     press();
-    assert(g_ui.current() == Screen::Settings && lastCommand(CommandType::FactoryReset));
+    assert(g_ui.current() == Screen::Advanced && lastCommand(CommandType::FactoryReset));
 
     // Devices: start a scan, open a result, pair with an adapter override.
     hold();
-    turn(1);  // Dashboard -> Devices
+    hold();
+    turn(1);  // Connections
     press();
+    press();  // Fitness device
     assert(g_ui.current() == Screen::Devices);
     press();  // first button: input service diagnostics
     assert(g_ui.current() == Screen::InputServices);
@@ -810,6 +994,7 @@ void knobWalkthrough() {
     turn(1);  // input services -> stop scan
     press();
     assert(lastCommand(CommandType::ScanStop));
+    hold();
     hold();
     hold();
     assert(g_ui.current() == Screen::Dashboard);
@@ -833,8 +1018,8 @@ void checkListEnd(lv_obj_t* list, lv_obj_t* arc, bool top) {
 }
 
 void checkListEnds() {
-    for (Screen screen : {Screen::Menu, Screen::Devices, Screen::Settings, Screen::FtmsName,
-                          Screen::InputServices, Screen::OutputServices}) {
+    for (Screen screen : {Screen::Devices, Screen::Settings, Screen::FtmsName,
+                          Screen::InputServices, Screen::OutputServices, Screen::Advanced, Screen::Output}) {
         g_ui.navigate(screen);
         pump(400);
         lv_obj_t* list = currentList();
@@ -852,9 +1037,9 @@ void checkListEnds() {
     g_ui.navigate(Screen::Menu);
     pump(400);
     lv_obj_t* list = currentList();
-    turn(-1);  // Dashboard wraps to Settings; the back hint below it comes into view
+    turn(-1);  // Training wraps to System; the short main menu never scrolls.
     pump(400);
-    assert(lv_obj_get_scroll_bottom(list) == 0);
+    assert(lv_obj_get_scroll_bottom(list) <= 0);
     g_ui.navigate(Screen::Dashboard);
     pump(100);
     std::printf("list scrollbar reaches both ends passed\n");
@@ -958,7 +1143,7 @@ void checkAntUi() {
         g_ui.setConfig(config);
         g_ui.navigate(Screen::Dashboard);
         pump(50);
-        g_ui.navigate(Screen::Settings);
+        g_ui.navigate(Screen::Output);
         pump(100);
         turn(1);
         press();
@@ -1141,16 +1326,14 @@ int main(int argc, char** argv) {
 
     g_ui.setStatus(bikeStatus());
     pump(100);
-    turn(1);  // Incline (selected during the walkthrough) -> Power
     shot("01-dashboard-bike");
     g_ui.setStatus(treadmillStatus());
-    turn(-3);  // Power -> Speed in the treadmill order
     shot("02-dashboard-treadmill");
     g_ui.navigate(Screen::Menu);
     shot("03-menu");
     g_ui.navigate(Screen::Devices);
     shot("04-devices");
-    turn(7);  // first scan result (input diagnostics plus six device actions)
+    turn(5);  // first scan result; simulation now lives under Advanced
     shot("05-devices-results");
     g_ui.openDevice(0);
     shot("06-device-detail");
@@ -1171,7 +1354,7 @@ int main(int argc, char** argv) {
     shot("12-adjust-power");
     g_ui.navigate(Screen::Settings);
     shot("13-settings");
-    turn(7);
+    turn(5);
     shot("14-settings-scrolled");
     g_ui.navigate(Screen::FtmsName);
     shot("15-ftms-name");
@@ -1275,6 +1458,7 @@ int main(int argc, char** argv) {
     assert(lv_obj_get_height(name) > lv_font_get_line_height(&sf_antonio_16));
     checkLayout("device-detail-long-name");
     checkDashboardMetrics();
+    checkTrainingDesign();
     std::printf("hmi simulator done\n");
     return 0;
 }

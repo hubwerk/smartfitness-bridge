@@ -157,6 +157,20 @@ enum class Str : std::uint16_t {
     AntPower,
     AntSpeedCadence,
     AntFootpod,
+    Training,
+    Connections,
+    Advanced,
+    Receiver,
+    History,
+    HistoryWindow,
+    HistoryEmpty,
+    Stale,
+    StrokeRate,
+    StepRate,
+    ShortCadence,
+    ShortDistance,
+    ShortIncline,
+    ShortElevation,
     Count
 };
 
