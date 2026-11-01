@@ -95,7 +95,8 @@ private:
     void build(bool keepFocus);
     lv_obj_t* makeScreen(const std::string& title);
     lv_obj_t* makeList(lv_obj_t* screen);
-    lv_obj_t* addButton(lv_obj_t* parent, const std::string& text, std::function<void()> action, bool focusable = true);
+    lv_obj_t* addButton(lv_obj_t* parent, const std::string& text, std::function<void()> action, bool focusable = true,
+                         const lv_image_dsc_t* icon = nullptr);
     lv_obj_t* addLabel(lv_obj_t* parent, const std::string& text, const lv_font_t* font = nullptr);
     lv_obj_t* addInfoRow(lv_obj_t* list, const std::string& text, const lv_font_t* font = nullptr);
     void bind(lv_obj_t* obj, lv_event_code_t code, std::function<void(lv_event_t*)> action);
@@ -130,6 +131,7 @@ private:
     void submit(const Command& command);
     void changeSettings(const HmiSettings& settings);
     void cycleMetric(int detents);
+    void placeHeaderIcon(smartfitness::MachineProfile profile, std::uint32_t accent);
     std::string signature() const;
     bool inputBusy() const;
 
@@ -168,6 +170,8 @@ private:
     std::uint32_t chartUpdated_ = 0;
     struct DashboardWidgets {
         lcars::Gauge segments{};
+        lv_obj_t* glow = nullptr;
+        lv_obj_t* icon = nullptr;
         lv_obj_t* name = nullptr;
         lv_obj_t* value = nullptr;
         lv_obj_t* unit = nullptr;

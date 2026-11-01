@@ -1,4 +1,5 @@
 #include "hmi_ui.h"
+#include "hmi_icons.h"
 
 #include <algorithm>
 #include <cmath>
@@ -54,6 +55,18 @@ std::uint32_t sportColor(MachineProfile profile) {
         case MachineProfile::StepClimber: return 0x25C9C0;
         case MachineProfile::StairClimber: return 0xF3BE4F;
         default: return 0x3982F6;
+    }
+}
+
+const lv_image_dsc_t* sportIcon(MachineProfile profile) {
+    switch (profile) {
+        case MachineProfile::IndoorBike: return &sf_icon_sport_bike;
+        case MachineProfile::Treadmill: return &sf_icon_sport_treadmill;
+        case MachineProfile::Rower: return &sf_icon_sport_rower;
+        case MachineProfile::CrossTrainer: return &sf_icon_sport_cross_trainer;
+        case MachineProfile::StepClimber: return &sf_icon_sport_step_climber;
+        case MachineProfile::StairClimber: return &sf_icon_sport_stair_climber;
+        default: return &sf_icon_sport_generic;
     }
 }
 
@@ -397,7 +410,7 @@ void HmiUi::update() {
                              (status_.antOutput.enabled && !status_.antOutput.open) ||
                              !status_.antOutput.error.empty())) ||
                            (toastAlert_ && !lv_obj_has_flag(toast_, LV_OBJ_FLAG_HIDDEN));
-        lv_obj_set_style_bg_color(header_, lv_color_hex(alert ? lcars::Alert : lcars::Orange), 0);
+        lcars::band(header_, alert ? lcars::Alert : lcars::Orange);
     }
     if (inputBusy()) return;
     if (navigatePending_) {
@@ -472,7 +485,7 @@ void HmiUi::build(bool keepFocus) {
 
 lv_obj_t* HmiUi::makeScreen(const std::string& title) {
     root_ = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(root_, lv_color_hex(lcars::Black), 0);
+    lcars::background(root_);
     lv_obj_remove_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
     if (!title.empty()) header_ = lcars::frame(root_, title, screen_ == Screen::Confirm);
     if (screen_ != Screen::Dashboard) {
@@ -503,7 +516,8 @@ lv_obj_t* HmiUi::makeList(lv_obj_t* screen) {
     return list;
 }
 
-lv_obj_t* HmiUi::addButton(lv_obj_t* parent, const std::string& text, std::function<void()> action, bool focusable) {
+lv_obj_t* HmiUi::addButton(lv_obj_t* parent, const std::string& text, std::function<void()> action, bool focusable,
+                           const lv_image_dsc_t* icon) {
     lv_obj_t* button = lv_button_create(parent);
     lv_obj_set_width(button, lv_pct(100));
     lv_obj_set_height(button, LV_SIZE_CONTENT);
@@ -518,6 +532,14 @@ lv_obj_t* HmiUi::addButton(lv_obj_t* parent, const std::string& text, std::funct
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(lcars::LightBlue), 0);
     lv_obj_center(label);
+    if (icon) {
+        // Icon in the widened left padding, clear of the text.
+        constexpr lv_coord_t kIconGap = 10;
+        const lv_coord_t padLeft = lv_obj_get_style_pad_left(button, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(button, padLeft + static_cast<lv_coord_t>(icon->header.w) + kIconGap, 0);
+        lv_obj_align(lcars::icon(button, icon, lcars::Blue), LV_ALIGN_LEFT_MID,
+                     -static_cast<lv_coord_t>(icon->header.w + kIconGap), 0);
+    }
     bind(button, LV_EVENT_FOCUSED, [button](lv_event_t*) {
         lv_obj_update_layout(button);
         lv_anim_delete(lv_obj_get_parent(button), nullptr);
@@ -577,9 +599,11 @@ void HmiUi::buildDashboard() {
     lv_obj_set_style_radius(pad, LV_RADIUS_CIRCLE, 0);
     lv_group_add_obj(group_, pad);
 
+    dash_.glow = lcars::accentGlow(pad, sportColor(status_.input.profile));
     dash_.segments = lcars::gauge(pad);
     header_ = lcars::frame(pad, profileLabel(status_.input.profile), false);
     lv_obj_set_y(header_, 34);
+    dash_.icon = lcars::icon(header_, sportIcon(status_.input.profile), sportColor(status_.input.profile));
     auto label = [pad](const lv_font_t* font, lv_coord_t y, lv_color_t color) {
         lv_obj_t* obj = lv_label_create(pad);
         lv_obj_set_style_text_font(obj, font, 0);
@@ -655,7 +679,9 @@ void HmiUi::updateDashboard() {
     const auto accent = sportColor(profile);
     lcars::setGauge(dash_.segments, ratio, false, accent);
     lv_obj_set_style_text_color(dash_.value, lv_color_hex(accent), 0);
-    lv_label_set_text(lv_obj_get_child(header_, 0), lcars::uppercase(profileLabel(profile)).c_str());
+    lv_obj_set_style_bg_color(dash_.glow, lv_color_hex(accent), 0);
+    lv_obj_set_style_bg_grad_color(dash_.glow, lv_color_hex(accent), 0);
+    placeHeaderIcon(profile, accent);
     fitText(dash_.state, tr(status_.input.stale ? Str::Stale : stateLabel(status_.state)), 156, 12);
     std::size_t sideIndex = 0;
     for (const auto secondary : metrics) {
@@ -675,16 +701,48 @@ void HmiUi::updateDashboard() {
     lv_label_set_text(dash_.info, tr(Str::HintDashboard));
 }
 
+// Sport icon and name share the header band as one centred group.
+void HmiUi::placeHeaderIcon(MachineProfile profile, std::uint32_t accent) {
+    constexpr lv_coord_t kGap = 5;
+    constexpr lv_coord_t kInset = 10;
+    const lv_image_dsc_t* source = sportIcon(profile);
+    lv_image_set_src(dash_.icon, source);
+    lv_obj_set_style_image_recolor(dash_.icon, lv_color_hex(accent), 0);
+    lv_obj_t* label = lv_obj_get_child(header_, 0);
+    const std::string text = lcars::uppercase(profileLabel(profile));
+    lv_label_set_text(label, text.c_str());
+    const lv_coord_t band = lv_obj_get_width(header_) - 2 * kInset;
+    auto widthOf = [&](const lv_font_t* f) { return lv_text_get_width(text.c_str(), text.size(), f, 0); };
+    // Prefer icon + Antonio 20, then icon + 16; drop the icon before truncating the name.
+    lv_coord_t iconWidth = static_cast<lv_coord_t>(source->header.w);
+    const lv_font_t* font = &sf_antonio_20;
+    if (widthOf(font) > band - iconWidth - kGap) {
+        font = &sf_antonio_16;
+        if (widthOf(font) > band - iconWidth - kGap) iconWidth = 0;
+    }
+    if (iconWidth == 0 && widthOf(&sf_antonio_20) <= band) font = &sf_antonio_20;
+    const lv_coord_t gap = iconWidth ? kGap : 0;
+    if (iconWidth) lv_obj_remove_flag(dash_.icon, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(dash_.icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_font(label, font, 0);
+    const lv_coord_t textWidth = std::min<lv_coord_t>(band - iconWidth - gap, widthOf(font));
+    lv_obj_set_size(label, textWidth, lv_font_get_line_height(font));
+    const lv_coord_t left = (lv_obj_get_width(header_) - iconWidth - gap - textWidth) / 2;
+    lv_obj_align(dash_.icon, LV_ALIGN_LEFT_MID, left, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, left + iconWidth + gap, font == &sf_antonio_20 ? -1 : 0);
+}
+
 // --- menu -------------------------------------------------------------------
 
 void HmiUi::buildMenu() {
     makeScreen(tr(Str::Menu));
     lv_obj_t* list = makeList(root_);
-    addButton(list, tr(Str::Training), [this] { navigate(Screen::Training); });
-    addButton(list, tr(Str::Connections), [this] { navigate(Screen::Connections); });
-    addButton(list, tr(Str::Settings), [this] { navigate(Screen::Settings); });
+    addButton(list, tr(Str::Training), [this] { navigate(Screen::Training); }, true, &sf_icon_nav_training);
+    addButton(list, tr(Str::Connections), [this] { navigate(Screen::Connections); }, true,
+              &sf_icon_nav_connections);
+    addButton(list, tr(Str::Settings), [this] { navigate(Screen::Settings); }, true, &sf_icon_nav_system);
     // Back from the top level returns to the live values, never to a deeper screen.
-    addButton(list, tr(Str::Back), [this] { navigate(Screen::Dashboard); });
+    addButton(list, tr(Str::Back), [this] { navigate(Screen::Dashboard); }, true, &sf_icon_nav_back);
 }
 
 void HmiUi::buildTraining() {

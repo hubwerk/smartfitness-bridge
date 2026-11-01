@@ -133,10 +133,70 @@ std::string uppercase(std::string text) {
     return text;
 }
 
-void pill(lv_obj_t* object, std::uint32_t color) {
-    lv_obj_set_style_bg_color(object, lv_color_hex(color), 0);
+// The token colour stays the main colour; the gradient deepens it downwards.
+static void gradient(lv_obj_t* object, std::uint32_t color, lv_style_selector_t selector, lv_opa_t depth) {
+    const lv_color_t base = lv_color_hex(color);
+    lv_obj_set_style_bg_color(object, base, selector);
+    lv_obj_set_style_bg_grad_color(object, lv_color_darken(base, depth), selector);
+    lv_obj_set_style_bg_grad_dir(object, LV_GRAD_DIR_VER, selector);
+}
+
+void band(lv_obj_t* object, std::uint32_t color) {
     lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_grad_dir(object, LV_GRAD_DIR_NONE, 0);
+    gradient(object, color, 0, 90);
+    // Hairline edge keeps the dark band distinct from the sky gradient behind it.
+    lv_obj_set_style_border_width(object, 1, 0);
+    lv_obj_set_style_border_color(object, lv_color_lighten(lv_color_hex(color), 50), 0);
+}
+
+void background(lv_obj_t* screen) {
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(Black), 0);
+    lv_obj_t* sky = lv_obj_create(screen);
+    lv_obj_remove_style_all(sky);
+    lv_obj_remove_flag(sky, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_add_flag(sky, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_IGNORE_LAYOUT | Decor));
+    lv_obj_set_size(sky, lv_pct(100), 112);
+    lv_obj_set_style_bg_opa(sky, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(sky, lv_color_hex(Sky), 0);
+    lv_obj_set_style_bg_grad_color(sky, lv_color_hex(Sky), 0);
+    lv_obj_set_style_bg_main_opa(sky, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_grad_opa(sky, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_grad_dir(sky, LV_GRAD_DIR_VER, 0);
+}
+
+lv_obj_t* accentGlow(lv_obj_t* parent, std::uint32_t color) {
+    // A circle whose upper edge fades in: reads as a radial glow below the arc.
+    lv_obj_t* glow = lv_obj_create(parent);
+    lv_obj_remove_style_all(glow);
+    lv_obj_remove_flag(glow, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_add_flag(glow, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_IGNORE_LAYOUT | Decor));
+    lv_obj_set_size(glow, 220, 220);
+    lv_obj_align(glow, LV_ALIGN_BOTTOM_MID, 0, 110);
+    lv_obj_set_style_radius(glow, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(glow, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(glow, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_main_opa(glow, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_grad_opa(glow, 60, 0);
+    lv_obj_set_style_bg_grad_color(glow, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_grad_dir(glow, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_main_stop(glow, 0, 0);
+    lv_obj_set_style_bg_grad_stop(glow, 140, 0);
+    return glow;
+}
+
+lv_obj_t* icon(lv_obj_t* parent, const lv_image_dsc_t* source, std::uint32_t color) {
+    lv_obj_t* image = lv_image_create(parent);
+    lv_image_set_src(image, source);
+    lv_obj_remove_flag(image, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    lv_obj_set_style_image_recolor(image, lv_color_hex(color), 0);
+    lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
+    return image;
+}
+
+void pill(lv_obj_t* object, std::uint32_t color) {
+    lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
+    gradient(object, color, 0, 70);
     lv_obj_set_style_text_color(object, lv_color_hex(LightBlue), 0);
     lv_obj_set_style_radius(object, 12, 0);
     lv_obj_set_style_shadow_width(object, 0, 0);
@@ -144,8 +204,9 @@ void pill(lv_obj_t* object, std::uint32_t color) {
     lv_obj_set_style_border_color(object, lv_color_hex(Border), 0);
     lv_obj_set_style_border_width(object, 2, LV_STATE_FOCUSED);
     lv_obj_set_style_border_color(object, lv_color_white(), LV_STATE_FOCUSED);
-    lv_obj_set_style_bg_color(object, lv_color_hex(Peach), LV_STATE_FOCUSED);
+    gradient(object, Peach, LV_STATE_FOCUSED, 80);
     lv_obj_set_style_bg_color(object, lv_color_hex(Golden), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_grad_color(object, lv_color_hex(Golden), LV_STATE_PRESSED);
     lv_obj_set_style_opa(object, LV_OPA_50, LV_STATE_DISABLED);
     // The default theme fades bg colors with a delay, so the previously
     // focused pill stayed highlighted next to the new one while scrolling.
@@ -168,8 +229,7 @@ lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert) {
     lv_obj_remove_flag(header, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
     lv_obj_set_pos(header, 56, 30);
     lv_obj_set_size(header, 128, 28);
-    lv_obj_set_style_bg_opa(header, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(header, lv_color_hex(alert ? Alert : Orange), 0);
+    band(header, alert ? Alert : Orange);
     lv_obj_set_style_radius(header, LV_RADIUS_CIRCLE, 0);
 
     // One line inside the band; long titles get dots.
@@ -200,21 +260,37 @@ void scrollbar(lv_obj_t* container) {
 }
 
 Gauge gauge(lv_obj_t* parent) {
+    // Glow halos straddle the 8 px progress band (radius 104..112), drawn first.
+    auto halo = [parent](int size, int width) {
+        auto* object = arc(parent, size, width, Border, 135, 405);
+        lv_obj_add_flag(object, Decor);
+        lv_obj_set_style_arc_opa(object, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(object, width, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_rounded(object, true, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(object, LV_OPA_TRANSP, LV_PART_KNOB);
+        return object;
+    };
+    auto* outer = halo(234, 19);
+    auto* inner = halo(230, 15);
     auto* object = arc(parent, 224, 8, Border, 135, 405);
     lv_obj_set_style_arc_width(object, 8, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(object, true, LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(object, LV_OPA_TRANSP, LV_PART_KNOB);
-    Gauge result{object};
+    Gauge result{object, outer, inner};
     setGauge(result, 0);
     return result;
 }
 
 void setGauge(const Gauge& segments, float ratio, bool alert, std::uint32_t color) {
     ratio = std::min(1.0F, std::max(0.0F, ratio));
-    auto* object = segments[0];
-    lv_arc_set_angles(object, 135, 135 + static_cast<int>(ratio * 270));
-    lv_obj_set_style_arc_color(object, lv_color_hex(alert ? Alert : color), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_opa(object, ratio > 0 ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_INDICATOR);
+    const lv_opa_t opacity[GaugeSegments] = {LV_OPA_COVER, 28, 46};
+    for (std::size_t i = 0; i < GaugeSegments; ++i) {
+        auto* object = segments[i];
+        if (!object) continue;
+        lv_arc_set_angles(object, 135, 135 + static_cast<int>(ratio * 270));
+        lv_obj_set_style_arc_color(object, lv_color_hex(alert ? Alert : color), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_opa(object, ratio > 0 ? opacity[i] : static_cast<lv_opa_t>(LV_OPA_TRANSP), LV_PART_INDICATOR);
+    }
 }
 
 lv_obj_t* signalBars(lv_obj_t* parent, int level, std::uint32_t color) {

@@ -28,7 +28,13 @@ constexpr std::uint32_t Gray = 0x16232D;
 constexpr std::uint32_t Alert = 0x78313B;
 constexpr std::uint32_t Muted = 0x9BB5CA;
 constexpr std::uint32_t Border = 0x2B465D;
-constexpr std::size_t GaugeSegments = 1;
+// Top of the screen background gradient (fades into Black).
+constexpr std::uint32_t Sky = 0x10283C;
+// Purely decorative layers (gradients, glow); never focusable or interactive.
+// Layout checks in the simulator skip them.
+constexpr lv_obj_flag_t Decor = LV_OBJ_FLAG_USER_1;
+// Progress arc plus two soft glow arcs behind it.
+constexpr std::size_t GaugeSegments = 3;
 // Knob focus cursor drawn around the focused widget (outline width + gap).
 // Containers of focusable widgets keep at least this much padding so the
 // cursor is never clipped.
@@ -48,6 +54,14 @@ std::string uppercase(std::string text);
 lv_obj_t* frame(lv_obj_t* screen, const std::string& title, bool alert);
 void scrollbar(lv_obj_t* container);
 void pill(lv_obj_t* object, std::uint32_t color = Lavender);
+// Vertical gradient fill derived from `color` (header bands, pills).
+void band(lv_obj_t* object, std::uint32_t color);
+// Screen background: black with a navy sky fading in from the top.
+void background(lv_obj_t* screen);
+// Soft accent glow rising from the bottom of the round screen.
+lv_obj_t* accentGlow(lv_obj_t* parent, std::uint32_t color);
+// Recoloured A8 icon.
+lv_obj_t* icon(lv_obj_t* parent, const lv_image_dsc_t* source, std::uint32_t color);
 Gauge gauge(lv_obj_t* parent);
 void setGauge(const Gauge& segments, float ratio, bool alert = false, std::uint32_t color = Blue);
 // Signal pictogram with `level` (0..SignalBarCount) lit bars in `color`.

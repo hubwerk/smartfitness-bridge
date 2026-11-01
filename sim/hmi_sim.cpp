@@ -60,6 +60,16 @@ HmiUi g_ui;
 lv_indev_t* g_knob = nullptr;
 std::vector<Command> g_commands;
 
+// First content child of the screen (behind it only decorative layers).
+lv_obj_t* screenHeader() {
+    lv_obj_t* screen = lv_screen_active();
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(screen); ++i) {
+        lv_obj_t* child = lv_obj_get_child(screen, static_cast<int>(i));
+        if (!lv_obj_has_flag(child, lcars::Decor)) return child;
+    }
+    return nullptr;
+}
+
 void checkLcars() {
     assert(lcars::uppercase("Bridge äöü ß") == "BRIDGE ÄÖÜ ß");
     for (const auto* font : {&sf_antonio_16, &sf_antonio_20}) {
@@ -350,7 +360,7 @@ lv_area_t textInk(lv_obj_t* label) {
 void collect(lv_obj_t* obj, std::vector<Element>& elements, std::vector<Ring>& rings) {
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(obj); ++i) {
         lv_obj_t* child = lv_obj_get_child(obj, static_cast<int>(i));
-        if (lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) continue;
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN) || lv_obj_has_flag(child, lcars::Decor)) continue;
         collect(child, elements, rings);
     }
     if (lv_obj_get_parent(obj) == nullptr) return;  // screen / layer
@@ -565,7 +575,7 @@ void shot(const char* name, bool checkFocus = true) {
         for (std::uint32_t i = 0; i < lv_obj_get_child_count(lv_screen_active()); ++i) {
             auto* child = lv_obj_get_child(lv_screen_active(), static_cast<int>(i));
             if (lv_obj_check_type(child, &lv_arc_class)) assert(lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN));
-            if (i == 0)  // header band
+            if (child == screenHeader())  // header band
                 assert(lv_color_to_u32(lv_obj_get_style_bg_color(child, LV_PART_MAIN)) ==
                        lv_color_to_u32(lv_color_hex(lcars::Alert)));
         }
@@ -1263,7 +1273,7 @@ void checkAntUi() {
     press();
     assert(g_ui.current() == Screen::AntStatus);
     assert(readoutText(0) == "BROADCASTING\nMODULE DETECTED");
-    auto* header = lv_obj_get_child(lv_screen_active(), 0);
+    auto* header = screenHeader();
     assert(lv_color_to_u32(lv_obj_get_style_bg_color(header, LV_PART_MAIN)) ==
            lv_color_to_u32(lv_color_hex(lcars::Orange)));
     status.antOutput.stick = false;
@@ -1276,7 +1286,7 @@ void checkAntUi() {
     assert(readoutText(1) == "LINK: WAIT-STICK");
     assert(lv_color_to_u32(lv_obj_get_style_bg_color(lv_obj_get_child(currentList(), 0), LV_PART_MAIN)) ==
            lv_color_to_u32(lv_color_hex(lcars::Alert)));
-    header = lv_obj_get_child(lv_screen_active(), 0);
+    header = screenHeader();
     assert(lv_color_to_u32(lv_obj_get_style_bg_color(header, LV_PART_MAIN)) ==
            lv_color_to_u32(lv_color_hex(lcars::Alert)));
     status.antOutput.stick = true;

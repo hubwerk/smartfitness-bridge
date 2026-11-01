@@ -20,7 +20,26 @@ confirmation and a second factory-reset confirmation.
 The tokens below are the design specification. HMI implementation:
 [`lcars_theme.h`](../../include/variants/hmi/lcars_theme.h) and
 [`lcars_theme.cpp`](../../src/variants/hmi/lcars_theme.cpp).
-The HMI uses no gradients, shadows or textured materials.
+Depth matches the web UI, kept cheap for LVGL on the round 240×240 panel:
+
+- **Sky:** each screen has a `Sky` (`#10283C`) band at the top that fades out to
+  black over 112 px.
+- **Gradients:** header bands and buttons use their token as the top colour and
+  fade to a darker shade of it. The header band also has a hairline edge.
+- **Glow:** on the training dashboard, a soft glow in the sport accent sits below
+  the arc. The arc has two faint halo arcs behind it.
+- **Decor:** sky, glow and halos are flagged `lcars::Decor`, so the simulator's
+  layout and overlap checks ignore them.
+- **Icons:** Training, Connections, System and Back in the menu carry the same
+  icons as the web navigation. The dashboard header shows the sport icon next to
+  its name; if a long name does not fit, the icon is dropped before the text is
+  truncated.
+
+Icons come from `src/variants/web/assets/index.html`.
+[`scripts/gen_hmi_icons.py`](../../scripts/gen_hmi_icons.py) rasterises them into
+A8 images in `src/variants/hmi/icons/hmi_icons.c`, which LVGL recolours. Run
+`.venv/bin/python scripts/gen_hmi_icons.py` after changing an icon; `--check`
+verifies the file is up to date.
 
 | Token | Colour | Role |
 |---|---|---|
