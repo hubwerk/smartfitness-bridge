@@ -5,187 +5,92 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SmartFitness Bridge</title>
 <style>
-/* Antonio, SIL Open Font License; source and license are in assets/fonts. */
-@font-face{font-family:Antonio;font-style:normal;font-weight:400;font-display:swap;src:url("data:font/woff2;base64,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") format("woff2")}
-:root{--bg:#000000;--fg:#FFCC99;--muted:#CC99CC;--acc:#FF9900;--gold:#FFAA00;--tan:#CC9966;--violet:#9999FF;--light:#99CCFF;--blue:#5566FF;--ok:#99CCFF;--bad:#CC4444;--warn:#FFAA00}
-*{box-sizing:border-box}body{position:relative;min-height:100vh;margin:0;padding:24px 28px 24px 168px;font:18px/1.4 Antonio,"Arial Narrow",sans-serif;background:var(--bg);color:var(--fg)}
-.lcars-rail{position:absolute;left:28px;top:24px;bottom:24px;width:120px;display:flex;flex-direction:column;gap:8px;z-index:-1}.lcars-rail span{display:block;flex-shrink:0}.lcars-rail span:nth-child(1){height:142px;background:var(--acc)}.lcars-rail span:nth-child(2){height:104px;background:var(--tan)}.lcars-rail span:nth-child(3){height:132px;background:var(--muted)}.lcars-rail span:nth-child(4){height:102px;background:var(--violet)}.lcars-rail span:nth-child(5){flex:1;background:var(--light)}
-header{display:flex;align-items:center;gap:16px;position:relative;min-height:100px;border-top:22px solid var(--acc);margin-bottom:24px;flex-wrap:wrap;padding:12px 0}
-header:before{content:"";position:absolute;background:var(--acc);height:22px;width:20px;top:-22px;left:-20px}
-header h1{font-size:38px;font-weight:400;line-height:1.1;text-transform:uppercase;text-align:right;margin:0;flex:1;order:2}header .connection-status{order:1}nav{display:flex;flex-wrap:wrap;gap:8px;order:3;width:100%}
-nav button{background:var(--tan);border:0;border-radius:24px;color:#000;padding:8px 22px;font:20px Antonio,"Arial Narrow",sans-serif;text-transform:uppercase;cursor:pointer;min-height:44px}
-nav button:nth-child(2){background:var(--muted)}nav button:nth-child(3){background:var(--violet)}nav button:nth-child(4){background:var(--light)}
-nav button.active{background:var(--acc)}nav button[aria-selected="true"]:before{content:"";display:inline-block;width:8px;height:8px;background:#000;margin-right:8px}
-main{max-width:1120px;margin:auto;border-bottom:16px solid var(--tan);padding-bottom:12px}
-section{display:none}section.active{display:block}section h2{margin:0 0 16px;font-size:23px;font-weight:400;letter-spacing:2px;text-transform:uppercase;color:var(--light)}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:22px}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px}
-.card{background:#000;border-top:6px solid var(--tan);padding:12px 0;margin-bottom:14px;min-width:0}.metric{border-color:var(--acc);margin:0;padding-top:8px}.metric:nth-child(2n){border-color:var(--muted)}.metric:nth-child(3n){border-color:var(--light)}
-.metric .v{font-size:62px;line-height:1.2;font-weight:400;color:var(--fg)}.metric .u{color:var(--light);font-size:18px;text-transform:uppercase}
-.label{color:var(--muted);font-size:18px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
-.pill{display:inline-block;padding:3px 12px;border-radius:18px;background:var(--tan);color:#000;font-size:16px;margin:3px 4px 3px 0;overflow-wrap:anywhere}
-.pill.ok{background:var(--ok);color:#000}.pill.bad{background:var(--bad);color:#000}.pill.warn{background:var(--warn);color:#000}
-.service-pills{display:flex;flex-wrap:wrap;gap:4px;min-width:0}.service-pills .pill{margin:2px 0;text-transform:uppercase}.pill.sensor{background:var(--violet)}.pill.pending{background:var(--tan)}
-.service-options{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.service-options button{font:18px Antonio,"Arial Narrow",sans-serif;text-transform:uppercase;min-height:44px;border:0;border-radius:24px;padding:8px 16px;background:var(--tan);color:#000}.service-options button[aria-pressed="true"]{background:var(--gold)}.service-options button:disabled{opacity:.65}.service-options button.required{opacity:1}
-button.b.service-action{background:var(--muted)}.service-note{text-transform:uppercase;color:var(--light)}.service-note.bad{color:var(--bad)}[hidden]{display:none!important}
-button.b{background:var(--acc);color:#000;border:0;border-radius:22px;padding:8px 20px;min-height:44px;font:18px Antonio,"Arial Narrow",sans-serif;text-transform:uppercase;cursor:pointer;margin:2px}button.b.sec{background:var(--light)}button.b.danger{background:var(--bad)}
-button:disabled{opacity:.4;cursor:default}input,select{background:#000;color:var(--fg);border:2px solid var(--violet);border-radius:0;padding:8px 10px;font:18px Antonio,"Arial Narrow",sans-serif;min-height:44px;max-width:100%;min-width:0}
-input[type="checkbox"]{accent-color:var(--acc);width:24px;min-height:24px}input:focus,select:focus{border-color:var(--acc)}
-:focus-visible{outline:3px solid #fff;outline-offset:4px}
-table{width:100%;border-collapse:collapse;table-layout:fixed}td,th{padding:10px 6px;border-bottom:2px solid var(--tan);text-align:left;vertical-align:top;overflow-wrap:anywhere}th{color:var(--muted);font-weight:400;font-size:16px;text-transform:uppercase}th:first-child{width:30%}th:nth-child(2){width:8%}th:nth-child(3){width:16%}th:nth-child(4){width:30%}
-td select{width:100%;font-size:16px}td button.b{padding:8px 14px}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}.row label{min-width:180px;color:var(--light)}
-.facts{display:grid;grid-template-columns:200px minmax(0,1fr);gap:8px 16px;align-items:center;margin:4px 0 14px}.facts dt{color:var(--light);text-transform:uppercase;font-size:16px}.facts dd{margin:0;min-width:0;overflow-wrap:anywhere}.facts dd.control{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.facts .na{color:#888888}
-.service-group{margin-bottom:4px}
-#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--tan);color:#000;padding:12px 24px;border-radius:24px;display:none;max-width:90%;z-index:2}
-.combo{position:relative;width:305px;max-width:100%;min-width:0}.combo input{width:100%}
-#wifi-list{position:absolute;left:0;right:0;top:100%;z-index:3;margin:0;padding:0;list-style:none;background:#000;border:2px solid var(--acc);border-top:0;max-height:264px;overflow-y:auto}
-#wifi-list li{display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;overflow-wrap:anywhere}#wifi-list li .ssid{flex:1;min-width:0}#wifi-list li .small{flex-shrink:0;color:var(--light)}
-.bars{display:inline-flex;align-items:flex-end;gap:2px;width:22px;height:16px;flex-shrink:0;color:var(--light)}.bars i{width:4px;border-radius:1px;background:currentColor;opacity:.3}.bars i.on{opacity:1}.bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:8px}.bars i:nth-child(3){height:12px}.bars i:nth-child(4){height:16px}
-#wifi-list li:hover,#wifi-list li[aria-selected="true"]{background:var(--acc);color:#000}#wifi-list li:hover .small,#wifi-list li[aria-selected="true"] .small,#wifi-list li:hover .bars,#wifi-list li[aria-selected="true"] .bars{color:#000}
-.spin{display:none;width:16px;height:16px;margin-right:8px;vertical-align:-2px;border:3px solid #000;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}[aria-busy="true"] .spin{display:inline-block}@keyframes spin{to{transform:rotate(360deg)}}
-#toast.bad{background:var(--bad)}#toast.ok{background:var(--ok)}.small{font-size:16px;color:var(--fg);overflow-wrap:anywhere}
-.gray{color:#888888}tr.gray td{color:#888888}tr.gray select,tr.gray button.b{opacity:.8}
-.status-legend{display:flex;flex-wrap:wrap;gap:6px 16px;list-style:none;padding:0;margin:8px 0 14px;font-size:16px}.status-legend li{display:flex;align-items:center;gap:6px}.status-legend .legend-swatch{display:inline-block;flex-shrink:0;width:12px;height:12px;padding:0;margin:0;border-radius:50%}.legend-swatch.gray{background:currentColor}.connection-status .status-legend{margin:4px 0 0}
-#ctl-result:not(:empty){display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:var(--ok);color:#000}#ctl-result.bad{background:var(--bad)}
-.gauge{display:flex;align-items:center;gap:14px;margin:16px 0 22px;color:var(--light);text-transform:uppercase;font-size:16px}.gauge[hidden]{display:none}.gauge meter{flex:1;width:100%;height:14px;appearance:none;background:#000;border:2px solid var(--tan)}meter::-webkit-meter-bar{background:#000;border:0;border-radius:0}meter::-webkit-meter-optimum-value{background:var(--acc)}meter::-moz-meter-bar{background:var(--acc)}
-@media(max-width:1000px){.status-grid{grid-template-columns:1fr}}
-@media(max-width:650px){body{padding:14px 14px 20px 36px;font-size:17px}.lcars-rail{left:14px;top:14px;bottom:14px;width:12px}header{border-top-width:14px;gap:8px;margin-bottom:18px;padding:10px 0}header:before{height:14px;top:-14px;width:10px;left:-10px}header h1{font-size:27px}header #conn{font-size:14px;padding:3px 9px}nav{gap:5px}nav button{flex:1;padding:7px 3px;font-size:16px;min-width:0}nav button[aria-selected="true"]:before{display:none}.grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}.metric .v{font-size:49px}.label{font-size:16px}.pill{font-size:15px;padding:4px 10px}.row{gap:8px}.row label{min-width:0;flex-basis:100%}.facts{grid-template-columns:1fr;gap:2px 0}.facts dd{margin-bottom:6px}.facts dd.control select{width:100%}.row input:not([type="checkbox"]),.row select{width:100%}.card{padding-top:10px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:6px solid var(--muted);padding:12px 0}td{border:0;padding:4px 0}td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}td select{width:100%}#ctl-value{flex:1;width:auto;max-width:210px}.gauge{gap:8px;font-size:14px}section h2{font-size:20px;margin-bottom:12px}}
+:root{color-scheme:dark;--bg:#07111d;--surface:#0d1e2e;--fg:#f1f6fc;--muted:#9bb5ca;--line:#2b465d;--acc:#3982f6;--ok:#8ce1b6;--bad:#ffb9bd;--warn:#e8c081}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,sans-serif}button,input,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}[hidden]{display:none!important}
+header{position:fixed;inset:0 auto 0 0;width:226px;background:#0b1927;border-right:1px solid var(--line);padding:30px 18px}header h1{font-size:20px;line-height:1.3;margin:0 0 58px}header h1 small{display:block;font-size:10px;color:var(--muted);letter-spacing:2px;margin-top:7px}
+nav{display:grid;gap:10px}nav button{background:transparent;border:1px solid transparent;border-radius:11px;color:var(--muted);min-height:50px;text-align:left;padding:12px 16px}nav button.active{background:#173047;border-color:#34546f;color:white}
+main{margin-left:226px;padding:32px 40px;max-width:1700px}.connection-status{display:flex;justify-content:flex-end;margin-bottom:12px}h2{font-size:28px;letter-spacing:-.5px;margin:0 0 22px}h3{font-size:17px;margin:0}p{margin:10px 0}.small,.label{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.card{background:linear-gradient(130deg,var(--surface),#0b1926);border:1px solid var(--line);border-radius:16px;padding:22px;min-width:0}.head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.head h3{overflow-wrap:anywhere}.stack{display:grid;gap:18px;min-width:0}.two-column{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;align-items:start}
+.pill{display:inline-block;border:1px solid #355269;border-radius:18px;background:#10283a;color:#bad2e5;font-size:11px;padding:6px 10px;margin:3px 5px 3px 0;overflow-wrap:anywhere}.pill.ok,.ok{color:var(--ok)}.pill.ok{background:#102d25;border-color:#265b48}.pill.bad{background:#311e27;border-color:#76404b;color:var(--bad)}.pill.warn,.pill.pending{background:#292519;border-color:#68552f;color:var(--warn)}.pill.sensor{background:#172b49;color:#b8caff}.bad{color:var(--bad)}.gray,.na{color:var(--muted)}
+.b,.service-options button{min-height:44px;border:1px solid #3d5b73;border-radius:9px;background:#162b3e;color:#dcebf8;padding:9px 15px;font-size:12px;font-weight:600}.b.primary{background:#327ceb;border-color:#5395fc;color:white}.b.danger{background:#311e27;border-color:#76404b;color:var(--bad)}.b.sec{background:transparent}.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0}.row label{color:var(--muted);font-size:12px}.row>input:not([type=checkbox]),.row>select,.row>.combo{flex:1;min-width:120px}.field{display:block;margin:16px 0}.field>span{display:block;color:var(--muted);font-size:12px;margin-bottom:7px}
+input,select{height:44px;max-width:100%;min-width:0;border:1px solid #39576e;border-radius:8px;background:#071623;color:var(--fg);padding:0 12px}input[type=checkbox]{width:22px;height:22px;accent-color:#3982f6}.field>input,.field>select{width:100%}:focus-visible{outline:3px solid white;outline-offset:3px}
+details{min-width:0}summary{cursor:pointer;color:#bed1e2;font-size:12px;min-height:44px;display:flex;justify-content:space-between;align-items:center;gap:10px;list-style:none}summary:after{content:"⌄";font-size:18px}details[open]>summary:after{content:"⌃"}summary::-webkit-details-marker{display:none}.technical{border-top:1px solid var(--line);margin-top:18px;padding-top:8px}.technical>div{padding-top:12px}.facts{display:grid;grid-template-columns:130px minmax(0,1fr);gap:9px 14px;margin:12px 0}.facts dt{font-size:12px;color:var(--muted)}.facts dd{margin:0;min-width:0;overflow-wrap:anywhere}.service-pills,.service-options{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.service-options button[aria-pressed=true]{border-color:#76adfa;background:#234775}.service-options .required{opacity:1}.service-group{margin-bottom:10px}.status-legend{font-size:11px;color:var(--muted)}
+.training-layout{display:grid;grid-template-columns:1.48fr 1fr;gap:18px;align-items:start}.live-card{padding:20px 24px 6px}.device-label{color:var(--muted);font-size:12px}.device-icon{width:32px;height:32px;fill:none;stroke:var(--acc);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}.device-heading{display:flex;align-items:center;gap:12px;min-width:0}.arc-row{display:grid;grid-template-columns:minmax(0,1fr) 250px minmax(0,1fr);align-items:center}.arc{position:relative;width:250px;height:245px}.arc svg{width:100%;height:100%}.arc path{fill:none;stroke-width:10;stroke-linecap:round}.arc .track{stroke:#28425d}.arc .progress{stroke:var(--acc)}.arc-reading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:8px}.arc-reading .v{font-size:64px;font-weight:700;letter-spacing:-2px;font-variant-numeric:tabular-nums}.arc-reading .u{color:var(--muted);font-size:15px}.arc-reading .label{margin-top:13px;color:var(--acc);font-size:10px;text-transform:uppercase;text-align:center}.secondary{text-align:center}.secondary .v{display:block;font-size:27px;font-weight:600;font-variant-numeric:tabular-nums}.secondary .u{display:block;color:var(--muted);font-size:12px}.secondary .label{display:block;margin-bottom:6px}
+.control-card{padding:18px 20px}.control-card .head{margin-bottom:10px}.control-fields{display:grid;grid-template-columns:1fr 1.25fr;gap:10px}.control-fields .field{margin:0}.control-fields .field>span{font-size:11px}.adjust{display:flex;gap:5px}.adjust input{width:100%;text-align:center;font-size:20px;padding:0 4px}.adjust button{padding:0;min-width:44px;font-size:19px}.control-actions{display:flex;gap:10px;margin-top:12px}.control-actions .b{flex:1}#ctl-state{margin-top:8px;font-size:11px}#ctl-result:not(:empty){margin-top:12px;border-top:1px solid var(--line);padding-top:10px}#confirmed-target{font-size:12px;margin-top:12px;color:var(--ok)}#training-alert{padding:10px 15px;border:1px solid #68552f;border-radius:10px;background:#292519;color:var(--warn);margin-bottom:18px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:18px}.metric{padding:18px;min-height:108px}.metric .v{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums}.metric .label{display:block;margin-bottom:12px}.metric .u{color:var(--muted);font-size:11px}.history{margin-top:18px}.history .head{flex-wrap:wrap}.history svg{display:block;width:100%;height:160px}.history text{fill:var(--muted);font:11px system-ui,sans-serif}.history .series{fill:none;stroke:var(--acc);stroke-width:2.5;stroke-linejoin:round}.history .target{fill:none;stroke:#91a7bb;stroke-width:1.5;stroke-dasharray:6 5}.legend{display:flex;gap:14px;font-size:11px;color:var(--muted)}.legend i{display:inline-block;width:18px;border-top:2px solid var(--acc);margin-right:5px;vertical-align:middle}.legend .target{border-color:#91a7bb;border-top-style:dashed}.history-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted)}#extra-metrics .metrics{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.chain{display:flex;justify-content:space-between;gap:12px;padding:14px 20px;border:1px solid var(--line);border-radius:12px;color:var(--muted);font-size:12px;margin-bottom:18px}.config-actions{border-top:1px solid var(--line);padding-top:12px;margin-top:18px}.system-advanced{margin-top:18px}.system-advanced>summary .small{display:block;margin-top:6px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}th,td{padding:12px 6px;border-bottom:1px solid var(--line);text-align:left;overflow-wrap:anywhere}td select{width:100%}th{color:var(--muted)}.combo{position:relative} .combo input{width:100%}
+#wifi-list{position:absolute;left:0;right:0;top:100%;z-index:3;margin:0;padding:0;list-style:none;background:var(--bg);border:1px solid var(--line);max-height:250px;overflow:auto}#wifi-list li{display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer}#wifi-list .ssid{flex:1;overflow-wrap:anywhere}#wifi-list li:hover,#wifi-list li[aria-selected=true]{background:#234775}.bars{display:inline-flex;align-items:flex-end;gap:2px;width:22px;height:16px;flex:none}.bars i{width:4px;background:currentColor;opacity:.3}.bars i.on{opacity:1}.bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:8px}.bars i:nth-child(3){height:12px}.bars i:nth-child(4){height:16px}.spin{display:none}[aria-busy=true] .spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);border:1px solid var(--line);background:#142b3e;border-radius:12px;padding:12px 20px;max-width:90%;z-index:5;display:none}
+@media(max-width:1150px){main{padding:25px}.arc-row{grid-template-columns:minmax(0,1fr) 210px minmax(0,1fr)}.arc{width:210px}.secondary .v{font-size:23px}.training-layout{grid-template-columns:1fr}.two-column{grid-template-columns:1fr}}
+@media(max-width:700px){header{position:static;width:auto;border-right:0;border-bottom:1px solid var(--line);padding:16px}header h1{font-size:17px;margin:0 0 18px}nav{display:flex;gap:6px}nav button{flex:1;min-height:44px;padding:8px;font-size:12px;text-align:center}main{margin:0;padding:16px 14px}.connection-status{margin:0 0 10px}.connection-status .pill{font-size:10px}h2{font-size:25px;margin-bottom:16px}.training-layout{display:contents}#dash{display:flex;flex-direction:column}#dash>h2{order:0}#training-alert{order:1}.live-card{order:2;padding:15px 10px 3px}.control-card{order:4;margin-top:12px;padding:16px}.history{order:5;margin-top:12px;padding:16px}#extra-metrics{order:6}.metrics{order:3;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.live-card .head{gap:8px}.head h3{font-size:14px}.device-heading{gap:8px}.device-icon{width:27px}.live-card .pill{font-size:9px;padding:5px 7px}.arc-row{grid-template-columns:minmax(0,1fr) 180px minmax(0,1fr)}.arc{width:180px;height:190px}.arc-reading .v{font-size:48px}.arc-reading .u{font-size:12px}.arc-reading .label{font-size:8px;margin-top:9px}.secondary .v{font-size:20px}.secondary .label,.secondary .u{font-size:10px}.metric{min-height:96px;padding:14px 16px}.metric .v{font-size:25px}.metric .label{margin-bottom:8px}.control-fields{grid-template-columns:.9fr 1.2fr;gap:9px}.control-fields select{padding:0 7px;font-size:12px}.adjust input{font-size:18px}.card{border-radius:13px}.two-column{gap:12px}.facts{grid-template-columns:1fr;gap:4px}.facts dd{margin-bottom:8px}.chain{font-size:10px;padding:12px}.row>label{flex-basis:100%}.system-advanced{padding:16px}.table-wrap table,.table-wrap tbody,.table-wrap tr,.table-wrap td{display:block}.table-wrap thead{display:none}.table-wrap td{border:0;padding:5px 0}.table-wrap tr{border-bottom:1px solid var(--line);padding:12px 0}.table-wrap td[data-label]:before{content:attr(data-label) ": ";color:var(--muted)}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 /* #ifdef DEBUG_WEB */
-#debug-output{display:block;width:100%;height:55vh;resize:vertical;background:var(--bg);color:var(--fg);border:2px solid var(--violet);padding:12px;font:14px/1.4 monospace;white-space:pre}
+#debug-output{width:100%;height:320px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:12px;font:12px/1.6 monospace;resize:vertical}
 /* #endif */
 </style>
 </head>
 <body>
-<div class="lcars-rail" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
-<header><h1>SmartFitness Bridge</h1><div class="connection-status"><span id="conn" class="pill bad" role="status">offline</span>
-<ul class="status-legend" aria-label="Web connection color legend">
- <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Web interface online</li>
- <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Web interface offline</li>
-</ul></div>
-<nav role="tablist" aria-label="Bridge panels"><button id="tab-dash" role="tab" aria-controls="dash" aria-selected="true" tabindex="0" data-tab="dash" class="active">Dashboard</button><button id="tab-dev" role="tab" aria-controls="dev" aria-selected="false" tabindex="-1" data-tab="dev">Devices</button><button id="tab-ctl" role="tab" aria-controls="ctl" aria-selected="false" tabindex="-1" data-tab="ctl">Control</button><button id="tab-set" role="tab" aria-controls="set" aria-selected="false" tabindex="-1" data-tab="set">Settings</button>
-<!-- #ifdef DEBUG_WEB -->
-<button id="tab-debug" role="tab" aria-controls="debug" aria-selected="false" tabindex="-1" data-tab="debug">Debug</button>
-<!-- #endif -->
-</nav></header>
+<header><h1>SmartFitness<small>BRIDGE · WEBHMI</small></h1>
+<nav role="tablist" aria-label="Bridge panels"><button id="tab-dash" role="tab" aria-controls="dash" aria-selected="true" tabindex="0" data-tab="dash" class="active">Training</button><button id="tab-dev" role="tab" aria-controls="dev" aria-selected="false" tabindex="-1" data-tab="dev">Connections</button><button id="tab-set" role="tab" aria-controls="set" aria-selected="false" tabindex="-1" data-tab="set">System</button></nav></header>
 <main>
+<div class="connection-status"><span id="conn" class="pill bad" role="status">Browser ↔ Bridge offline</span></div>
 <section id="dash" class="active" role="tabpanel" aria-labelledby="tab-dash" tabindex="0">
- <h2>01 / Live telemetry</h2>
- <div id="metrics" class="grid"></div><p id="metrics-empty" class="small" hidden>Waiting for device measurements.</p>
- <div class="gauge" id="power-display" hidden><label for="power-gauge">Power</label><meter id="power-gauge" min="0" max="500" value="0">0 W</meter></div>
- <div class="status-grid">
- <div class="card"><div class="label">Bridge</div><div id="s-bridge"></div></div>
- <div class="card"><div class="label">Input device</div><div id="s-input"></div></div>
- <div class="card"><div class="label">Output (Zwift, MyWhoosh, …)</div><div id="s-out"></div></div>
- <div class="card"><div class="label">Network</div><div id="s-net"></div></div>
- </div>
- <ul class="status-legend" aria-label="Bridge connection color legend">
-  <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Connected / ready / active</li>
-  <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Disconnected / error</li>
-  <li><span class="legend-swatch pill warn" aria-hidden="true"></span>Retry backoff / stale data / missing ANT+ stick</li>
-  <li><span class="legend-swatch pill" aria-hidden="true"></span>Connecting / scanning / advertising / inactive / info</li>
- </ul>
+<h2>Training</h2><div id="training-alert" role="status" hidden></div>
+<div class="training-layout">
+<div class="card live-card"><div class="head"><div class="device-heading"><svg class="device-icon" viewBox="0 0 40 36" aria-hidden="true"><path id="device-icon-path"></path></svg><div><h3 id="training-device">No fitness device</h3><div id="training-profile" class="device-label"></div></div></div><span id="training-state" class="pill">Waiting</span></div>
+<div class="arc-row"><div id="secondary-left" class="secondary"></div><div class="arc"><svg viewBox="0 0 270 248" aria-hidden="true"><path class="track" d="M57 202 A105 105 0 1 1 213 202"/><path id="primary-arc" class="progress" d="M57 202 A105 105 0 1 1 213 202" pathLength="100"/></svg><div id="primary-reading" class="arc-reading"></div></div><div id="secondary-right" class="secondary"></div></div>
+</div>
+<div id="ctl" class="card control-card"><div class="head"><h3>Training control</h3></div>
+<div class="control-fields"><label class="field"><span>Control</span><select id="ctl-kind"><option value="power">Power · W</option><option value="resistance">Resistance · %</option><option value="incline">Incline · %</option><option value="speed">Speed · km/h</option></select></label>
+<div class="field"><span id="ctl-value-label">New target · W</span><div class="adjust"><button class="b" id="ctl-minus" aria-label="Decrease target">−</button><input id="ctl-value" aria-labelledby="ctl-value-label" type="number" step="1" placeholder="Target"><button class="b" id="ctl-plus" aria-label="Increase target">+</button></div></div></div>
+<div id="ctl-state" class="small"></div><div class="control-actions"><button class="b primary" id="btn-apply">Apply</button></div><div id="confirmed-target"></div><div id="ctl-result" class="small" role="status" aria-live="polite"></div>
+</div></div>
+<div id="metrics" class="metrics"></div>
+<div class="card history"><div class="head"><h3 id="history-title">Live history</h3><div class="legend"><span><i></i>Actual</span><span id="history-target-legend"><i class="target"></i>Confirmed target</span></div></div><svg id="history-chart" role="img" aria-label="Recent measurements"></svg><div class="history-footer"><span>Last 5 minutes · this browser only</span><span id="history-state">Waiting for measurements</span></div></div>
+<details id="extra-metrics" class="technical"><summary>More measurements</summary><div id="other-metrics" class="metrics"></div></details>
 </section>
-<section id="dev" role="tabpanel" aria-labelledby="tab-dev" tabindex="0" hidden>
- <h2>02 / Device registry</h2>
- <div class="card device-card" id="card-input"><div class="label">Fitness device · input</div>
-  <dl class="facts" id="paired"><dt>Name</dt><dd id="p-name">none</dd><dt>Address</dt><dd id="p-address">–</dd><dt>Adapter</dt><dd id="p-adapter">–</dd></dl>
-  <div class="label">Advertised services</div><div id="paired-advertised" class="service-pills"></div>
-  <div class="label">Subscribed characteristics</div><div id="paired-subscriptions" class="service-pills"></div>
-  <ul class="status-legend" aria-label="Bluetooth service color legend">
-   <li><span class="legend-swatch pill sensor" aria-hidden="true"></span>Advertised service</li>
-   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Subscribed / OK</li>
-   <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Pending / none reported</li>
-   <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Subscription failed</li>
-  </ul>
-  <div class="row"><button class="b" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button><button class="b danger" id="btn-unpair">Unpair</button><button class="b sec" id="btn-sim">Use simulation</button></div></div>
-    <div class="label">Scan for Fitness devices · input</div>
-  <div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span>
-   <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
-   <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
-  <ul class="status-legend" aria-label="Bluetooth scan color legend">
-   <li><span class="legend-swatch gray" aria-hidden="true"></span>Unrelated device / unnamed device</li>
-  </ul>
-  <div class="card device-card" id="card-bridge"><div class="label">Bridge · output</div>
-  <dl class="facts"><dt>BLE name (FTMS)</dt><dd id="b-name">–</dd><dt>ANT+ device number</dt><dd id="b-ant">–</dd>
-   <dt><label for="c-outputProtocol">Output format</label></dt><dd class="control"><select id="c-outputProtocol"><option value="ble-ftms">BLE FTMS</option><option value="ant-fec">ANT+ FE-C</option><option value="off">Off</option></select><button class="b" id="btn-output">Apply</button></dd></dl>
-  <p class="small" id="c-outputHint">ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.</p>
-  <div class="label" id="b-sent-label">Sent services / characteristics</div><div id="b-sent"></div>
-  <ul class="status-legend" aria-label="Bridge output color legend">
-   <li><span class="legend-swatch pill sensor" aria-hidden="true"></span>Service / ANT+ channel</li>
-   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Sending / subscribed / channel open</li>
-   <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Pending / not applied</li>
-  </ul>
-  <p class="small" id="b-note">BLE services and ANT+ channels are selected under Settings.</p></div>
- <div class="card device-card" id="card-receiver"><div class="label">Receiving device · app / display</div>
-  <dl class="facts"><dt>Name</dt><dd id="r-name">–</dd><dt id="r-id-label">Address</dt><dd id="r-id">–</dd><dt>Protocol</dt><dd id="r-protocol">–</dd></dl>
-  <div class="label">Connection</div><div id="r-state" class="service-pills"></div>
-  <ul class="status-legend" aria-label="Receiving device color legend">
-   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Connected / has control</li>
-   <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Waiting / no control / output off</li>
-  </ul>
-  <p class="small" id="r-note"></p></div>
- <!--<div class="card"><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop</button><span id="scan-state" class="small"></span></div>
-  <table aria-label="Discovered Bluetooth devices"><thead><tr><th scope="col">Name / address</th><th scope="col">RSSI</th><th scope="col">Services</th><th scope="col">Adapter</th><th scope="col">Action</th></tr></thead><tbody id="scan-body"></tbody></table>
-  <p class="small">The detected adapter is preselected; choose another one to override the detection. Devices without a match need a manual choice.</p></div>
- <ul class="status-legend" aria-label="Bluetooth scan color legend">
-  <li><span class="legend-swatch gray" aria-hidden="true"></span>Unrelated device / unnamed device</li>
- </ul>-->
-</section>
-<section id="ctl" role="tabpanel" aria-labelledby="tab-ctl" tabindex="0" hidden>
- <h2>03 / Trainer control</h2>
- <div class="card"><div id="ctl-state" class="small"></div>
-  <div class="row"><label for="ctl-kind">Target</label><select id="ctl-kind"><option value="power">Power (W)</option><option value="resistance">Resistance (%)</option><option value="incline">Incline / grade (%)</option><option value="speed">Speed (km/h)</option></select></div>
-  <div class="row"><label for="ctl-value">Value</label><input id="ctl-value" type="number" step="any" value="150"><button class="b" id="btn-apply">Apply</button></div>
-  <div id="ctl-result" class="small" role="status" aria-live="polite"></div>
-  <ul class="status-legend" aria-label="Control result color legend">
-   <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Command accepted</li>
-   <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Command failed / disconnected / rejected</li>
-  </ul>
-  <p class="small">Requests pass the bridge safety gate: they are rejected when no trainer is connected, the control is not supported or the value is out of range.</p></div>
-</section>
-<section id="set" role="tabpanel" aria-labelledby="tab-set" tabindex="0" hidden>
- <h2>04 / System configuration</h2>
- <div class="card"><div class="label">Outputs</div>
-  <p class="small">The output format is selected under Devices → Bridge.</p>
-  <div class="row"><label for="c-ftmsName">FTMS output name</label><input id="c-ftmsName" maxlength="20"></div>
-  <div class="row"><label for="c-ftmsOutputProfile">Output profile</label><select id="c-ftmsOutputProfile"><option value="auto">Auto (follow input)</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option><option value="step-climber">Step climber</option><option value="stair-climber">Stair climber</option></select></div>
-  <p class="small">Every profile is sent with its native FTMS data characteristic or ANT+ FE-C equipment type. The dashboard shows the effective profile.</p>
-  <div class="label">BLE output services</div><div id="c-ftmsServices" class="service-options" role="group" aria-label="BLE output services"></div>
-  <div id="ftms-service-state" class="service-pills" aria-label="BLE service state"></div>
-  <p id="c-ftmsRestart" class="small service-note">Save + restart after changing BLE services; re-pair your client.</p>
-  <div id="ant-services" hidden><div class="label">ANT+ output channels</div><div id="c-antServices" class="service-options" role="group" aria-label="ANT+ output channels"></div>
-  <div id="ant-service-state" class="service-pills" aria-label="ANT+ channel state"></div>
-  <p id="c-antWarning" class="small service-note bad" role="status" hidden>FE-C + Power duplicates power. Pair only one power source in your app.</p></div>
-  <ul class="status-legend" aria-label="Output service color legend">
-  <li><span class="legend-swatch pill ok" aria-hidden="true"></span>Service active / channel open / channel capacity</li>
-  <li><span class="legend-swatch pill pending" aria-hidden="true"></span>Pending / off</li>
-  <li><span class="legend-swatch pill bad" aria-hidden="true"></span>Failed / error / duplicate power warning</li>
-  </ul>
-  <div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div></div>
- <div class="card"><div class="label">Wi-Fi (applied after restart)</div>
-  <div class="row"><label for="c-wifiSsid">Network (SSID)</label><div class="combo"><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="wifi-list" autocomplete="off"><ul id="wifi-list" role="listbox" aria-label="Wi-Fi networks" hidden></ul></div><button class="b sec" id="btn-wifi-scan" aria-busy="false"><span class="spin" aria-hidden="true"></span>Scan</button></div>
-  <div class="row"><label for="c-wifiPassword">Password</label><input id="c-wifiPassword" type="password" maxlength="63" placeholder="unchanged"></div>
-  <div class="row"><label for="c-apPassword">Access point password</label><input id="c-apPassword" type="password" maxlength="63" placeholder="unchanged"></div>
-  <div class="row"><label for="c-https">HTTPS</label><input id="c-https" type="checkbox"></div>
-  <p class="small">HTTPS uses a self-signed certificate. Off serves the web interface unencrypted over http://. After the restart this page opens the new address.</p></div>
- <div class="row"><button class="b service-action" id="btn-save">Save</button><button class="b sec service-action" id="btn-restart">Restart</button><button class="b danger" id="btn-reset">Factory reset</button></div>
- <p class="small">Firmware <span id="fw"></span> · <span id="unsaved"></span></p>
-</section>
+<section id="dev" role="tabpanel" aria-labelledby="tab-dev" tabindex="0" hidden><h2>Connections</h2>
+<div class="chain"><span>Fitness device</span><span>→</span><span>Bridge output</span><span>→</span><span>App / display</span></div>
+<div class="two-column"><div class="stack">
+<div class="card device-card" id="card-input"><div class="head"><h3>01 · Fitness device</h3><span id="input-state" class="pill">Waiting</span></div><div id="p-name"></div><p id="input-summary" class="small"></p>
+<div class="row"><button class="b" id="btn-change-device">Change device</button><button class="b sec" id="btn-connect">Connect</button><button class="b sec" id="btn-disconnect">Disconnect</button></div>
+<details class="technical" id="input-details"><summary>Technical details & pairing</summary><div><dl class="facts" id="paired"><dt>Address</dt><dd id="p-address"></dd><dt>Adapter</dt><dd id="p-adapter"></dd></dl><div id="s-input"></div>
+<div class="label">Advertised services</div><div id="paired-advertised" class="service-pills"></div><div class="label">Subscribed characteristics</div><div id="paired-subscriptions" class="service-pills"></div>
+<p class="small">Advertised services do not imply successful subscription. Each characteristic reports its own state.</p><button class="b danger" id="btn-unpair">Forget pairing</button></div></details>
+<details class="technical" id="device-search"><summary>Find fitness devices</summary><div><div class="row"><button class="b" id="btn-scan">Scan</button><button class="b sec" id="btn-scan-stop">Stop scan</button><span id="scan-state" class="small"></span></div>
+<div class="table-wrap"><table aria-label="Discovered Bluetooth devices"><thead><tr><th>Name / address</th><th>RSSI</th><th>Services</th><th>Adapter</th><th>Action</th></tr></thead><tbody id="scan-body"></tbody></table></div><p class="small">Detected adapters are preselected. Otherwise choose an adapter before pairing.</p></div></details></div>
+<div class="card device-card" id="card-receiver"><h3>03 · App / display</h3><div id="r-state" class="service-pills"></div><p class="small">Connection and control ownership are independent.</p><details class="technical"><summary>Technical details</summary><div><dl class="facts"><dt>Name</dt><dd id="r-name"></dd><dt id="r-id-label">Address</dt><dd id="r-id"></dd><dt>Protocol</dt><dd id="r-protocol"></dd></dl><p id="r-note" class="small"></p></div></details></div>
+</div>
+<div class="card device-card" id="card-bridge"><div class="head"><h3>02 · Bridge output</h3><span id="output-state" class="pill">Waiting</span></div>
+<label class="field"><span>Output format</span><select id="c-outputProtocol"><option value="ble-ftms">Bluetooth · FTMS</option><option value="ant-fec">ANT+ FE-C</option><option value="off">Off</option></select></label><p id="c-outputHint" class="small"></p>
+<label class="field"><span>Name for apps</span><input id="c-ftmsName" maxlength="20"></label>
+<label class="field"><span>Device profile</span><select id="c-ftmsOutputProfile"><option value="auto">Automatic · follow input</option><option value="bike">Indoor bike</option><option value="treadmill">Treadmill</option><option value="cross-trainer">Cross trainer</option><option value="rower">Rower</option><option value="step-climber">Step climber</option><option value="stair-climber">Stair climber</option></select></label>
+<div id="ble-services"><h3>BLE services</h3><div id="c-ftmsServices" class="service-options" role="group" aria-label="BLE output services"></div><div id="ftms-service-state" class="service-pills"></div><p id="c-ftmsRestart" class="small"></p></div>
+<div id="ant-services" hidden><h3>ANT+ channels</h3><div id="c-antServices" class="service-options" role="group" aria-label="ANT+ output channels"></div><div id="ant-service-state" class="service-pills"></div><p id="c-antWarning" class="small bad" role="status" hidden>FE-C + Power duplicates power. Pair only one power source in your app.</p></div>
+<details class="technical"><summary>Sent services & technical details</summary><div><dl class="facts"><dt>Active BLE name</dt><dd id="b-name"></dd><dt>ANT+ device number</dt><dd id="b-ant"></dd></dl><div id="b-sent-label" class="label"></div><div id="b-sent"></div><p id="b-note" class="small"></p></div></details>
+<div class="config-actions"><p id="output-dirty" class="small" role="status">No unsaved edits</p><div class="row"><button class="b primary" id="btn-output">Save output</button><button class="b sec" id="btn-discard-output">Discard</button></div></div>
+</div></div></section>
+<section id="set" role="tabpanel" aria-labelledby="tab-set" tabindex="0" hidden><h2>System</h2><div class="two-column">
+<div class="card" id="network-settings"><h3>Wi-Fi & access</h3><label class="field" for="c-wifiSsid"><span>Network (SSID)</span></label><div class="row"><div class="combo"><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="wifi-list" autocomplete="off"><ul id="wifi-list" role="listbox" aria-label="Wi-Fi networks" hidden></ul></div><button class="b sec" id="btn-wifi-scan" aria-busy="false"><span class="spin" aria-hidden="true"></span>Scan</button></div>
+<label class="field"><span>Wi-Fi password</span><input id="c-wifiPassword" type="password" maxlength="63" placeholder="unchanged"></label><label class="field"><span>Access point password</span><input id="c-apPassword" type="password" maxlength="63" placeholder="unchanged"></label><div class="row"><label for="c-https">HTTPS</label><input id="c-https" type="checkbox"></div>
+<p class="small">HTTPS uses a self-signed certificate. Disabling it serves this interface unencrypted. Network changes take effect after restart.</p><div class="row"><button class="b primary" id="btn-save">Save system</button><span id="system-dirty" class="small" role="status">No unsaved edits</span></div><details class="technical"><summary>Network details</summary><div id="s-net"></div></details></div>
+<div class="card"><h3>System actions</h3><p class="small">Restarting interrupts device and app connections. Finish your training first.</p><button class="b sec" id="btn-restart">Restart…</button><div class="technical"><h3>Factory settings</h3><p class="small">Erases configuration and pairing. Requires two confirmations.</p><button class="b danger" id="btn-reset">Factory reset…</button></div><p class="small">Firmware <span id="fw"></span> · <span id="unsaved"></span></p></div></div>
+<details class="card system-advanced" id="advanced"><summary><div><h3>Advanced</h3><span class="small">Diagnostics, logs & simulation · setup and troubleshooting</span></div></summary><div class="two-column">
+<div><h3>Simulation</h3><p class="small">Replaces the real training source with simulated measurements.</p><button class="b" id="btn-sim">Use simulation…</button><div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div><p class="small">Save this option with “Save system”. Connect a real device under Connections to leave simulation.</p></div>
 <!-- #ifdef DEBUG_WEB -->
-<section id="debug" role="tabpanel" aria-labelledby="tab-debug" tabindex="0" hidden>
- <h2>05 / Debug</h2>
- <div class="card"><label for="debug-output" class="label">Debug-Output · max. 512 KB · gelöscht beim Neustart</label>
- <textarea id="debug-output" readonly spellcheck="false"></textarea></div>
- <div class="row"><button class="b" id="btn-debug-download">Logfile herunterladen</button><button class="b sec" id="btn-debug-clear">Anzeige leeren</button><button class="b danger" id="btn-debug-logging" aria-pressed="false">Logging stoppen</button><span id="debug-state" class="small" role="status"></span></div>
-</section>
+<div id="debug"><h3>Diagnostics</h3><p class="small">Maximum 512 KB · cleared on restart</p><textarea id="debug-output" aria-label="Debug output" readonly spellcheck="false"></textarea><div class="row"><button class="b" id="btn-debug-download">Logfile herunterladen</button><button class="b sec" id="btn-debug-clear">Anzeige leeren</button><button class="b" id="btn-debug-logging" aria-pressed="false">Logging stoppen</button></div><span id="debug-state" class="small" role="status"></span></div>
 <!-- #endif -->
-</main>
-<div id="toast" role="status" aria-live="polite"></div>
+</div></details></section>
+</main><div id="toast" role="status" aria-live="polite"></div>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
 let status={},scan={devices:[],adapters:[]},pending={};
+const dirty=new Set();
+const editVersion={output:0,system:0};
+let configLoaded=false,configSaving=false;
+function markDirty(scope){dirty.add(scope);editVersion[scope]++;renderDirty()}
+function renderDirty(){for(const scope of["output","system"])$(scope+"-dirty").textContent=dirty.has(scope)?"Unsaved edits":"No unsaved edits"}
 let serviceMasks={ftms:0,ant:0},antAvailable=false,configuredFtmsServices=0,outputDirty=false,configuredOutput="ble-ftms";
 const outputServices={ftms:[["ftms","FTMS",1],["cps","CPS",2],["hr","HR",4],["csc","CSC",8],["rsc","RSC",16]],ant:[["fec","FE-C",1],["power","Power",2],["hr","HR",4],["speed-cadence","Speed / cadence",8],["sdm","Footpod",16]]};
 function outputEntries(kind){return kind==="ftms"?(status.ftmsOutput||{}).services||[]:(status.antOutput||{}).channels||[]}
@@ -197,13 +102,14 @@ function renderServiceControls(){
   fill($(kind+"-service-state"),[...outputEntries(kind).map(entry=>{const active=kind==="ftms"?entry.active:entry.open,failed=entry.enabled&&out.enabled&&!active&&kind==="ant"&&!!out.error;
    return pill(entry.name+" · "+(active?"ACTIVE":failed?"FAILED":entry.enabled?"PENDING":"OFF"),active?"ok":failed?"bad":"pending")}),...(out.error?[pill(out.error,"bad")]:[]),...(out.channelLimit?[pill("channel capacity: "+out.channelLimit,"ok")]:[])]);
   if(group.dataset.render!==key){const focused=group.contains(document.activeElement)?document.activeElement.dataset.service:null,buttons=[];
-  const auto=el("button","Auto");auto.type="button";auto.dataset.service="auto";auto.setAttribute("aria-pressed",String(mask===0));auto.onclick=()=>{serviceMasks[kind]=0;renderServiceControls()};buttons.push(auto);
+  const auto=el("button","Auto");auto.type="button";auto.dataset.service="auto";auto.setAttribute("aria-pressed",String(mask===0));auto.onclick=()=>{serviceMasks[kind]=0;markDirty("output");renderServiceControls()};buttons.push(auto);
   for(const[id,name,bit]of outputServices[kind]){const available=serviceAvailable(kind,id),selected=!!((mask||1)&bit),required=kind==="ftms"&&bit===1;
    const b=el("button",name+(available?"":" · NO DATA")+(required?" · REQUIRED":""));b.type="button";b.dataset.service=id;b.setAttribute("aria-pressed",String(selected));b.disabled=required||!available;if(required)b.className="required";
-   b.onclick=()=>{const current=serviceMasks[kind]||1,next=current^bit;if(!next){toast("select at least one ANT+ channel or choose Auto",false);return}serviceMasks[kind]=kind==="ftms"?next|1:next;renderServiceControls()};buttons.push(b)}
+   b.onclick=()=>{const current=serviceMasks[kind]||1,next=current^bit;if(!next){toast("select at least one ANT+ channel or choose Auto",false);return}serviceMasks[kind]=kind==="ftms"?next|1:next;markDirty("output");renderServiceControls()};buttons.push(b)}
   fill(group,buttons);group.dataset.render=key;if(focused)group.querySelector('[data-service="'+focused+'"]')?.focus()}}
- $("ant-services").hidden=!antAvailable;
- const antMask=serviceMasks.ant||1;$("c-antWarning").hidden=!antAvailable||(antMask&3)!==3;
+ const selected=$("c-outputProtocol").value;
+ $("ant-services").hidden=!antAvailable||selected!=="ant-fec";$("ble-services").hidden=selected!=="ble-ftms";
+ const antMask=serviceMasks.ant||1;$("c-antWarning").hidden=!antAvailable||selected!=="ant-fec"||(antMask&3)!==3;
  $("c-ftmsRestart").textContent=(serviceMasks.ftms||1)!==(configuredFtmsServices||1)?"Save + restart to apply this BLE service selection; re-pair your client.":(status.ftmsOutput||{}).restartRequired?"Saved BLE service changes pending: restart and re-pair your client.":"Save + restart after changing BLE services; re-pair your client.";
 }
 function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined&&text!==null)e.textContent=String(text);if(cls)e.className=cls;return e}
@@ -221,7 +127,7 @@ function renderBridge(){
  else groups=[[pill("output off – nothing is sent","pending")]];
  if(!groups.length)groups=[[pill("none","pending")]];
  fill($("b-sent"),groups.map(items=>{const g=el("div",null,"service-pills service-group");g.append(...items);return g}));
- $("b-note").textContent=applied?"BLE services and ANT+ channels are selected under Settings.":"Not applied yet: press Apply to switch the output format.";}
+ $("b-note").textContent=applied?"These are the currently advertised services and channel states.":"Not applied yet: save output to switch the format.";}
 function renderReceiver(){
  const f=status.ftmsOutput||{},a=status.antOutput||{},op=status.outputProtocol||"ble-ftms";
  if(op==="ble-ftms"){
@@ -243,9 +149,9 @@ function fullUuid(uuid){const short=/^(?:0x)?([0-9a-f]{4})$/i.exec(uuid);return 
 function fill(node,items){node.replaceChildren(...items)}
 function toast(msg,ok){const t=$("toast");t.textContent=msg;t.className=ok===undefined?"":ok?"ok":"bad";t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",4000)}
 const tabs=Array.from(document.querySelectorAll('nav [role="tab"]'));
-function selectTab(b){tabs.forEach(t=>{const active=t===b;t.classList.toggle("active",active);t.setAttribute("aria-selected",String(active));t.tabIndex=active?0:-1;const panel=$(t.dataset.tab);panel.classList.toggle("active",active);panel.hidden=!active});if(b.dataset.tab==="set"||b.dataset.tab==="dev")loadConfig();
+function selectTab(b){tabs.forEach(t=>{const active=t===b;t.classList.toggle("active",active);t.setAttribute("aria-selected",String(active));t.tabIndex=active?0:-1;const panel=$(t.dataset.tab);panel.classList.toggle("active",active);panel.hidden=!active});if((b.dataset.tab==="set"||b.dataset.tab==="dev")&&!configLoaded)loadConfig();
 // #ifdef DEBUG_WEB
- if(b.dataset.tab==="debug")loadDebug();
+ if(debugVisible())loadDebug();
 // #endif
 }
 tabs.forEach((b,index)=>{b.onclick=()=>selectTab(b);b.onkeydown=e=>{let next;if(e.key==="ArrowRight")next=(index+1)%tabs.length;else if(e.key==="ArrowLeft")next=(index+tabs.length-1)%tabs.length;else if(e.key==="Home")next=0;else if(e.key==="End")next=tabs.length-1;else return;e.preventDefault();selectTab(tabs[next]);tabs[next].focus()}});
@@ -262,37 +168,125 @@ async function run(endpoint,body,quiet){const r=await post(endpoint,body);if(r&&
 function fmt(v){return v===null||v===undefined?"–":(Math.round(v*10)/10).toString()}
 const metricNames={speed:"Speed",distance:"Distance",cadence:"Cadence",power:"Power",heartRate:"Heart rate",incline:"Incline",elapsed:"Elapsed time",resistance:"Resistance",averageSpeed:"Average speed",averageCadence:"Average cadence",averagePower:"Average power",totalEnergy:"Total energy",energyPerHour:"Energy per hour",energyPerMinute:"Energy per minute",metabolicEquivalent:"MET",remainingTime:"Remaining time",rampAngle:"Ramp angle",positiveElevationGain:"Elevation gain",negativeElevationGain:"Elevation loss",pace:"Pace",averagePace:"Average pace",strokeCount:"Strokes",stepCount:"Steps",strideCount:"Strides",floors:"Floors",forceOnBelt:"Belt force"};
 const metricUnits={speed:"km/h",distance:"m",cadence:"rpm",power:"W",heartRate:"bpm",incline:"%",elapsed:"s",resistance:"level",averageSpeed:"km/h",averageCadence:"rpm",averagePower:"W",totalEnergy:"kcal",energyPerHour:"kcal/h",energyPerMinute:"kcal/min",metabolicEquivalent:"MET",remainingTime:"s",rampAngle:"°",positiveElevationGain:"m",negativeElevationGain:"m",pace:"s/500m",averagePace:"s/500m",strokeCount:"strokes",stepCount:"steps",strideCount:"strides",floors:"floors",forceOnBelt:"N"};
+const profiles={
+ bike:{name:"Indoor bike",color:"#3982f6",main:"power",sides:["cadence","distance"],cards:["elapsed","heartRate","totalEnergy","speed"],scale:500,icon:"M7 21a5 5 0 1 0 0 .1M29 21a5 5 0 1 0 0 .1M7 21l7-13 7 13H7m14 0 8-11M11 8h6m7 2h5"},
+ treadmill:{name:"Treadmill",color:"#ff912f",main:"speed",sides:["incline","distance"],cards:["elapsed","heartRate","totalEnergy","pace"],scale:25,icon:"M23 5a2 2 0 1 0 0 .1M21 10l-6 8 9 3 5 9M16 17l-7 12M20 11l9 4 5-6M15 13l-7 2"},
+ rower:{name:"Rower",color:"#35d77a",main:"cadence",sides:["power","distance"],cards:["elapsed","heartRate","totalEnergy","pace"],scale:60,icon:"M18 5a2 2 0 1 0 0 .1M18 9l5 5-6 5-6-4m6-4-7 1m11 2 9 3 6-7M6 22l7 5h17l6-6M3 29h32"},
+ "cross-trainer":{name:"Cross trainer",color:"#ae88ff",main:"resistance",sides:["cadence","distance"],cards:["elapsed","heartRate","totalEnergy","power"],scale:30,icon:"M22 5a2 2 0 1 0 0 .1M20 10l-5 7 9 3-4 8m-4-13-6-2m11-2 8 3 3-6M15 17l-7 10M3 29h12m4 0h13"},
+ "step-climber":{name:"Step climber",color:"#25c9c0",main:"cadence",sides:["positiveElevationGain","stepCount"],cards:["elapsed","heartRate","totalEnergy","averageCadence"],scale:160,icon:"M19 5a2 2 0 1 0 0 .1M18 10l-4 7 8 2 5 7m-12-9-6 8m10-14 8 3 4-4M4 28h11m7 2h12"},
+ "stair-climber":{name:"Stair climber",color:"#f3be4f",main:"cadence",sides:["floors","stepCount"],cards:["elapsed","heartRate","totalEnergy","positiveElevationGain"],scale:160,icon:"M21 5a2 2 0 1 0 0 .1M20 10l-5 7 8 1v6m-7-8-6 9m10-13 7 3 5-4M3 30h10v-5h10v-5h12"}
+};
+const genericProfile={name:"Fitness device",color:"#99b5cf",main:"power",sides:["cadence","distance"],cards:["elapsed","heartRate","totalEnergy","speed"],scale:500,icon:"M4 18h8l5-10 6 20 5-10h8"};
+let activeProfile=genericProfile,profileKey="",sourceKey="",history=[],lastHistory=0,lastStatus=0,online=false,controlBusy=false,controlKind="";
+const controlUnits={power:"W",resistance:"%",incline:"%",speed:"km/h"};
+function effectiveProfile(s){return(s.outputProtocol==="ant-fec"?s.antOutput?.profile:s.outputProtocol==="off"?s.input?.profile:s.ftmsOutput?.profile)||s.input?.profile||""}
+function metricLabel(key){
+ if(key==="cadence")return profileKey==="rower"?"Stroke rate":profileKey.includes("climber")||profileKey==="cross-trainer"?"Step rate":"Cadence";
+ return metricNames[key]||key;
+}
+function metricUnit(key){
+ if(key==="distance")return"km";
+ if(key==="elapsed"||key==="remainingTime")return"min";
+ if(key==="pace"||key==="averagePace")return"min/500 m";
+ if(key==="cadence"||key==="averageCadence")return profileKey==="rower"?"spm":profileKey.includes("climber")||profileKey==="cross-trainer"?"steps/min":"rpm";
+ return metricUnits[key]||"";
+}
+function metricValue(key,value){
+ if(!Number.isFinite(value))return"–";
+ if(key==="distance")return(value/1000).toFixed(2);
+ if(["elapsed","remainingTime","pace","averagePace"].includes(key)){const seconds=Math.max(0,Math.round(value));return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")}
+ return fmt(value);
+}
+function reading(node,key,value){
+ const v=el("span",metricValue(key,value),"v");v.id="m-"+key;
+ fill(node,[el("span",metricLabel(key),"label"),v,el("span",metricUnit(key),"u")]);
+}
+function metricCard(key,value){const card=el("div",null,"card metric");reading(card,key,value);card.insertBefore(document.createTextNode(" "),card.lastChild);return card}
+function dataFresh(){return online&&Date.now()-lastStatus<6000&&!status.input?.stale&&!["disconnected","error","fault"].includes(status.state)}
 function renderMetrics(telemetry){
- const entries=Object.entries(telemetry||{}).filter(([,value])=>Number.isFinite(value));
- fill($("metrics"),entries.map(([key,value])=>{
-  const card=el("div",null,"card metric"),valueNode=el("span",fmt(value),"v");
-  valueNode.id="m-"+key;card.append(el("div",metricNames[key]||key,"label"),valueNode);
-  if(metricUnits[key])card.append(" ",el("span",metricUnits[key],"u"));
-  return card;
- }));
- $("metrics-empty").hidden=entries.length>0;
+ const fresh=dataFresh(),values=fresh?telemetry||{}:{},p=activeProfile;
+ reading($("primary-reading"),p.main,values[p.main]);$("primary-reading").append($("primary-reading").firstChild);
+ reading($("secondary-left"),p.sides[0],values[p.sides[0]]);reading($("secondary-right"),p.sides[1],values[p.sides[1]]);
+ fill($("metrics"),p.cards.map(key=>metricCard(key,values[key])));
+ const used=new Set([p.main,...p.sides,...p.cards]);
+ const extra=Object.entries(values).filter(([key,value])=>!used.has(key)&&Number.isFinite(value));
+ fill($("other-metrics"),extra.map(([key,value])=>metricCard(key,value)));$("extra-metrics").hidden=!extra.length;
+ const value=values[p.main],amount=Number.isFinite(value)?Math.max(0,Math.min(100,value/p.scale*100)):0;
+ $("primary-arc").style.strokeDasharray=amount+" 100";$("primary-arc").style.visibility=Number.isFinite(value)?"visible":"hidden";
+}
+function renderControls(){
+ const choices=status.controls||[],select=$("ctl-kind");
+ for(const option of select.options)option.disabled=!choices.includes(option.value);
+ if(!choices.includes(select.value)){const available=[...select.options].find(option=>!option.disabled);if(available)select.value=available.value}
+ const enabled=dataFresh()&&status.canControl&&choices.includes(select.value)&&!controlBusy;
+ for(const id of["ctl-kind","ctl-value","ctl-minus","ctl-plus","btn-apply"])$(id).disabled=!enabled;
+ const kind=select.value;
+ if(controlKind!==kind){controlKind=kind;$("ctl-value").value=status.target?.control===kind&&Number.isFinite(status.target.value)?fmt(status.target.value):""}
+ $("ctl-value-label").textContent="New target · "+controlUnits[kind];$("ctl-value").step=kind==="speed"||kind==="incline"?"0.1":"1";
+ $("ctl-state").textContent=controlBusy?"Waiting for device acknowledgement…":!dataFresh()?"Control unavailable: no fresh device data.":!enabled?"This device does not support target control.":"Not sent until you apply.";
+ const t=status.target;
+ $("confirmed-target").textContent=t&&controlUnits[t.control]&&Number.isFinite(t.value)?"Confirmed target: "+fmt(t.value)+" "+controlUnits[t.control]+" ("+t.control+")":"";
+}
+function renderTraining(){
+ const s=status,p=activeProfile,fresh=dataFresh(),sim=s.input?.source==="simulation"||s.input?.source==="simulated";
+ $("training-device").textContent=s.deviceName||s.input?.paired?.name||"No fitness device";
+ $("training-profile").textContent=p.name;$("device-icon-path").setAttribute("d",p.icon);
+ $("training-state").textContent=sim?"Simulation":fresh?s.state||"Connected":"Unavailable";
+ $("training-state").className="pill "+(sim?"warn":fresh?"ok":"bad");
+ const warnings=[];
+ if(sim)warnings.push("Simulation – not live device measurements.");
+ if(!online)warnings.push("Browser connection lost. Measurements and control are unavailable.");
+ else if(!fresh)warnings.push(s.input?.error||"Device disconnected or measurements are stale.");
+ if(!profiles[profileKey])warnings.push("Device profile unavailable; showing generic measurements.");
+ $("training-alert").hidden=!warnings.length;$("training-alert").textContent=warnings.join(" ");
+ renderMetrics(s.telemetry);renderControls();
+}
+function svgNode(tag,attrs){const node=document.createElementNS("http://www.w3.org/2000/svg",tag);for(const[key,value]of Object.entries(attrs))node.setAttribute(key,value);return node}
+function renderHistory(){
+ const chart=$("history-chart"),p=activeProfile,now=Date.now(),width=Math.max(280,chart.clientWidth),height=160,left=52,right=width-8,top=14,bottom=124;
+ chart.setAttribute("viewBox",`0 0 ${width} ${height}`);
+ chart.setAttribute("aria-label",metricLabel(p.main)+" over the last five minutes, "+metricUnit(p.main));
+ $("history-title").textContent=metricLabel(p.main)+" history";
+ history=history.filter(point=>now-point.time<=300000);
+ const points=history.filter(point=>Number.isFinite(point.value)||Number.isFinite(point.target)),values=points.flatMap(point=>[point.value,point.target]).filter(Number.isFinite);
+ const max=Math.max(1,...values)*1.15,min=Math.min(0,...values),x=time=>left+(time-(now-300000))/300000*(right-left),y=value=>bottom-(value-min)/(max-min)*(bottom-top);
+ const nodes=[];
+ for(let i=0;i<3;i++){const v=min+(max-min)*i/2,yy=y(v);nodes.push(svgNode("path",{d:`M${left} ${yy}H${right}`,stroke:"#294458","stroke-dasharray":"3 5"}));const text=svgNode("text",{x:0,y:yy+4});text.textContent=fmt(v);nodes.push(text)}
+ for(const[ratio,label]of[[0,"−5 min"],[.5,"−2.5 min"],[1,"Now"]]){const text=svgNode("text",{x:left+ratio*(right-left),y:151,"text-anchor":ratio===1?"end":ratio===0?"start":"middle"});text.textContent=label;nodes.push(text)}
+ for(const key of["target","value"]){
+  let path="",previous=null;
+  for(const point of history){const v=point[key];if(!Number.isFinite(v)){previous=null;continue}const connected=previous&&point.time-previous.time<6000;
+   path+=(!connected?"M":key==="target"?"H":"L")+(key==="target"&&connected?x(point.time)+"V"+y(v):x(point.time)+" "+y(v));previous=point}
+  if(path)nodes.push(svgNode("path",{d:path,class:key==="value"?"series":"target"}));
+ }
+ const latest=history.at(-1);if(latest&&Number.isFinite(latest.value))nodes.push(svgNode("circle",{cx:x(latest.time),cy:y(latest.value),r:3,fill:"var(--acc)"}));
+ chart.replaceChildren(...nodes);$("history-target-legend").hidden=!history.some(point=>Number.isFinite(point.target));
+ $("history-state").textContent=values.length?metricUnit(p.main)+" · observed samples only":"Waiting for measurements";
 }
 function renderStatus(s){
- status=s;$("conn").textContent="online";$("conn").className="pill ok";
- const telemetry=s.telemetry||{},power=telemetry.power;renderMetrics(telemetry);
- $("power-display").hidden=!Number.isFinite(power);$("power-gauge").value=Number.isFinite(power)?Math.max(0,Math.min(500,power)):0;$("power-gauge").textContent=fmt(power)+" W";
- fill($("s-bridge"),[pill(s.state,["disconnected","error","fault"].includes(s.state)?"bad":"ok"),pill(s.trainer?"trainer":"no trainer",s.trainer?"ok":""),pill(s.canControl?"control ready":"no control",s.canControl?"ok":""),
-  ...(s.controls||[]).map(c=>pill(c)),pill(s.deviceName||"no device")]);
- const i=s.input||{},items=[pill("source: "+i.source),pill("profile: "+(i.profile||"bike"))];
- if(i.link)items.push(pill("link: "+i.link,i.link==="connected"||i.link==="ready"||i.link==="listening"?"ok":i.link==="reconnecting"||i.link==="backoff"?"warn":i.link==="searching"?"pending":""));
- if(i.protocol)items.push(pill("adapter: "+i.protocol));if(i.stale)items.push(pill("stale data","warn"));if(i.scanning)items.push(pill("scanning"));
- if(i.error)items.push(pill(i.error,"bad"));if(i.link==="backoff")items.push(pill("retry in "+Math.ceil(i.nextAttemptMs/1000)+" s"));
+ status=s;online=true;lastStatus=Date.now();$("conn").textContent="Browser ↔ Bridge online";$("conn").className="pill ok";
+ profileKey=effectiveProfile(s);activeProfile=profiles[profileKey]||genericProfile;
+ $("dash").style.setProperty("--acc",activeProfile.color);
+ const key=[profileKey,s.input?.source,s.input?.paired?.address,s.deviceName].join("|");
+ if(sourceKey!==key){history=[];lastHistory=0;sourceKey=key;controlKind="";$("ctl-result").textContent=""}
+ if(Date.now()-lastHistory>=1000){const fresh=dataFresh(),value=fresh?s.telemetry?.[activeProfile.main]:null,t=s.target;history.push({time:Date.now(),value:Number.isFinite(value)?value:null,target:fresh&&t?.control===activeProfile.main&&controlUnits[t.control]===metricUnit(activeProfile.main)&&Number.isFinite(t.value)?t.value:null});lastHistory=Date.now();history=history.slice(-301)}
+ renderTraining();renderHistory();
+ const i=s.input||{},items=[];
+ if(i.error)items.push(pill(i.error,"bad"));
+ if(i.stale)items.push(pill("stale data","warn"));
+ if(i.link==="backoff")items.push(pill("retry in "+Math.ceil(i.nextAttemptMs/1000)+" s","warn"));
  fill($("s-input"),items);
- const f=s.ftmsOutput||{},a=s.antOutput||{},op=s.outputProtocol||"ble-ftms";
- if(op==="ble-ftms")fill($("s-out"),[pill("BLE FTMS","ok"),pill(f.name||""),pill("profile: "+(f.profile||"bike")),pill("override: "+(f.override||"auto")),pill(f.advertising?"advertising":"not advertising"),pill(f.client?"app connected":"no app",f.client?"ok":""),pill(f.control?"app has control":"no app control")]);
- else if(op==="ant-fec")fill($("s-out"),[pill("ANT+ FE-C",a.open?"ok":""),pill(a.stick?"stick: "+(a.hardware||"connected"):(a.available?"no ANT+ USB stick":"no ANT+ hardware"),a.stick?"ok":"warn"),pill("link: "+(a.link||"-")),pill("device #"+(a.deviceNumber||0)),pill("profile: "+(a.profile||"bike")),pill(a.display?"display connected":"no display",a.display?"ok":""),pill(a.control?"display has control":"no display control")]);
- else fill($("s-out"),[pill("off")]);
- const n=s.network||{};fill($("s-net"),[pill(n.mode),pill(n.ssid||"-"),pill(n.ip||"-"),pill(n.hostname||""),...(n.mode&&n.mode!=="sta"?[pill(n.stations+" AP client(s)")]:[])]);
+ $("input-state").textContent=i.link||s.state||"Unavailable";$("input-state").className="pill "+(dataFresh()?"ok":"warn");
+ $("input-summary").textContent=[i.source,i.profile,i.protocol].filter(Boolean).join(" · ");
+ $("btn-change-device").textContent=i.paired?"Change device":"Add device";
+ const f=s.ftmsOutput||{},a=s.antOutput||{},op=s.outputProtocol||"ble-ftms",out=op==="ant-fec"?a:f;
+ $("output-state").textContent=op==="off"?"Off":out.error||((op==="ant-fec"?a.open:f.enabled)?"Active":"Inactive");
+ $("output-state").className="pill "+(out.error?"bad":op!=="off"&&(op==="ant-fec"?a.open:f.enabled)?"ok":"");
+ const n=s.network||{};fill($("s-net"),[pill(n.mode||"unknown"),pill(n.ssid||"–"),pill(n.ip||"–"),pill(n.hostname||"")]);
  const p=i.paired;fact("p-name",p?el("b",p.name||"(no name)"):"none – scan and pair a device",!p);fact("p-address",p?p.address+" ("+p.addressType+")":"–",!p);fact("p-adapter",p?p.adapter:"–",!p);
  fill($("paired-advertised"),p&&(p.advertisedServices||[]).length?p.advertisedServices.map(uuid=>{const b=pill((p.advertisedServiceNames||{})[uuid]||uuidLabel(uuid),"sensor");b.title=fullUuid(uuid);return b}):[pill("none reported","pending")]);
  fill($("paired-subscriptions"),p&&(p.subscriptions||[]).length?p.subscriptions.map(sub=>{const b=pill((sub.name||sub.service)+" · "+(sub.characteristicName?sub.characteristicName+" ("+uuidLabel(sub.characteristic)+")":uuidLabel(sub.characteristic))+" · "+(sub.indicate?"INDICATE":"NOTIFY")+" · "+sub.state+(sub.reason?" ("+sub.reason+")":""),sub.state==="ok"||sub.state==="subscribed"?"ok":sub.state==="failed"?"bad":"pending");b.title=fullUuid(sub.service)+" / "+fullUuid(sub.characteristic);return b}):[pill("none","pending")]);
  renderServiceControls();renderBridge();renderReceiver();
- $("ctl-state").textContent="State: "+s.state+(s.canControl?" · supported: "+(s.controls||[]).join(", "):" · control not available")+(s.target?" · target "+s.target.control+" "+fmt(s.target.value):"");
  $("unsaved").textContent=s.unsaved?"unsaved changes":"saved";$("fw").textContent=s.version||"";
  $("btn-scan").disabled=!i.bleAvailable;}
 function renderScan(sc){
@@ -311,33 +305,55 @@ function renderScan(sc){
   const rssi=el("td",d.rssi);rssi.dataset.label="RSSI";svc.dataset.label="Services";ad.dataset.label="Adapter";tr.append(name,rssi,svc,ad,act);return tr}));}
 let cfgHttps=location.protocol==="https:";
 function renderConfig(c){
- $("c-ftmsName").value=c.ftmsName||"";$("c-simulatedTrainer").checked=!!c.simulatedTrainer;
+ configLoaded=true;
+ if(!dirty.has("output")){
+ $("c-ftmsName").value=c.ftmsName||"";
  const fec=$("c-outputProtocol").querySelector('option[value="ant-fec"]');fec.disabled=!c.antAvailable;configuredOutput=c.outputProtocol||"ble-ftms";if(!outputDirty)$("c-outputProtocol").value=configuredOutput;
  fec.hidden=!c.antAvailable;antAvailable=!!c.antAvailable;configuredFtmsServices=c.ftmsOutputServices||0;serviceMasks={ftms:configuredFtmsServices,ant:c.antOutputServices||0};renderServiceControls();
  $("c-outputHint").textContent=c.antAvailable?"ANT+ FE-C needs an ANT+ USB stick (e.g. COOSPO) on the board's USB-OTG port.":"ANT+ FE-C is not available on this hardware.";
- cfgHttps=c.https!==false;$("c-https").checked=cfgHttps;
+ $("c-outputHint").hidden=$("c-outputProtocol").value!=="ant-fec";
  $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";renderBridge();
+ }
+ cfgHttps=c.https!==false;
+ if(!dirty.has("system")){
+ $("c-simulatedTrainer").checked=!!c.simulatedTrainer;$("c-https").checked=cfgHttps;
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
  $("c-wifiPassword").placeholder=c.wifiPasswordSet?"unchanged":"none (open network)";
- $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";}
- async function loadConfig(){try{renderConfig(await(await fetch("/api/config")).json())}catch(e){toast("could not load settings",false)}}
+ $("c-apPassword").placeholder=c.apPasswordDefault?"default: smartfitness":"unchanged";
+ }renderDirty();}
+ async function loadConfig(){try{const response=await fetch("/api/config");if(!response.ok)throw new Error("HTTP "+response.status);renderConfig(await response.json())}catch(e){toast("could not load settings: "+e.message,false)}}
 $("btn-scan").onclick=()=>run("scan",{seconds:30},true);$("btn-scan-stop").onclick=()=>run("scan",{action:"stop"},true);
-$("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run("disconnect");$("btn-sim").onclick=()=>run("simulate");
-$("c-outputProtocol").onchange=()=>{outputDirty=$("c-outputProtocol").value!==configuredOutput;renderBridge()};
-$("btn-output").onclick=async()=>{const r=await run("config",{outputProtocol:$("c-outputProtocol").value,save:true});if(r&&r.ok){outputDirty=false;loadConfig()}};
+$("btn-change-device").onclick=()=>{$("device-search").open=true;$("btn-scan").focus()};
+$("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run("disconnect");$("btn-sim").onclick=()=>{if(confirm("Replace the real device with simulation?"))run("simulate")};
+$("c-outputProtocol").onchange=()=>{outputDirty=$("c-outputProtocol").value!==configuredOutput;$("c-outputHint").hidden=$("c-outputProtocol").value!=="ant-fec";renderBridge();renderServiceControls()};
+for(const[id,scope]of[["card-bridge","output"],["network-settings","system"],["advanced","system"]])for(const event of["input","change"])$(id).addEventListener(event,e=>{if(e.target.matches("input,select"))markDirty(scope)});
+$("btn-discard-output").onclick=()=>{dirty.delete("output");outputDirty=false;loadConfig()};
+async function saveConfig(scope,body){
+ if(configSaving)return;
+ if(!configLoaded){toast("Load settings before saving.",false);return}
+ const version=editVersion[scope];configSaving=true;$("btn-save").disabled=true;$("btn-output").disabled=true;
+ try{const r=await run("config",{...body,save:true});if(r?.ok){if(editVersion[scope]===version)dirty.delete(scope);if(scope==="output"&&!dirty.has(scope))outputDirty=false;await loadConfig()}}
+ finally{configSaving=false;$("btn-save").disabled=false;$("btn-output").disabled=false;renderDirty()}
+}
+$("btn-output").onclick=()=>{const body={outputProtocol:$("c-outputProtocol").value,ftmsName:$("c-ftmsName").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ftmsOutputServices:serviceMasks.ftms};if(antAvailable)body.antOutputServices=serviceMasks.ant;saveConfig("output",body)};
 $("btn-unpair").onclick=()=>{if(confirm("Forget the paired device?"))run("unpair")};
-$("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value);if(!isFinite(v)){toast("enter a number",false);return}
- const r=await run("control",{control:$("ctl-kind").value,value:v},true);if(r){$("ctl-result").textContent=r.message;$("ctl-result").className="small "+(r.ok?"ok":"bad")}};
-$("btn-save").onclick=async()=>{const b={ftmsName:$("c-ftmsName").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ftmsOutputServices:serviceMasks.ftms,simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value,save:true};
-if(antAvailable)b.antOutputServices=serviceMasks.ant;
+$("ctl-kind").onchange=()=>renderControls();
+for(const[id,sign]of[["ctl-minus",-1],["ctl-plus",1]])$(id).onclick=()=>{const field=$("ctl-value"),value=Number(field.value);if(!field.value||!Number.isFinite(value)){toast("enter a number",false);return}field.value=String(Math.round((value+sign*Number(field.step))*10)/10)};
+$("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value),kind=$("ctl-kind").value;if(!Number.isFinite(v)){toast("enter a number",false);return}
+ if(controlBusy||!dataFresh()||!status.canControl||!(status.controls||[]).includes(kind)){toast("control unavailable",false);return}
+ if(kind==="speed"&&!confirm("Set speed to "+v+" km/h?"))return;
+ const commandSource=sourceKey;controlBusy=true;$("ctl-result").textContent="";renderControls();
+ try{const r=await run("control",{control:kind,value:v},true);if(commandSource===sourceKey){$("ctl-result").textContent=r?r.message:"Request failed; target not confirmed.";$("ctl-result").className="small "+(r?.ok?"ok":"bad")}}
+ finally{controlBusy=false;renderControls()}};
+$("btn-save").onclick=()=>{const b={simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value};
  b.https=$("c-https").checked;
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
- const r=await run("config",b);if(r&&r.ok)loadConfig()};
+ saveConfig("system",b)};
 let wifiNets=[];
 const ssid=$("c-wifiSsid"),wifiList=$("wifi-list");
 function wifiOpen(open){open=open&&wifiNets.length>0;wifiList.hidden=!open;ssid.setAttribute("aria-expanded",String(open));if(!open)wifiMark(-1)}
 function wifiMark(i){[...wifiList.children].forEach((li,k)=>li.setAttribute("aria-selected",String(k===i)));const li=wifiList.children[i];if(li){ssid.setAttribute("aria-activedescendant",li.id);li.scrollIntoView({block:"nearest"})}else ssid.removeAttribute("aria-activedescendant")}
-function wifiPick(n){ssid.value=n.ssid;wifiOpen(false);$("c-wifiPassword").focus()}
+function wifiPick(n){ssid.value=n.ssid;markDirty("system");wifiOpen(false);$("c-wifiPassword").focus()}
 // Same four-step pictogram and thresholds as the HMI scan list (hmi::signalLevel).
 function signalLevel(rssi){return rssi>=-60?4:rssi>=-70?3:rssi>=-80?2:1}
 function bars(rssi){const b=el("span",null,"bars"),level=signalLevel(rssi);b.setAttribute("aria-hidden","true");b.dataset.level=level;
@@ -359,15 +375,17 @@ $("btn-wifi-scan").onclick=async()=>{const b=$("btn-wifi-scan");if(b.getAttribut
   if(!s)throw err||new Error("no response");
   renderWifi(s.networks||[]);if(wifiNets.length){ssid.focus();wifiOpen(true)}else toast("no Wi-Fi networks found",false)}
  catch(e){toast("Wi-Fi scan failed: "+e.message,false)}finally{b.setAttribute("aria-busy","false")}};
-$("btn-restart").onclick=async()=>{if(!confirm("Restart the bridge?"))return;const r=await run("restart");
+$("btn-restart").onclick=async()=>{if(dirty.size){toast("Save or discard your edits before restarting.",false);return}if(!confirm("Restart the bridge and interrupt all connections?"))return;const r=await run("restart");
  if(r&&r.ok&&cfgHttps!==(location.protocol==="https:"))setTimeout(()=>{location.href=(cfgHttps?"https://":"http://")+location.hostname+"/"},8000)};
-$("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?"))run("factory-reset").then(loadConfig)};
+$("btn-reset").onclick=()=>{if(confirm("Erase all settings and the pairing?")&&confirm("This cannot be undone. Restore factory settings?"))run("factory-reset").then(r=>{if(r?.ok){dirty.clear();loadConfig()}})};
 // #ifdef DEBUG_WEB
+function debugVisible(){return !$("set").hidden&&$("advanced").open}
+$("advanced").addEventListener("toggle",()=>{if(debugVisible())loadDebug()});
 let debugEnd=0,debugLoading=false,debugQueue=[],debugQueuedBytes=0,debugOverflow=false;
 const debugDecoder=new TextDecoder();
 function debugText(text,replace=false){const box=$("debug-output");box.value=(replace?text:box.value+text).slice(-512*1024);box.scrollTop=box.scrollHeight}
 function renderDebug(m){
- if($("debug").hidden)return;
+ if(!debugVisible())return;
  if(debugLoading){if(debugQueuedBytes+m.data.length<=512*1024){debugQueue.push(m);debugQueuedBytes+=m.data.length}else debugOverflow=true;return}
  if(m.end<=debugEnd)return;
  if(m.start>debugEnd&&!m.reset){loadDebug();return}
@@ -397,17 +415,19 @@ $("btn-debug-download").onclick=async()=>{
 // #endif
 function connectWs(){const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
 // #ifdef DEBUG_WEB
- ws.onopen=()=>{if(!$("debug").hidden)loadDebug()};
+ ws.onopen=()=>{if(debugVisible())loadDebug()};
 // #endif
- ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config"){if(!document.activeElement.matches("#set input,#set select,#set button,#c-outputProtocol"))renderConfig(m)}else if(m.type==="result"&&m.done)finish(m);
+ ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){toast("Invalid message from bridge",false);return}if(m.type==="status")renderStatus(m);else if(m.type==="scan")renderScan(m);else if(m.type==="config")renderConfig(m);else if(m.type==="result"&&m.done)finish(m);
 // #ifdef DEBUG_WEB
   if(m.type==="debug")renderDebug(m);
 // #endif
  };
- ws.onclose=()=>{$("conn").textContent="offline";$("conn").className="pill bad";setTimeout(connectWs,2000)}}
-fetch("/api/status").then(r=>r.json()).then(s=>{if(s.type)renderStatus(s)}).catch(()=>{});
-fetch("/api/scan/results").then(r=>r.json()).then(s=>{if(s.devices)renderScan(s)}).catch(()=>{});
-fetch("/api/config").then(r=>r.json()).then(c=>{if(c.type)renderConfig(c)}).catch(()=>{});
+ ws.onclose=()=>{online=false;$("conn").textContent="Browser ↔ Bridge offline";$("conn").className="pill bad";history.push({time:Date.now(),value:null,target:null});renderTraining();renderHistory();setTimeout(connectWs,2000)}}
+fetch("/api/status").then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(s=>{if(s.type)renderStatus(s)}).catch(e=>toast("Status unavailable: "+e.message,false));
+fetch("/api/scan/results").then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(s=>{if(s.devices)renderScan(s)}).catch(e=>toast("Device scan unavailable: "+e.message,false));
+loadConfig();
+new ResizeObserver(()=>renderHistory()).observe($("history-chart"));
+setInterval(()=>{if(!dataFresh()){renderTraining();if(history.length&&history.at(-1).value!==null)history.push({time:Date.now(),value:null,target:null})}renderHistory()},1000);
 connectWs();
 </script>
 </body>

@@ -1,25 +1,24 @@
-# LCARS-inspired user interfaces
+# User interfaces
 
-One original, LCARS-inspired design system serves the **CrowPanel 1.28" round
-240×240 HMI** (`crowpanel128`, LVGL 9.2.2) and the **self-contained web app**
-(`esp32s3dev`). The visual reference is the warm, flat, condensed design language
-of TNG-era interfaces; these are not reproductions of screen assets.
+The **CrowPanel 1.28" round 240×240 HMI** (`crowpanel128`, LVGL 9.2.2)
+retains its original LCARS-inspired design. The **self-contained web app**
+(`esp32s3dev`) uses the dark, responsive training design documented in
+[Web design](#web-design). This web revision does not change the round HMI.
 
 The HMI display, rotary encoder (turning/direction), and knob press have been tested
 and work on the real CrowPanel. Gallery images are simulator renders with fixed
 sample data, not photographs; the web UI remains unverified on hardware. Touch
 accuracy, colours, small text, IPS contrast, frame rate, heap/PSRAM headroom and
 readability still require checks on the real panel. Commands, safety confirmations,
-API contracts, BLE and FTMS behavior are unchanged.
+API contracts, BLE and FTMS behavior are unchanged. The web UI adds explicit speed
+confirmation and a second factory-reset confirmation.
 
-## Shared design system
+## HMI design system
 
 The tokens below are the design specification. HMI implementation:
 [`lcars_theme.h`](../../include/variants/hmi/lcars_theme.h) and
 [`lcars_theme.cpp`](../../src/variants/hmi/lcars_theme.cpp).
-Web implementation: CSS custom properties in
-[`src/variants/web/assets/index.html`](../../src/variants/web/assets/index.html).
-There are no gradients, shadows, textured materials or external web resources.
+The HMI uses no gradients, shadows or textured materials.
 
 | Token | Colour | Role |
 |---|---|---|
@@ -41,14 +40,11 @@ There are no gradients, shadows, textured materials or external web resources.
 licensed under the **SIL Open Font License 1.1**. The original variable font and
 [`OFL.txt`](../../assets/fonts/OFL.txt) are committed in `assets/fonts/`.
 Source: [Google Fonts Antonio](https://github.com/google/fonts/tree/main/ofl/antonio).
-Both variants subset `U+0020–007E` and `U+00A0–00FF`, including digits and German
+HMI fonts subset `U+0020–007E` and `U+00A0–00FF`, including digits and German
 umlauts. HMI text sizes are **16 and 20 px**; the **48 px** readout subsets digits
 and numeric punctuation only. Fonts use 4-bit antialiasing, uncompressed LVGL
 bitmaps. LVGL's Montserrat 14 is retained only as a symbol fallback.
-Web uses a **9,292-byte WOFF2**, embedded as a data URL in the HTML and gzipped
-with the page into flash; it never makes a font request. The whole compressed
-page grows **5,334 → 17,522 bytes (+12,188 B)**; the font payload contributes
-**10,299 B** of that compressed asset.
+The web uses system fonts instead of embedding Antonio; no font request is made.
 
 UI labels are displayed uppercase; editable names and underlying device/adapter
 identifiers retain their values. Text on bright fills is black; body data is light blue or
@@ -60,14 +56,13 @@ peach on black. Error indicators also include text, not colour alone.
   which is drawn inverse (black), like the dashboard state pill. There is no
   top arc, elbow, vertical sidebar or bottom frame, so the gauge ring runs
   uninterrupted across the top.
-- Web: intentionally retains the swept elbow, title bar and desktop sidebar
-  (responsive navigation pills on phones). This HMI revision does not change it.
+- Web: see the separate responsive card design below.
 - Navigation/action pills: solid fills, rounded endcaps, right-aligned labels.
   Ordinary HMI action targets are at least 36 px tall; touch adjustment helpers
   are 44×44 px. The existing compact text keyboard is also operable by knob;
   use the larger preset pills when possible.
 - Data: large central digits, small unit, labelled secondary/status readouts;
-  blue segments fill an arc (HMI) or a linear gauge (web).
+  blue segments fill the HMI arc.
 - Signal strength (HMI): a 4-bar pictogram (`lcars::signalBars`) replaces the
   numeric RSSI in scan results (black on the pill, left of the label) and device
   details (light blue). Bars lit: ≥ −60 dBm 4, ≥ −70 dBm 3, ≥ −80 dBm 2, else 1;
@@ -127,7 +122,7 @@ endorsement is implied.
 - **HMI touch:** tap pills/readout, swipe right to go back; swipe left/right
   on the dashboard cycles metrics. +/- adjust values; Apply uses the same
   confirmation path. Names retain presets and the on-screen keyboard.
-- **Web:** Dashboard, Devices, Control, Settings tabs work on desktop/phone.
+- **Web:** Training, Connections and System tabs work on desktop/phone.
   Use Tab/Shift-Tab to move focus and Enter/Space to activate controls; tab
   navigation also supports arrow keys and Home/End. Fields retain labels,
   status/result announcements and the original asynchronous result flow.
@@ -209,21 +204,79 @@ New service strings include English and German translations.
 See [HD-009](../hardware-decisions.md#hd-009-selectable-ble-services-and-ant-output-channels)
 for schema migration and boot-frozen GATT decisions.
 
+## Web design
+
+The web UI is one offline-capable HTML/CSS/JS asset, gzipped into flash. It uses
+system fonts, inline SVG, a navy background (`#07111D`), card surfaces (`#0D1E2E`),
+fine borders (`#2B465D`) and explicit text alongside status colours.
+
+Training uses the effective output profile (or input profile when output is off):
+
+| Profile | Accent | Primary | Left / right secondary |
+|---|---|---|---|
+| Indoor bike | Blue | Power | Cadence / distance |
+| Treadmill | Orange | Speed | Incline / distance |
+| Rower | Green | Stroke rate | Power / distance |
+| Cross trainer | Violet | Resistance | Step rate / distance |
+| Step climber | Turquoise | Step rate | Elevation gain / steps |
+| Stair climber | Gold | Step rate | Floors / steps |
+
+Secondary values are not repeated below the arc. Four other measurements have
+individual cards; remaining reported fields are under **More measurements**.
+Missing/non-finite, disconnected or stale readings show `–`, never invented zeros.
+The arc uses a visual reference scale, not a claimed hardware control range.
+Its fill is clamped; the numeric reading is not.
+
+The history records at most 301 samples, at most once per second, over five minutes
+in the current browser. It resets for a changed device/source/profile and does not
+join gaps across stale data or disconnects. It draws a confirmed-target series only
+when its control and units correspond to the primary metric (a resistance
+percentage is not plotted against a raw resistance level). Reloading clears history.
+
+Compact control uses only the existing power/resistance/incline/speed API and
+advertised capabilities. Numeric input, accepted target and actual measurement
+are separate. Commands remain pending until the asynchronous result; speed
+changes require confirmation. **Pause/Stop are not implemented by the web API**
+and are deliberately absent, rather than presented as nonfunctional buttons.
+The desktop has no explanatory text block below the control card.
+
+**Connections** groups the fitness device, output configuration and receiving app.
+Scanning, UUIDs and subscription details are disclosed on demand. Output format,
+profile and services save together; BLE and ANT+ controls follow the selected
+transport. **System** owns Wi-Fi, HTTPS and system actions. **Advanced** is
+collapsed by default and holds simulation and optional `DEBUG_WEB` diagnostics.
+Local output/system edits survive tab changes and incoming configuration frames;
+saving one group does not overwrite the other. Restart requires saved/discarded
+edits, and factory reset requires two confirmations.
+
+Desktop uses a sidebar; phones use three navigation tabs, secondary values beside
+the arc, a two-column metric grid, compact control and the visible history below.
+The interface retains English labels used by the existing web UI.
+
 ## Web gallery
 
 Desktop (1280×800):
 
-| Dashboard | Devices |
+| Training | Connections |
 |---|---|
-| ![Dashboard desktop](web/01-dashboard-desktop.png) | ![Devices desktop](web/02-devices-desktop.png) |
-| ![Control desktop](web/03-control-desktop.png) | ![Settings desktop](web/04-settings-desktop.png) |
+| ![Training desktop](web/training-bike-desktop.png) | ![Connections desktop](web/connections-desktop.png) |
+| ![Rower desktop](web/training-rower-desktop.png) | ![System desktop](web/system-desktop.png) |
 
 Mobile (390×844; full-page screenshots include scrollable content):
 
-| Dashboard | Devices |
+| Training | Connections |
 |---|---|
-| ![Dashboard mobile](web/05-dashboard-mobile.png) | ![Devices mobile](web/06-devices-mobile.png) |
-| ![Control mobile](web/07-control-mobile.png) | ![Settings mobile](web/08-settings-mobile.png) |
+| ![Training mobile](web/training-bike-mobile.png) | ![Connections mobile](web/connections-mobile.png) |
+| ![Rower mobile](web/training-rower-mobile.png) | ![System mobile](web/system-mobile.png) |
+
+All remaining profiles:
+
+| Profile | Desktop | Mobile |
+|---|---|---|
+| Treadmill | ![Treadmill](web/training-treadmill-desktop.png) | ![Treadmill mobile](web/training-treadmill-mobile.png) |
+| Cross trainer | ![Cross trainer](web/training-cross-trainer-desktop.png) | ![Cross trainer mobile](web/training-cross-trainer-mobile.png) |
+| Step climber | ![Step climber](web/training-step-climber-desktop.png) | ![Step climber mobile](web/training-step-climber-mobile.png) |
+| Stair climber | ![Stair climber](web/training-stair-climber-desktop.png) | ![Stair climber mobile](web/training-stair-climber-mobile.png) |
 
 Optional `DEBUG_WEB` build:
 
@@ -234,7 +287,7 @@ Optional `DEBUG_WEB` build:
 ## Before / after
 
 Header-only HMI revision (same fixtures; historical elbow images are not
-regenerated). The web UI and its screenshots are unchanged. The CrowPanel display,
+regenerated). This historical comparison concerns the HMI only. The CrowPanel display,
 rotary encoder and knob have been tested on hardware; the gallery images remain
 simulator renders, and the web UI is unverified on hardware. Firmware flash/static
 RAM delta is unavailable locally
@@ -256,7 +309,7 @@ sample data. They are historical references, not regenerated by the update scrip
 
 | Web before | Web after |
 |---|---|
-| ![Original web](before/web-dashboard-desktop.png) | ![LCARS-inspired web](web/01-dashboard-desktop.png) |
+| ![Original web](before/web-dashboard-desktop.png) | ![Training web](web/training-bike-desktop.png) |
 
 ## Regeneration
 
@@ -310,8 +363,8 @@ bash scripts/update_hmi_docs.sh
 ```
 
 The font script creates a static weight-400 instance using FontTools, subsets
-WOFF2 using Brotli, generates LVGL C arrays using `lv_font_conv`, and refreshes
-the single embedded web-font payload.
+WOFF2 using Brotli and generates LVGL C arrays using `lv_font_conv`.
+It no longer modifies the web asset, which uses system fonts.
 
 See [HD-008](../hardware-decisions.md#hd-008-shared-lcars-inspired-interface-design)
 for memory impact and the decision boundary.

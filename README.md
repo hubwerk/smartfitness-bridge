@@ -38,12 +38,12 @@ the board's 16 MB flash layout; do not select a different partition scheme.
 1. After flashing, connect to the Wi-Fi access point named `SmartFitness-XXXX`.
    Its initial password is `smartfitness`; change it before normal use.
 2. Open `https://192.168.4.1/` and accept the browser warning for the
-   self-signed certificate. In **Settings**, enter your home Wi-Fi details and
+   self-signed certificate. In **System**, enter your home Wi-Fi details and
    save/restart, or continue using the access point.
 3. Wake the fitness device, disconnect other apps from it, then use
-   **Devices → Scan** and **Pair**. Check the dashboard for a connection and
+   **Connections → Add device → Scan** and **Pair**. Check **Training** for
    live measurements.
-4. Choose Bluetooth FTMS or ANT+ FE-C output in **Settings**. For ANT+ on the
+4. Choose Bluetooth FTMS or ANT+ FE-C under **Connections → Bridge output**. For ANT+ on the
    web variant, connect a supported USB ANT+ stick through the USB host port.
 5. Connect your training app or display to the bridge and start a workout from
    that app. The bridge does not start treadmill belts.
@@ -62,7 +62,7 @@ control the bridge. Change the default access-point password, and do not expose
 the bridge to an untrusted or public network.
 
 The bridge reconnects to its saved input after reboot. Use **Disconnect** or
-**Unpair** from Devices when needed. For safety, treadmill controls are only
+**Forget pairing** under Connections (Devices on the HMI) when needed. For safety, treadmill controls are only
 available when the device is already running and reporting fresh data.
 
 ## Hardware variants and accessories
@@ -76,7 +76,7 @@ radio. Affiliate links are provided for convenience and are not an endorsement.
 | **Board (PlatformIO environment)** | [ESP32-S3 DevKitC-1 N16R8](https://link.amazon/B04sCBCRH) (`esp32s3dev`) | [ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display](https://link.amazon/B0eHDSltG) (`crowpanel128`) |
 | **Base peripherals** | USB data cable for flashing; no extra hardware for BLE FTMS | USB data cable for flashing; display and controls are integrated; no extra hardware for BLE FTMS |
 | **Optional ANT+ hardware and affiliate links** | [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [USB-C to USB-A OTG adapter (LogiLink AU0055)](https://link.amazon/B01z26VJ2). USB-stick ANT+ output is hardware-verified on this variant. | — |
-| **Example** | <img src="docs/hmi/web/01-dashboard-desktop.png" alt="Web variant dashboard" width="480"> | <img src="docs/hmi/hmi/01-dashboard-bike.png" alt="CrowPanel HMI dashboard" width="240"> |
+| **Example** | <img src="docs/hmi/web/training-bike-desktop.png" alt="Web training dashboard" width="480"> | <img src="docs/hmi/hmi/01-dashboard-bike.png" alt="CrowPanel HMI dashboard" width="240"> |
 
 Use the USB-C connection to flash the CrowPanel.
 
