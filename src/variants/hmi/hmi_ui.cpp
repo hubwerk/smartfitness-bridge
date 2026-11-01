@@ -18,12 +18,31 @@ constexpr lv_coord_t kScreenSize = 240;
 constexpr lv_coord_t kListWidth = 174;
 constexpr lv_coord_t kListHeight = 136;
 constexpr std::uint32_t kToastMs = 2500;
-// Below the chart's 156px content width: LVGL's dense-column renderer can
-// draw spurious vertical extrema at gaps. Each visible bucket covers 2s.
-constexpr std::size_t kHistoryChartPoints = 151;
-constexpr std::uint32_t kHistoryChartStepMs = TrainingHistory::WindowMs / (kHistoryChartPoints - 1);
+// History chart: as wide as the round panel allows, with the axis labels in
+// the chart's own padding so they never overlap the plot.
+constexpr lv_coord_t kChartWidth = 208;
+constexpr lv_coord_t kChartHeight = 88;
+constexpr lv_coord_t kChartTop = 76;
+constexpr lv_coord_t kChartPadLeft = 30;
+constexpr lv_coord_t kChartPadBottom = 16;
+constexpr lv_coord_t kChartPad = 3;
+constexpr lv_coord_t kAxisLabelWidth = 48;
+// Below the plot's pixel width: LVGL's dense-column renderer can draw
+// spurious vertical extrema at gaps. Fewer samples use fewer columns.
+constexpr std::size_t kHistoryChartPoints = 145;
+// Normalised chart range; the real values are shown on the Y axis labels.
+constexpr std::int32_t kChartScale = 1000;
 
 std::string withValue(Str label, const std::string& value) { return std::string(tr(label)) + ": " + value; }
+
+// Compact time-axis label: "M:SS" below an hour, "Hh MM" above.
+std::string durationLabel(std::uint32_t milliseconds) {
+    const unsigned total = milliseconds / 1000;
+    char text[16];
+    if (total < 3600) std::snprintf(text, sizeof(text), "%u:%02u", total / 60, total % 60);
+    else std::snprintf(text, sizeof(text), "%uh%02u", total / 3600, (total / 60) % 60);
+    return text;
+}
 
 std::string percent(std::uint8_t value) { return std::to_string(value) + " %"; }
 
@@ -409,7 +428,8 @@ void HmiUi::build(bool keepFocus) {
     callbacks_.clear();
     dash_ = {};
     roller_ = rollerInfo_ = adjustValue_ = textArea_ = nullptr;
-    chart_ = chartRange_ = chartEmpty_ = nullptr;
+    chart_ = chartRange_ = chartEmpty_ = chartYMin_ = chartYMax_ = nullptr;
+    chartX_ = {};
     series_ = nullptr;
     adjustSegments_ = {};
 
@@ -521,6 +541,24 @@ lv_obj_t* HmiUi::addLabel(lv_obj_t* parent, const std::string& text, const lv_fo
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(label, font ? font : &sf_antonio_16, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(lcars::LightBlue), 0);
+    return label;
+}
+
+// A label the knob can stop on. Lists that open with an info block taller than
+// the focus ring reveal would otherwise keep that block out of reach, because
+// the encoder scrolls a list only by moving the focus between group members.
+lv_obj_t* HmiUi::addInfoRow(lv_obj_t* list, const std::string& text, const lv_font_t* font) {
+    lv_obj_t* label = addLabel(list, text, font);
+    lv_obj_add_flag(label, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    bind(label, LV_EVENT_FOCUSED, [label](lv_event_t*) {
+        lv_obj_update_layout(label);
+        lv_anim_delete(lv_obj_get_parent(label), nullptr);
+        lv_obj_scroll_to_view_recursive(label, LV_ANIM_OFF);
+        revealListEnds(label);
+    });
+    // Keep the default focus on the first real entry.
+    if (lv_group_get_obj_count(group_) == defaultFocus_) ++defaultFocus_;
+    lv_group_add_obj(group_, label);
     return label;
 }
 
@@ -645,6 +683,8 @@ void HmiUi::buildMenu() {
     addButton(list, tr(Str::Training), [this] { navigate(Screen::Training); });
     addButton(list, tr(Str::Connections), [this] { navigate(Screen::Connections); });
     addButton(list, tr(Str::Settings), [this] { navigate(Screen::Settings); });
+    // Back from the top level returns to the live values, never to a deeper screen.
+    addButton(list, tr(Str::Back), [this] { navigate(Screen::Dashboard); });
 }
 
 void HmiUi::buildTraining() {
@@ -653,6 +693,7 @@ void HmiUi::buildTraining() {
     addButton(list, tr(Str::Dashboard), [this] { navigate(Screen::Dashboard); });
     addButton(list, tr(Str::Control), [this] { navigate(Screen::Control); });
     addButton(list, tr(Str::History), [this] { navigate(Screen::History); });
+    addButton(list, tr(Str::Back), [this] { back(); });
 }
 
 void HmiUi::buildConnections() {
@@ -661,6 +702,7 @@ void HmiUi::buildConnections() {
     addButton(list, tr(Str::Devices), [this] { navigate(Screen::Devices); });
     addButton(list, tr(Str::OutputProtocol), [this] { navigate(Screen::Output); });
     addButton(list, tr(Str::Receiver), [this] { navigate(Screen::Receiver); });
+    addButton(list, tr(Str::Back), [this] { back(); });
 }
 
 void HmiUi::buildReceiver() {
@@ -680,72 +722,120 @@ void HmiUi::buildReceiver() {
 void HmiUi::buildHistory() {
     makeScreen(tr(Str::History));
     const auto metric = trainingMetrics(status_.input.profile)[0];
-    auto* title = addLabel(root_, tr(trainingFormat(metric, status_.input.profile).name), &lv_font_montserrat_12);
-    lv_obj_set_width(title, 164);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 63);
+    const auto format = trainingFormat(metric, status_.input.profile);
+    // Y-axis caption: the plotted metric with its unit.
+    std::string caption = tr(format.name);
+    if (format.unit[0] != '\0') caption += " (" + std::string(format.unit) + ")";
+    auto* title = addLabel(root_, caption, &lv_font_montserrat_12);
+    lv_obj_set_width(title, 180);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
+
     chart_ = lv_chart_create(root_);
-    lv_obj_set_size(chart_, 164, 76);
-    lv_obj_align(chart_, LV_ALIGN_TOP_MID, 0, 82);
+    lv_obj_set_size(chart_, kChartWidth, kChartHeight);
+    lv_obj_align(chart_, LV_ALIGN_TOP_MID, 0, kChartTop);
     lv_obj_set_style_bg_color(chart_, lv_color_hex(lcars::Lavender), 0);
     lv_obj_set_style_border_width(chart_, 0, 0);
-    lv_obj_set_style_pad_all(chart_, 4, 0);
+    lv_obj_set_style_pad_all(chart_, kChartPad, 0);
+    // Axis labels live in the padding, outside the plotted area.
+    lv_obj_set_style_pad_left(chart_, kChartPadLeft, 0);
+    lv_obj_set_style_pad_bottom(chart_, kChartPadBottom, 0);
     lv_obj_set_style_line_color(chart_, lv_color_hex(lcars::Border), 0);
     lv_obj_set_style_size(chart_, 2, 2, LV_PART_INDICATOR);
     lv_obj_remove_flag(chart_, LV_OBJ_FLAG_SCROLLABLE);
     lv_chart_set_div_line_count(chart_, 3, 3);
-    lv_chart_set_range(chart_, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
-    lv_chart_set_point_count(chart_, kHistoryChartPoints);
+    lv_chart_set_range(chart_, LV_CHART_AXIS_PRIMARY_Y, 0, kChartScale);
+    lv_chart_set_point_count(chart_, 2);
     series_ = lv_chart_add_series(chart_, lv_color_hex(sportColor(status_.input.profile)), LV_CHART_AXIS_PRIMARY_Y);
+
+    auto axisLabel = [this](lv_align_t align, lv_coord_t x, lv_coord_t y, lv_coord_t width,
+                            lv_text_align_t textAlign) {
+        lv_obj_t* label = lv_label_create(chart_);
+        lv_obj_set_width(label, width);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(lcars::Muted), 0);
+        lv_obj_set_style_text_align(label, textAlign, 0);
+        lv_obj_align(label, align, x, y);
+        lv_label_set_text(label, "");
+        return label;
+    };
+    // Negative offsets reach out of the content area into the chart padding.
+    chartYMax_ = axisLabel(LV_ALIGN_TOP_LEFT, -kChartPadLeft, 0, kChartPadLeft - 4, LV_TEXT_ALIGN_RIGHT);
+    chartYMin_ = axisLabel(LV_ALIGN_BOTTOM_LEFT, -kChartPadLeft, -2, kChartPadLeft - 4, LV_TEXT_ALIGN_RIGHT);
+    chartX_[0] = axisLabel(LV_ALIGN_BOTTOM_LEFT, 0, kChartPadBottom - 1, kAxisLabelWidth, LV_TEXT_ALIGN_LEFT);
+    chartX_[1] = axisLabel(LV_ALIGN_BOTTOM_MID, 0, kChartPadBottom - 1, kAxisLabelWidth, LV_TEXT_ALIGN_CENTER);
+    chartX_[2] = axisLabel(LV_ALIGN_BOTTOM_RIGHT, 0, kChartPadBottom - 1, kAxisLabelWidth, LV_TEXT_ALIGN_RIGHT);
+
     chartEmpty_ = lv_label_create(chart_);
     lv_obj_set_style_text_font(chartEmpty_, &lv_font_montserrat_12, 0);
     lv_label_set_text(chartEmpty_, tr(Str::HistoryEmpty));
     lv_obj_center(chartEmpty_);
+
+    // X-axis caption: the session covered by the plot.
     chartRange_ = addLabel(root_, "", &lv_font_montserrat_12);
-    lv_obj_align(chartRange_, LV_ALIGN_TOP_MID, 0, 162);
-    auto* window = addLabel(root_, tr(Str::HistoryWindow), &lv_font_montserrat_12);
-    lv_obj_set_width(window, 150);
-    lv_obj_align(window, LV_ALIGN_TOP_MID, 0, 174);
+    lv_obj_set_width(chartRange_, 164);
+    lv_obj_align(chartRange_, LV_ALIGN_TOP_MID, 0, 166);
     auto* button = addButton(root_, tr(Str::Back), [this] { back(); });
     lv_obj_set_width(button, 100);
-    lv_obj_align(button, LV_ALIGN_TOP_MID, 0, 190);
+    lv_obj_align(button, LV_ALIGN_TOP_MID, 0, 182);
     updateHistory();
 }
 
 void HmiUi::updateHistory() {
+    if (!chart_ || !series_) return;
     chartUpdated_ = lv_tick_get();
+    const std::size_t count = telemetryHistory_.size();
     float minimum = 0, maximum = 0;
     bool any = false;
-    for (std::size_t i = 0; i < telemetryHistory_.size(); ++i) {
+    for (std::size_t i = 0; i < count; ++i) {
         const auto& point = telemetryHistory_.at(i);
-        if (!point.valid || chartUpdated_ - point.time > TrainingHistory::WindowMs) continue;
+        if (!point.valid) continue;
         minimum = any ? std::min(minimum, point.value) : point.value;
         maximum = any ? std::max(maximum, point.value) : point.value;
         any = true;
     }
+    // One column per sample until the plot is full; the X axis always spans
+    // the complete session, so it is rescaled on every refresh.
+    const auto points = static_cast<std::uint32_t>(
+        std::min(std::max<std::size_t>(count, 2), kHistoryChartPoints));
+    if (lv_chart_get_point_count(chart_) != points) lv_chart_set_point_count(chart_, points);
     lv_chart_set_all_value(chart_, series_, LV_CHART_POINT_NONE);
     auto* values = lv_chart_get_y_array(chart_, series_);
+
+    std::array<float, kHistoryChartPoints> sums{};
+    std::array<std::uint8_t, kHistoryChartPoints> samples{};
     std::array<bool, kHistoryChartPoints> gaps{};
-    for (std::size_t i = 0; i < telemetryHistory_.size(); ++i) {
+    const std::uint32_t span = telemetryHistory_.span();
+    const std::uint32_t first = count ? telemetryHistory_.at(0).time : 0;
+    for (std::size_t i = 0; i < count; ++i) {
         const auto& point = telemetryHistory_.at(i);
-        const auto age = chartUpdated_ - point.time;
-        if (age > TrainingHistory::WindowMs) continue;
-        const auto index = kHistoryChartPoints - 1 - age / kHistoryChartStepMs;
+        const auto column = static_cast<std::uint32_t>(
+            span > 0 ? static_cast<std::uint64_t>(point.time - first) * (points - 1) / span
+                     : (count > 1 ? i * (points - 1) / (count - 1) : 0));
+        if (column >= points) continue;
         if (!point.valid) {
-            gaps[index] = true;
+            gaps[column] = true;
             continue;
         }
-        values[index] = maximum > minimum
-            ? static_cast<int32_t>((static_cast<double>(point.value) - minimum) * 1000 /
-                                   (static_cast<double>(maximum) - minimum))
-            : 500;
+        sums[column] += point.value;
+        if (samples[column] < 255) ++samples[column];
     }
-    for (std::size_t i = 0; i < gaps.size(); ++i)
-        if (gaps[i]) values[i] = LV_CHART_POINT_NONE;
+    for (std::uint32_t column = 0; column < points; ++column) {
+        if (gaps[column] || samples[column] == 0) continue;
+        const double value = static_cast<double>(sums[column]) / samples[column];
+        values[column] = maximum > minimum
+            ? static_cast<std::int32_t>((value - minimum) * kChartScale / (maximum - minimum))
+            : kChartScale / 2;
+    }
     if (any) lv_obj_add_flag(chartEmpty_, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_remove_flag(chartEmpty_, LV_OBJ_FLAG_HIDDEN);
+
     const auto format = trainingFormat(trainingMetrics(status_.input.profile)[0], status_.input.profile);
-    fitText(chartRange_, any ? formatValue(minimum, format.decimals) + " - " +
-                formatValue(maximum, format.decimals) + " " + format.unit : "--", 164, 12);
+    lv_label_set_text(chartYMax_, any ? formatValue(maximum, format.decimals).c_str() : "--");
+    lv_label_set_text(chartYMin_, any ? formatValue(minimum, format.decimals).c_str() : "--");
+    for (std::size_t i = 0; i < chartX_.size(); ++i)
+        lv_label_set_text(chartX_[i], durationLabel(static_cast<std::uint32_t>(span * i / 2)).c_str());
+    fitText(chartRange_, std::string(tr(Str::HistorySession)) + " " + durationLabel(span), 164, 12);
     lv_chart_refresh(chart_);
 }
 
@@ -813,14 +903,20 @@ void HmiUi::buildDeviceDetail() {
     const std::string title = !device_.label.empty() ? device_.label : (device_.name.empty() ? device_.address : device_.name);
     makeScreen(title);
     lv_obj_t* list = makeList(root_);
-    if (!device_.name.empty()) addLabel(list, device_.name);
-    addLabel(list, device_.address);
+    bool head = true;
+    auto info = [&](const std::string& text) {
+        lv_obj_t* row = head ? addInfoRow(list, text) : addLabel(list, text);
+        head = false;
+        return row;
+    };
+    if (!device_.name.empty()) info(device_.name);
+    info(device_.address);
     lcars::signalBars(list, signalLevel(device_.rssi), lcars::LightBlue);
-    addLabel(list, std::string(tr(Str::Adapter)) + ": " +
-                       (device_.adapter.empty() ? std::string(tr(Str::Unknown))
-                                                : device_.adapter + " (" + tr(Str::Detected) + ")"));
+    info(std::string(tr(Str::Adapter)) + ": " +
+         (device_.adapter.empty() ? std::string(tr(Str::Unknown))
+                                  : device_.adapter + " (" + tr(Str::Detected) + ")"));
     if (!device_.services.empty()) {
-        lv_obj_t* adv = addLabel(list, advertisedServicesLabel(device_.services));
+        lv_obj_t* adv = info(advertisedServicesLabel(device_.services));
         lv_obj_set_style_text_color(adv, lv_color_hex(lcars::Muted), 0);
     }
     if (!device_.adapter.empty()) {
@@ -904,7 +1000,11 @@ void HmiUi::buildControl() {
         std::string text = tr(spec.name);
         if (!status_.supports(control)) {
             text += " - " + std::string(tr(Str::Unsupported));
-            addButton(list, text, nullptr, false);
+            // Focusable read-only row: an unreachable entry would leave the
+            // list stuck for the knob, which only scrolls by moving the focus.
+            lv_obj_t* row = addButton(list, text, [] {});
+            lcars::pill(row, lcars::Gray);
+            lv_obj_set_style_text_color(lv_obj_get_child(row, 0), lv_color_hex(lcars::Muted), 0);
             continue;
         }
         if (status_.hasTarget && status_.target.control == control)

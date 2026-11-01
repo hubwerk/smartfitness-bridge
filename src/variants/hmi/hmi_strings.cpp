@@ -158,7 +158,7 @@ constexpr Entry kTable[] = {
     {Str::Advanced, {"Advanced", "Erweitert"}},
     {Str::Receiver, {"App / display", "App / Display"}},
     {Str::History, {"History", "Verlauf"}},
-    {Str::HistoryWindow, {"Last 5 min", "Letzte 5 min"}},
+    {Str::HistorySession, {"Session", "Session"}},
     {Str::HistoryEmpty, {"Waiting for data", "Warte auf Daten"}},
     {Str::Stale, {"Stale data", "Daten veraltet"}},
     {Str::StrokeRate, {"Stroke rate", "Schlagzahl"}},

@@ -176,28 +176,45 @@ std::string trainingSource(const StatusView& status) {
            input.paired.address + ":" + std::to_string(input.paired.randomAddress) + ":" + input.paired.adapter;
 }
 
+void TrainingHistory::compact() {
+    const std::size_t kept = (count_ + 1) / 2;
+    // Ascending in place: the destination offset i never passes the source
+    // offsets 2i and 2i+1 that are still to be read.
+    for (std::size_t i = 0; i < kept; ++i) {
+        Point merged = at(2 * i);
+        if (2 * i + 1 < count_) {
+            const Point& second = at(2 * i + 1);
+            if (merged.valid && second.valid) merged.value = (merged.value + second.value) / 2.0F;
+            else if (second.valid) merged.value = second.value;
+            merged.valid = merged.valid && second.valid;
+        }
+        points_[(start_ + i) % Capacity] = merged;
+    }
+    count_ = kept;
+    intervalMs_ *= 2;
+}
+
 void TrainingHistory::record(const StatusView& status, std::uint32_t now) {
     const auto source = trainingSource(status);
     if (source != source_) {
         start_ = count_ = 0;
+        intervalMs_ = BaseIntervalMs;
         source_ = source;
     }
     const auto& sample = status.metric(trainingMetrics(status.input.profile)[0]);
     const bool valid = sample.valid && std::isfinite(sample.value) && !status.input.stale &&
                        status.state != RuntimeState::Disconnected;
-    if (count_ && now - at(count_ - 1).time < 1000) {
-        // Even a short interruption must break the line; never replace a gap
-        // with a recovered value from the same sampling interval.
+    // Even a short interruption must break the line; never replace a gap
+    // with a recovered value from the same sampling interval.
+    auto tooEarly = [&] {
+        if (!count_ || now - at(count_ - 1).time >= intervalMs_) return false;
         if (!valid) points_[(start_ + count_ - 1) % Capacity].valid = false;
-        return;
-    }
-    while (count_ && now - at(0).time > WindowMs) {
-        start_ = (start_ + 1) % Capacity;
-        --count_;
-    }
+        return true;
+    };
+    if (tooEarly()) return;
     if (count_ == Capacity) {
-        start_ = (start_ + 1) % Capacity;
-        --count_;
+        compact();
+        if (tooEarly()) return;
     }
     points_[(start_ + count_) % Capacity] = {now, sample.value, valid};
     ++count_;

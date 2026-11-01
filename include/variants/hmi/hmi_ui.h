@@ -11,6 +11,7 @@
 // Touch: tap = select, swipe right = back, swipe left/right on the
 // dashboard = next/previous metric.
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -96,6 +97,7 @@ private:
     lv_obj_t* makeList(lv_obj_t* screen);
     lv_obj_t* addButton(lv_obj_t* parent, const std::string& text, std::function<void()> action, bool focusable = true);
     lv_obj_t* addLabel(lv_obj_t* parent, const std::string& text, const lv_font_t* font = nullptr);
+    lv_obj_t* addInfoRow(lv_obj_t* list, const std::string& text, const lv_font_t* font = nullptr);
     void bind(lv_obj_t* obj, lv_event_code_t code, std::function<void(lv_event_t*)> action);
     void returnTo(Screen screen);
 
@@ -160,6 +162,9 @@ private:
     lv_chart_series_t* series_ = nullptr;
     lv_obj_t* chartRange_ = nullptr;
     lv_obj_t* chartEmpty_ = nullptr;
+    lv_obj_t* chartYMin_ = nullptr;
+    lv_obj_t* chartYMax_ = nullptr;
+    std::array<lv_obj_t*, 3> chartX_{};
     std::uint32_t chartUpdated_ = 0;
     struct DashboardWidgets {
         lcars::Gauge segments{};

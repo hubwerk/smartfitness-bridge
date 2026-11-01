@@ -162,7 +162,7 @@ enum class Str : std::uint16_t {
     Advanced,
     Receiver,
     History,
-    HistoryWindow,
+    HistorySession,
     HistoryEmpty,
     Stale,
     StrokeRate,
