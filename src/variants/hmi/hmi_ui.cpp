@@ -679,8 +679,7 @@ void HmiUi::updateDashboard() {
     const auto accent = sportColor(profile);
     lcars::setGauge(dash_.segments, ratio, false, accent);
     lv_obj_set_style_text_color(dash_.value, lv_color_hex(accent), 0);
-    lv_obj_set_style_bg_color(dash_.glow, lv_color_hex(accent), 0);
-    lv_obj_set_style_bg_grad_color(dash_.glow, lv_color_hex(accent), 0);
+    lv_obj_set_style_image_recolor(dash_.glow, lv_color_hex(accent), 0);
     placeHeaderIcon(profile, accent);
     fitText(dash_.state, tr(status_.input.stale ? Str::Stale : stateLabel(status_.state)), 156, 12);
     std::size_t sideIndex = 0;

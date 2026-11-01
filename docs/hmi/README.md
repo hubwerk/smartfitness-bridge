@@ -22,12 +22,15 @@ The tokens below are the design specification. HMI implementation:
 [`lcars_theme.cpp`](../../src/variants/hmi/lcars_theme.cpp).
 Depth matches the web UI, kept cheap for LVGL on the round 240×240 panel:
 
-- **Sky:** each screen has a `Sky` (`#10283C`) band at the top that fades out to
-  black over 112 px.
+- **Sky:** each screen has a `Sky` (`#10283C`) band at the top that fades into
+  `Black` over 112 px.
 - **Gradients:** header bands and buttons use their token as the top colour and
   fade to a darker shade of it. The header band also has a hairline edge.
-- **Glow:** on the training dashboard, a soft glow in the sport accent sits below
-  the arc. The arc has two faint halo arcs behind it.
+- **Glow:** on the training dashboard, a soft radial glow in the sport accent
+  rises from the bottom edge. The arc has two faint halo arcs behind it.
+- **Dithering:** the panel is RGB565 and LVGL 9 does not dither gradients, so
+  the large sky and glow areas are pre-dithered images instead of LVGL
+  gradients. Without this they would show visible bands.
 - **Decor:** sky, glow and halos are flagged `lcars::Decor`, so the simulator's
   layout and overlap checks ignore them.
 - **Icons:** Training, Connections, System and Back in the menu carry the same
@@ -37,7 +40,8 @@ Depth matches the web UI, kept cheap for LVGL on the round 240×240 panel:
 
 Icons come from `src/variants/web/assets/index.html`.
 [`scripts/gen_hmi_icons.py`](../../scripts/gen_hmi_icons.py) rasterises them into
-A8 images in `src/variants/hmi/icons/hmi_icons.c`, which LVGL recolours. Run
+A8 images in `src/variants/hmi/icons/hmi_icons.c`, which LVGL recolours. The
+same file holds the dithered sky (RGB565) and glow (A8) textures. Run
 `.venv/bin/python scripts/gen_hmi_icons.py` after changing an icon; `--check`
 verifies the file is up to date.
 
