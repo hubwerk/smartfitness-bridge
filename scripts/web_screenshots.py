@@ -142,6 +142,19 @@ def check_view(page, panel, mobile):
     expect(page.locator('[role="tab"][aria-selected="true"]')).to_have_attribute("aria-controls", panel)
     assert page.locator('[role="tabpanel"]:visible').count() == 1
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"Overflow: {panel}"
+    if panel == "dash":
+        assert page.locator("#device-icon path, #device-icon rect, #device-icon circle").count() > 1
+    if not mobile:
+        # The first content tile starts level with the first navigation item.
+        first = page.evaluate(f"""() => {{
+            const nav=document.querySelector('nav button').getBoundingClientRect().top+scrollY;
+            const card=document.querySelector('#{panel} .card, #{panel} .chain').getBoundingClientRect().top+scrollY;
+            return [nav, card];}}""")
+        assert abs(first[0] - first[1]) <= 1, (panel, first)
+    if panel == "dash" and page.evaluate("innerWidth > 1150"):
+        heights = page.evaluate("""() => ['.live-card','.control-card'].map(s =>
+            document.querySelector(s).getBoundingClientRect().height)""")
+        assert abs(heights[0] - heights[1]) <= 1, heights
 
 
 def render(browser, output, name, width, height):

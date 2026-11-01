@@ -270,6 +270,12 @@ for schema migration and boot-frozen GATT decisions.
 The web UI is one offline-capable HTML/CSS/JS asset, gzipped into flash. It uses
 system fonts, inline SVG, a navy background (`#07111D`), card surfaces (`#0D1E2E`),
 fine borders (`#2B465D`) and explicit text alongside status colours.
+Subtle radial/linear gradients give the page, sidebar and cards depth; the live
+card adds a soft glow in the profile accent behind the arc. The sidebar shows the
+SmartFitness logo and line icons for Training, Connections and System. Each
+profile has a two-tone equipment icon in an accent-tinted tile. On desktop the
+first content card starts level with the first navigation item, and Training
+control stretches to the live card height with **Apply** anchored at its bottom.
 
 Training uses the effective output profile (or input profile when output is off):
 
