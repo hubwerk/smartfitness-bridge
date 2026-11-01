@@ -137,7 +137,7 @@ inactive adapters contribute code and registry metadata, not one live protocol
 object per device.
 
 Baseline `main` CI run
-[`38041095684`](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38041095684)
+[`38041095684`](https://github.com/hubwerk/smartfitness-bridge/actions/runs/38041095684)
 reports **1,151,201 bytes flash** and **62,948 bytes static RAM**. A local
 PlatformIO build could not download the `espressif32` platform
 (`HTTPClientError`, before compilation). A firmware flash/RAM delta must be

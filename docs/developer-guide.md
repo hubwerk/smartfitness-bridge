@@ -1,6 +1,6 @@
 # ESP32 Smart Fitness Bridge
 
-[![CI](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml)
+[![CI](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml)
 
 Firmware for ESP32-S3 boards that reads fitness equipment over BLE and forwards
 measurements and supported trainer controls through Bluetooth FTMS. It is built in
@@ -39,7 +39,7 @@ see the [supported-device table](#supported-devices-and-new-protocols)):
 | End-to-end, **web** variant: **Wahoo KICKR** as FTMS input → bridge ANT+ FE-C output via USB ANT+ stick → **Garmin fenix 6 Pro** ([#73](https://github.com/hubwerk/smartfitness-bridge/issues/73)) | Verified |
 | Other BLE equipment and supported-device entries, Zwift and other apps, trainer control from apps, UART ANT transport, ANT+ sensor channels and other ANT+ displays, reconnect/persistence, radio coexistence under load, safe physical trainer operation, readability on the real IPS panel | Unverified |
 
-The post-PR-#10 [main CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38030185653)
+The post-PR-#10 [main CI run](https://github.com/hubwerk/smartfitness-bridge/actions/runs/38030185653)
 passed both host tests and firmware build; the badge above tracks CI.
 
 ## Build variants
@@ -113,7 +113,7 @@ CH34x) is needed only when using the board's UART port.
 ### Build
 
 ```sh
-git clone https://github.com/manuelh83/smartfitness-bridge.git
+git clone https://github.com/hubwerk/smartfitness-bridge.git
 cd smartfitness-bridge
 pio run -e esp32s3dev     # web variant
 pio run -e crowpanel128   # HMI variant
@@ -1306,7 +1306,7 @@ BLE/Wi-Fi coexistence on one radio; do not disable it as a latency workaround.
 Radio performance and heap headroom under simultaneous scanning, FTMS and Wi-Fi
 traffic need hardware measurement.
 
-The [post-merge firmware build](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38030185653/job/114149294707)
+The [post-merge firmware build](https://github.com/hubwerk/smartfitness-bridge/actions/runs/38030185653/job/114149294707)
 reported **62,916 / 327,680 B RAM** and **1,139,789 / 6,553,600 B flash**.
 These are linker/build figures for that revision, **not** total board capacity,
 runtime free heap or PSRAM usage. The board has 16 MB flash / 8 MB PSRAM; the

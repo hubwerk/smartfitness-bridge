@@ -311,7 +311,7 @@ is 34,270 bytes. This remains a small asset relative to the 6.25 MiB app
 partition, but the whole firmware budget must be confirmed by the linker.
 
 Baseline firmware measurements from the successful
-[main-branch CI run](https://github.com/manuelh83/smartfitness-bridge/actions/runs/38130475907)
+[main-branch CI run](https://github.com/hubwerk/smartfitness-bridge/actions/runs/38130475907)
 at `c153653`:
 
 | Variant | Baseline flash | Baseline static RAM | Post-restyle delta |

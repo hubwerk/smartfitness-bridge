@@ -1,6 +1,6 @@
 # ESP32 Smart Fitness Bridge
 
-[![CI](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/manuelh83/smartfitness-bridge/actions/workflows/ci.yml)
+[![CI](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml)
 
 The bridge reads supported fitness equipment over Bluetooth Low Energy (BLE) and
 forwards its measurements to a training app or display using Bluetooth FTMS.
@@ -20,7 +20,7 @@ the PlatformIO IDE extension in VS Code. Connect the board over USB, then run
 these commands from the project directory:
 
 ```sh
-git clone https://github.com/manuelh83/smartfitness-bridge.git
+git clone https://github.com/hubwerk/smartfitness-bridge.git
 cd smartfitness-bridge
 pio run -e esp32s3dev -t upload     # ESP32-S3 DevKitC-1, web interface
 pio run -e crowpanel128 -t upload   # ELECROW CrowPanel 1.28", local display
