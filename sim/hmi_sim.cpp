@@ -11,6 +11,7 @@
 //   build/hmi-sim <output dir>
 
 #undef NDEBUG
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -855,7 +856,8 @@ void checkTrainingDesign() {
         auto* child = lv_obj_get_child(lv_screen_active(), static_cast<int>(i));
         if (lv_obj_check_type(child, &lv_chart_class)) chart = child;
     }
-    assert(chart && lv_chart_get_point_count(chart) == 151);
+    // One column per sample until the plot is full, then bucketed by time.
+    assert(chart && lv_chart_get_point_count(chart) == 145);
     auto* series = lv_chart_get_series_next(chart, nullptr);
     auto* values = lv_chart_get_y_array(chart, series);
     int gaps = 0, valid = 0;
@@ -863,7 +865,32 @@ void checkTrainingDesign() {
         if (values[i] == LV_CHART_POINT_NONE) ++gaps;
         else ++valid;
     }
-    assert(gaps >= 10 && valid > 130);
+    assert(gaps >= 8 && valid > 120);
+    // The X axis always spans the whole session, so it keeps rescaling.
+    auto axisLabels = [chart] {
+        std::vector<std::string> texts;
+        for (std::uint32_t i = 0; i < lv_obj_get_child_count(chart); ++i) {
+            auto* child = lv_obj_get_child(chart, static_cast<int>(i));
+            if (lv_obj_check_type(child, &lv_label_class)) texts.emplace_back(lv_label_get_text(child));
+        }
+        return texts;
+    };
+    const auto axes = axisLabels();
+    // Y max / Y min / three time ticks / the empty hint.
+    assert(axes.size() == 6);
+    assert(axes[0] != axes[1] && axes[0] != "--");  // auto-scaled to the session extremes
+    assert(axes[2] == "0:00" && axes[4] == "5:00" && axes[3] == "2:30");
+    for (int i = 0; i < 120; ++i) {
+        g_now += 1000;
+        setMetric(status, Metric::Power, 150 + i);
+        g_ui.setStatus(status);
+    }
+    pump(1200);
+    const auto grown = axisLabels();
+    // Two more minutes of samples stretch the axis instead of dropping history.
+    assert(grown[2] == "0:00" && grown[3] == "3:30" && grown[4].rfind("7:", 0) == 0);
+    assert(grown[0] != axes[0]);  // the new maximum rescaled the Y axis
+    checkLayout("history-rescaled");
     status.input.paired.address = "new-device";
     status.telemetry = {};
     g_ui.setStatus(status);
@@ -1037,12 +1064,83 @@ void checkListEnds() {
     g_ui.navigate(Screen::Menu);
     pump(400);
     lv_obj_t* list = currentList();
-    turn(-1);  // Training wraps to System; the short main menu never scrolls.
+    lv_obj_t* arc = lv_obj_get_child(lv_obj_get_parent(list), lv_obj_get_index(list) + 1);
+    assert(lv_obj_check_type(arc, &lv_arc_class));
+    checkListEnd(list, arc, true);
+    turn(-1);  // Training wraps to Back, the last main-menu entry.
     pump(400);
-    assert(lv_obj_get_scroll_bottom(list) <= 0);
+    checkListEnd(list, arc, false);
     g_ui.navigate(Screen::Dashboard);
     pump(100);
     std::printf("list scrollbar reaches both ends passed\n");
+}
+
+// The knob scrolls a list only by moving the focus, so every pixel of a
+// scrollable list must be visible at some focus position. Entries that are
+// not focusable (or lists whose only focusable entry sits at one end) would
+// otherwise leave part of the screen unreachable without touch.
+void checkKnobCoverage(const char* name) {
+    auto* group = lv_indev_get_group(g_knob);
+    const auto count = lv_group_get_obj_count(group);
+    assert(count > 0);
+    auto* focused = lv_group_get_focused(group);
+    assert(focused);
+    lv_obj_t* list = lv_obj_get_parent(focused);
+    if (!lv_obj_has_flag(list, LV_OBJ_FLAG_SCROLLABLE)) return;
+    const int range = lv_obj_get_scroll_top(list) + lv_obj_get_scroll_bottom(list);
+    if (range <= 0) return;
+    const int viewport = lv_obj_get_content_height(list);
+    std::vector<int> tops;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        tops.push_back(lv_obj_get_scroll_top(list));
+        turn(1);
+        pump(300);
+    }
+    std::sort(tops.begin(), tops.end());
+    // Padding slivers around static labels may stay hidden; a whole row must not.
+    constexpr int kSliver = 16;
+    int covered = 0;  // highest scroll offset whose viewport is reachable
+    for (const int top : tops) {
+        if (top > covered + viewport + kSliver) {
+            std::printf("  %s: %d..%d px of the list are unreachable with the knob\n", name,
+                        covered + viewport, top);
+            assert(false);
+        }
+        covered = std::max(covered, top);
+    }
+    if (tops.front() > kSliver || covered < range - kSliver) {
+        std::printf("  %s: knob reaches scroll %d..%d of 0..%d\n", name, tops.front(), covered, range);
+        assert(false);
+    }
+}
+
+// Every list screen, including the read-only variants that offer no action.
+void checkKnobReach() {
+    auto screenName = [](Screen screen) { return "screen-" + std::to_string(static_cast<int>(screen)); };
+    const Screen screens[] = {Screen::Menu,       Screen::Training,      Screen::Connections,
+                              Screen::Control,    Screen::Devices,       Screen::DeviceDetail,
+                              Screen::Settings,   Screen::Output,        Screen::Receiver,
+                              Screen::Advanced,   Screen::InputServices, Screen::OutputServices,
+                              Screen::AntStatus,  Screen::FtmsName};
+    auto readOnly = bikeStatus();
+    readOnly.state = RuntimeState::Connected;
+    readOnly.canControl = false;
+    readOnly.controls = {false, false, false, false};
+    readOnly.hasTarget = false;
+    const StatusView fixtures[] = {bikeStatus(), treadmillStatus(), readOnly, antStatus()};
+    for (const auto& status : fixtures) {
+        g_ui.setStatus(status);
+        for (const Screen screen : screens) {
+            if (screen == Screen::DeviceDetail) g_ui.openDevice(0);
+            else g_ui.navigate(screen);
+            pump(400);
+            checkKnobCoverage(screenName(screen).c_str());
+        }
+    }
+    g_ui.setStatus(treadmillStatus());
+    g_ui.navigate(Screen::Dashboard);
+    pump(100);
+    std::printf("knob reaches every list entry on all screens passed\n");
 }
 
 void checkServiceRefresh() {
@@ -1321,6 +1419,7 @@ int main(int argc, char** argv) {
     checkScrollbar();
     knobWalkthrough();
     checkListEnds();
+    checkKnobReach();
     checkServiceRefresh();
     checkAntUi();
 

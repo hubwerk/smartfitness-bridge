@@ -127,6 +127,11 @@ No Wi-Fi/HTTPS controls are added to the HMI.
   Turn moves focus; press selects. In adjustment, turn changes the value and
   press applies. Hold goes back/cancels. Speed changes retain confirmation;
   factory reset retains two confirmations, each initially focused on Cancel.
+  Every list screen ends in a **Back** entry, so the knob alone always reaches
+  the previous screen; the menu's Back returns to the live dashboard. Because
+  the encoder scrolls a list only by moving the focus, every list region stays
+  reachable: unsupported rows remain focusable read-only pills and a leading
+  info block taller than the focus reveal is itself a focus stop.
 - **HMI touch:** tap pills/readout, swipe right to go back; swipe left/right
   on the dashboard cycles metrics. +/- adjust values; Apply uses the same
   confirmation path. Names retain presets and the on-screen keyboard.
@@ -157,12 +162,16 @@ Missing, stale or disconnected data never appears as a fresh measurement.
 The arc scale is a visual reference, not the device's supported control range.
 
 **Training → History** records the profile's default primary, independently of the
-currently selected live metric. A fixed ring buffer stores at most 301 samples,
-at most once per second, over five minutes (under 4 KiB for the model). Nothing
-is persisted. Source/address/address-type/adapter/profile changes clear it.
+currently selected live metric. A fixed ring buffer stores at most 301 samples
+(under 4 KiB for the model) and always covers the whole session: once it is full
+it halves its resolution by merging adjacent samples, so the sampling interval
+doubles (1 s, 2 s, 4 s, …) instead of discarding the session start. Nothing is
+persisted. Source/address/address-type/adapter/profile changes clear it.
 Invalid data and even brief stale/disconnect intervals break the line; missed
-time is not backfilled. The chart uses 151 two-second display buckets, preserving
-any gap within a bucket, and labels the observed range and five-minute window.
+time is not backfilled and survives the merging as a gap. The full-width chart
+buckets the samples by time into at most 145 columns, auto-scales the Y axis to
+the session minimum and maximum and rescales the X axis to the session length;
+both axes are labelled (metric with unit, observed range, elapsed time ticks).
 The bounded buffer collects on all screens; reboot starts an empty history.
 There are no invented Pause/Start commands. Existing speed-zero Stop belt and
 Cancel-first speed/reset confirmations retain their command paths.

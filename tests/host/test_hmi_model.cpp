@@ -180,18 +180,24 @@ void testTraining() {
     status.input.stale = false;
     history.record(status, 600);
     assert(!history.at(0).valid);  // a sub-second gap is not hidden
+    assert(history.interval() == TrainingHistory::BaseIntervalMs);
+    // Filling up halves the resolution instead of dropping the session start.
     for (std::uint32_t i = 1; i <= 400; ++i) history.record(status, i * 1000);
-    assert(history.size() == TrainingHistory::Capacity);
-    assert(history.at(0).time == 100000 && history.at(300).time == 400000);
+    assert(history.size() == 201 && history.interval() == 2000);
+    assert(history.at(0).time == 0 && history.at(200).time == 400000);
+    assert(history.span() == 400000);
+    assert(!history.at(0).valid);  // merging keeps the gap recorded at 400 ms
+    assert(history.at(1).valid && history.at(1).value == 180);
     status.state = RuntimeState::Disconnected;
     history.record(status, 401000);
-    assert(!history.at(300).valid);
+    assert(!history.at(200).valid);
     status.state = RuntimeState::ControlReady;
     status.telemetry[static_cast<std::size_t>(Metric::Power)] = {true, INFINITY};
     history.record(status, 402000);
-    assert(!history.at(300).valid);
+    assert(history.size() == 202 && !history.at(201).valid);
     history.record(status, 800000);
-    assert(history.size() == 1);  // no backfilling missing wall time
+    // A long stall stays in the session as a gap, it never truncates it.
+    assert(history.size() == 203 && history.span() == 800000 && !history.at(202).valid);
 
     auto checkReset = [&] {
         history.record(status, 800000);
