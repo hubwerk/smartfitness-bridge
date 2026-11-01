@@ -65,10 +65,15 @@ never starts Wi-Fi.
 
 ## User interfaces
 
-The round HMI retains its **LCARS-inspired** palette and Antonio typography.
-The web interface uses dark cards, system typography, sport-specific accents,
-and three areas: **Training**, **Connections**, and **System**. Training combines
-telemetry with compact target controls; diagnostics are under **System → Advanced**.
+Both interfaces use navy surfaces, sport-specific accents, and three areas:
+**Training**, **Connections**, and **System**. The round HMI adapts this to a
+continuous arc with two secondary readouts, condensed Antonio menus and Montserrat
+training values. Training offers live values, target controls and a separate
+five-minute history screen (bounded RAM, source resets, visible data gaps).
+Connections owns pairing, output configuration and receiver status. HMI display
+preferences and Save remain in System; simulation, Load, Restart and Factory reset
+are under **System → Advanced**. The HMI does not start Wi-Fi or HTTPS.
+The web interface retains responsive cards, compact controls and browser-local history.
 The shared command/API contract is unchanged. The screenshots are simulator/browser renders, not
 photographs; for hardware test status see
 [Overview and project status](#overview-and-project-status).

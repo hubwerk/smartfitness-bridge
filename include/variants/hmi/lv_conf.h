@@ -25,9 +25,14 @@
 #define LV_USE_PERF_MONITOR 0
 #define LV_USE_MEM_MONITOR 0
 
-/* Antonio Latin-1 fonts are generated in src/variants/hmi/fonts.
- * Montserrat 14 is retained only as the LVGL symbol fallback. */
+/* Antonio Latin-1 fonts serve condensed menus and adjustment readouts.
+ * Built-in Montserrat sizes serve training values, metadata and symbols. */
 #define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_12 1
+#define LV_FONT_MONTSERRAT_16 1
+#define LV_FONT_MONTSERRAT_20 1
+#define LV_FONT_MONTSERRAT_28 1
+#define LV_FONT_MONTSERRAT_40 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 #define LV_USE_THEME_DEFAULT 1

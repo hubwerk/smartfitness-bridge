@@ -86,9 +86,9 @@ std::vector<Metric> dashboardMetrics(MachineProfile profile) {
         case MachineProfile::Treadmill:
             return {Metric::Speed, Metric::Incline, Metric::HeartRate, Metric::Power, Metric::Cadence};
         case MachineProfile::Rower:
-            return {Metric::Power, Metric::Cadence, Metric::HeartRate, Metric::Pace, Metric::Speed};
+            return {Metric::Cadence, Metric::Power, Metric::HeartRate, Metric::Pace, Metric::Speed};
         case MachineProfile::CrossTrainer:
-            return {Metric::Power, Metric::Cadence, Metric::HeartRate, Metric::Speed, Metric::Incline};
+            return {Metric::Resistance, Metric::Cadence, Metric::Power, Metric::HeartRate, Metric::Speed, Metric::Incline};
         case MachineProfile::StepClimber:
         case MachineProfile::StairClimber:
             return {Metric::Cadence, Metric::HeartRate, Metric::Floors, Metric::Power, Metric::TotalEnergy};
@@ -116,7 +116,10 @@ std::vector<Metric> dashboardMetrics(MachineProfile profile, const StatusView& s
 std::string formatValue(float value, int decimals) {
     if (!std::isfinite(value)) return "--";
     char buffer[24];
-    std::snprintf(buffer, sizeof(buffer), "%.*f", std::max(0, std::min(decimals, 3)), static_cast<double>(value));
+    if (std::fabs(value) >= 1e7F)
+        std::snprintf(buffer, sizeof(buffer), "%.3g", static_cast<double>(value));
+    else
+        std::snprintf(buffer, sizeof(buffer), "%.*f", std::max(0, std::min(decimals, 3)), static_cast<double>(value));
     // Avoid "-0" / "-0.0".
     std::string text = buffer;
     if (text[0] == '-' && text.find_first_not_of("-0.") == std::string::npos) text.erase(0, 1);
@@ -124,8 +127,80 @@ std::string formatValue(float value, int decimals) {
 }
 
 std::string formatMetric(const MetricView& sample, Metric metric) {
-    if (!sample.valid) return "--";
-    return formatValue(sample.value, metricFormat(metric).decimals);
+    if (!sample.valid || !std::isfinite(sample.value)) return "--";
+    if (metric == Metric::ElapsedTime || metric == Metric::RemainingTime) {
+        if (sample.value < 0) return "--";
+        if (sample.value >= 360000) return formatValue(sample.value, 0) + " s";
+        const auto seconds = static_cast<unsigned>(sample.value);
+        char text[16];
+        std::snprintf(text, sizeof(text), "%02u:%02u", seconds / 60, seconds % 60);
+        return text;
+    }
+    return formatValue(metric == Metric::Distance ? sample.value / 1000.0F : sample.value,
+                       metricFormat(metric).decimals);
+}
+
+std::array<Metric, 3> trainingMetrics(MachineProfile profile) {
+    switch (profile) {
+        case MachineProfile::Treadmill: return {Metric::Speed, Metric::Incline, Metric::Distance};
+        case MachineProfile::Rower: return {Metric::Cadence, Metric::Power, Metric::Distance};
+        case MachineProfile::CrossTrainer: return {Metric::Resistance, Metric::Cadence, Metric::Distance};
+        case MachineProfile::StepClimber: return {Metric::Cadence, Metric::PositiveElevationGain, Metric::StepCount};
+        case MachineProfile::StairClimber: return {Metric::Cadence, Metric::Floors, Metric::StepCount};
+        default: return {Metric::Power, Metric::Cadence, Metric::Distance};
+    }
+}
+
+MetricFormat trainingFormat(Metric metric, MachineProfile profile) {
+    auto format = metricFormat(metric);
+    if (metric == Metric::ElapsedTime || metric == Metric::RemainingTime) format.unit = "";
+    if (metric == Metric::Resistance && profile == MachineProfile::CrossTrainer) format.gaugeMax = 30;
+    if (metric == Metric::Cadence || metric == Metric::AverageCadence) {
+        if (profile == MachineProfile::Rower) {
+            format.name = Str::StrokeRate;
+            format.unit = "spm";
+            format.gaugeMax = 60;
+        } else if (profile == MachineProfile::StepClimber || profile == MachineProfile::StairClimber ||
+                   profile == MachineProfile::Treadmill || profile == MachineProfile::CrossTrainer) {
+            format.name = Str::StepRate;
+            format.unit = "/min";
+            format.gaugeMax = 160;
+        }
+    }
+    return format;
+}
+
+std::string trainingSource(const StatusView& status) {
+    const auto& input = status.input;
+    return std::to_string(input.bleSelected) + ":" + std::to_string(static_cast<int>(input.profile)) + ":" +
+           input.paired.address + ":" + std::to_string(input.paired.randomAddress) + ":" + input.paired.adapter;
+}
+
+void TrainingHistory::record(const StatusView& status, std::uint32_t now) {
+    const auto source = trainingSource(status);
+    if (source != source_) {
+        start_ = count_ = 0;
+        source_ = source;
+    }
+    const auto& sample = status.metric(trainingMetrics(status.input.profile)[0]);
+    const bool valid = sample.valid && std::isfinite(sample.value) && !status.input.stale &&
+                       status.state != RuntimeState::Disconnected;
+    if (count_ && now - at(count_ - 1).time < 1000) {
+        // Even a short interruption must break the line; never replace a gap
+        // with a recovered value from the same sampling interval.
+        if (!valid) points_[(start_ + count_ - 1) % Capacity].valid = false;
+        return;
+    }
+    while (count_ && now - at(0).time > WindowMs) {
+        start_ = (start_ + 1) % Capacity;
+        --count_;
+    }
+    if (count_ == Capacity) {
+        start_ = (start_ + 1) % Capacity;
+        --count_;
+    }
+    points_[(start_ + count_) % Capacity] = {now, sample.value, valid};
+    ++count_;
 }
 
 Metric MetricCycler::current(MachineProfile profile) const {
@@ -223,6 +298,16 @@ Str stateLabel(RuntimeState state) {
 }
 
 const char* profileLabel(MachineProfile profile) {
+    if (language() == Language::German) {
+        switch (profile) {
+            case MachineProfile::Treadmill: return "Laufband";
+            case MachineProfile::CrossTrainer: return "Crosstrainer";
+            case MachineProfile::Rower: return "Rudergeraet";
+            case MachineProfile::StepClimber: return "Stepper";
+            case MachineProfile::StairClimber: return "Treppensteiger";
+            default: return "Fahrrad";
+        }
+    }
     switch (profile) {
         case MachineProfile::Treadmill: return "Treadmill";
         case MachineProfile::CrossTrainer: return "Cross trainer";

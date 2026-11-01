@@ -5,6 +5,7 @@
 // actions are expressed as the shared Commands; the HMI never touches the core
 // directly.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -40,6 +41,31 @@ std::vector<smartfitness::Metric> dashboardMetrics(smartfitness::MachineProfile 
 // "123" / "8.5"; "--" when the sample is invalid.
 std::string formatValue(float value, int decimals);
 std::string formatMetric(const smartfitness::MetricView& sample, smartfitness::Metric metric);
+MetricFormat trainingFormat(smartfitness::Metric metric, smartfitness::MachineProfile profile);
+std::array<smartfitness::Metric, 3> trainingMetrics(smartfitness::MachineProfile profile);
+std::string trainingSource(const smartfitness::StatusView& status);
+
+// One primary-metric sample per second, at most five minutes, never persisted.
+// Timestamps preserve gaps and use unsigned subtraction across tick rollover.
+class TrainingHistory {
+public:
+    static constexpr std::size_t Capacity = 301;
+    static constexpr std::uint32_t WindowMs = 300000;
+    struct Point {
+        std::uint32_t time = 0;
+        float value = 0;
+        bool valid = false;
+    };
+    void record(const smartfitness::StatusView& status, std::uint32_t now);
+    std::size_t size() const { return count_; }
+    const Point& at(std::size_t index) const { return points_[(start_ + index) % Capacity]; }
+
+private:
+    std::array<Point, Capacity> points_{};
+    std::string source_;
+    std::size_t start_ = 0;
+    std::size_t count_ = 0;
+};
 
 // Knob/swipe selection of the gauge metric; keeps the metric when the profile
 // (and therefore the order) changes.

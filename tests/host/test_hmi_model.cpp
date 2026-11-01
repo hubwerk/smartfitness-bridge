@@ -47,12 +47,12 @@ void testStrings() {
         const char* text = tr(static_cast<Str>(index));
         assert(text && *text && std::string(text) != "?");
     }
-    assert(std::string(tr(Str::Dashboard)) == "Dashboard");
+    assert(std::string(tr(Str::Dashboard)) == "Live values");
     assert(std::string(tr(Str::OutputServices)) == "Output services");
     setLanguage(Language::German);  // untranslated entries still fall back to English
     assert(std::string(tr(Str::OutputServices)) == "Ausgangsdienste");
     assert(std::string(tr(Str::ServiceNoData)) == "keine Daten");
-    assert(std::string(tr(Str::Dashboard)) == "Dashboard");
+    assert(std::string(tr(Str::Dashboard)) == "Live-Werte");
     setLanguage(Language::English);
     assert(language() == Language::English);
     assert(std::string(tr(Str::Count)) == "?");
@@ -142,6 +142,81 @@ void testTargetEditor() {
     assert(controlOrder(MachineProfile::Treadmill).front() == Control::Speed);
     assert(controlOrder(MachineProfile::IndoorBike).front() == Control::Power);
     assert(controlOrder(MachineProfile::Rower).size() == static_cast<std::size_t>(Control::Count));
+}
+
+void testTraining() {
+    const std::array<std::array<Metric, 3>, 6> expected{{
+        {Metric::Power, Metric::Cadence, Metric::Distance},
+        {Metric::Speed, Metric::Incline, Metric::Distance},
+        {Metric::Resistance, Metric::Cadence, Metric::Distance},
+        {Metric::Cadence, Metric::Power, Metric::Distance},
+        {Metric::Cadence, Metric::PositiveElevationGain, Metric::StepCount},
+        {Metric::Cadence, Metric::Floors, Metric::StepCount},
+    }};
+    const MachineProfile profiles[] = {MachineProfile::IndoorBike, MachineProfile::Treadmill,
+        MachineProfile::CrossTrainer, MachineProfile::Rower, MachineProfile::StepClimber, MachineProfile::StairClimber};
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        assert(trainingMetrics(profiles[i]) == expected[i]);
+        assert(dashboardMetrics(profiles[i]).front() == expected[i][0]);
+    }
+    assert(formatMetric({true, 18600}, Metric::Distance) == "18.60");
+    assert(formatMetric({true, 1935}, Metric::ElapsedTime) == "32:15");
+    assert(formatMetric({true, -1}, Metric::RemainingTime) == "--");
+    assert(formatMetric({true, INFINITY}, Metric::ElapsedTime) == "--");
+    assert(std::string(trainingFormat(Metric::Cadence, MachineProfile::Rower).unit) == "spm");
+    assert(std::string(trainingFormat(Metric::Cadence, MachineProfile::StairClimber).unit) == "/min");
+    assert(std::string(trainingFormat(Metric::Cadence, MachineProfile::IndoorBike).unit) == "rpm");
+    assert(formatValue(3.4e38F, 0).find('e') != std::string::npos);
+
+    TrainingHistory history;
+    StatusView status;
+    status.state = RuntimeState::ControlReady;
+    status.telemetry[static_cast<std::size_t>(Metric::Power)] = {true, 180};
+    history.record(status, 0);
+    history.record(status, 200);
+    assert(history.size() == 1 && history.at(0).valid);
+    status.input.stale = true;
+    history.record(status, 400);
+    status.input.stale = false;
+    history.record(status, 600);
+    assert(!history.at(0).valid);  // a sub-second gap is not hidden
+    for (std::uint32_t i = 1; i <= 400; ++i) history.record(status, i * 1000);
+    assert(history.size() == TrainingHistory::Capacity);
+    assert(history.at(0).time == 100000 && history.at(300).time == 400000);
+    status.state = RuntimeState::Disconnected;
+    history.record(status, 401000);
+    assert(!history.at(300).valid);
+    status.state = RuntimeState::ControlReady;
+    status.telemetry[static_cast<std::size_t>(Metric::Power)] = {true, INFINITY};
+    history.record(status, 402000);
+    assert(!history.at(300).valid);
+    history.record(status, 800000);
+    assert(history.size() == 1);  // no backfilling missing wall time
+
+    auto checkReset = [&] {
+        history.record(status, 800000);
+        assert(history.size() == 1);
+        history.record(status, 801000);
+        assert(history.size() == 2);
+    };
+    status.input.bleSelected = true;
+    checkReset();
+    status.input.paired.address = "aa:00:00:00:00:01";
+    checkReset();
+    status.input.paired.randomAddress = true;
+    checkReset();
+    status.input.paired.adapter = "ftms";
+    checkReset();
+    status.input.profile = MachineProfile::Rower;
+    status.telemetry[static_cast<std::size_t>(Metric::Cadence)] = {true, 28};
+    checkReset();
+    assert(history.at(1).valid && history.at(1).value == 28);
+
+    TrainingHistory rollover;
+    rollover.record(status, UINT32_MAX - 499);
+    rollover.record(status, 500);
+    assert(rollover.size() == 2 && rollover.at(1).time == 500);
+    static_assert(sizeof(TrainingHistory) < 4096, "history RAM budget");
 }
 
 void testStatusTexts() {
@@ -394,6 +469,7 @@ void runHmiModelTests() {
     testScrollArc();
     testStrings();
     testMetrics();
+    testTraining();
     testTargetEditor();
     testStatusTexts();
     testServiceDisplays();
