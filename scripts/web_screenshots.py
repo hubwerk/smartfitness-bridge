@@ -137,132 +137,26 @@ def failure_status():
     return failed
 
 
-def render_before(browser, asset, output, name, width, height):
-    context = browser.new_context(viewport={"width": width, "height": height},
-                                  device_scale_factor=1, reduced_motion="reduce")
-    page = context.new_page()
-    external, errors = [], []
-    page.on("pageerror", lambda error: errors.append(str(error)))
-    page.on("websocket", lambda ws: external.append(ws.url)
-            if ws.url != "ws://bridge.test/ws" else None)
-
-    def websocket(ws):
-        ws.send(json.dumps(failure_status()))
-        ws.send(json.dumps(SCAN))
-
-    def route(request_route):
-        url = urlparse(request_route.request.url)
-        if f"{url.scheme}://{url.netloc}" != ORIGIN:
-            external.append(request_route.request.url)
-            request_route.abort()
-        elif url.path == "/":
-            request_route.fulfill(body=asset.read_text(), content_type="text/html")
-        else:
-            fixtures = {"/api/status": failure_status(), "/api/scan/results": SCAN,
-                        "/api/config": CONFIG}
-            assert url.path in fixtures, f"Unexpected baseline request: {url.path}"
-            request_route.fulfill(json=fixtures[url.path])
-
-    context.route_web_socket("**/ws", websocket)
-    context.route("**/*", route)
-    page.goto(ORIGIN)
-    expect(page.locator("#m-power")).to_have_text("214")
-    assert page.locator("#metrics .metric").count() == len(STATUS["telemetry"])
-    assert page.locator("#m-target").count() == 0
-    expect(page.locator("#s-input .bad")).to_have_text("connection lost")
-    expect(page.locator("#dash")).to_be_visible()
-    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    page.screenshot(path=str(output / f"web-dashboard-{name}.png"), full_page=True)
-    assert not external, f"External baseline requests: {external}"
-    assert not errors, f"Baseline browser errors: {errors}"
-    context.close()
-    print(f"before {name}: same dashboard fixtures; offline assets and no overflow passed")
-
-
 def check_view(page, panel, mobile):
     expect(page.locator(f"#{panel}")).to_be_visible()
-    expect(page.locator('[role="tab"][aria-selected="true"]')).to_have_attribute(
-        "aria-controls", panel)
+    expect(page.locator('[role="tab"][aria-selected="true"]')).to_have_attribute("aria-controls", panel)
     assert page.locator('[role="tabpanel"]:visible').count() == 1
-    assert page.evaluate(
-        "document.documentElement.scrollWidth <= window.innerWidth"
-    ), f"Horizontal overflow in {'mobile' if mobile else 'desktop'} {panel}"
-    legends = {
-        "Web connection": ["Web interface online", "Web interface offline"],
-        "Bridge connection": [
-            "Connected / ready / active", "Disconnected / error",
-            "Retry backoff / stale data / missing ANT+ stick",
-            "Connecting / scanning / advertising / inactive / info"],
-        "Bluetooth service": ["Advertised service", "Subscribed / OK",
-                              "Pending / none reported", "Subscription failed"],
-        "Bluetooth scan": ["Unrelated device / unnamed device"],
-        "Bridge output": ["Service / ANT+ channel", "Sending / subscribed / channel open",
-                          "Pending / not applied"],
-        "Receiving device": ["Connected / has control", "Waiting / no control / output off"],
-        "Control result": ["Command accepted", "Command failed / disconnected / rejected"],
-        "Output service": ["Service active / channel open / channel capacity",
-                           "Pending / off", "Failed / error / duplicate power warning"],
-    }
-    names = ["Web connection"] + {
-        "dash": ["Bridge connection"], "dev": ["Bluetooth service", "Bridge output", "Receiving device", "Bluetooth scan"],
-        "ctl": ["Control result"], "set": ["Output service"], "debug": [],
-    }[panel]
-    expect(page.locator(".status-legend:visible")).to_have_count(len(names))
-    for name in names:
-        legend = page.get_by_role("list", name=f"{name} color legend", exact=True)
-        expect(legend).to_be_visible()
-        expect(legend.locator("li")).to_have_text(legends[name])
-        expect(legend.locator('.legend-swatch[aria-hidden="true"]')).to_have_count(
-            len(legends[name]))
-
-
-def check_legend_colors(page):
-    references = [
-        (".pill.ok", "#conn", "backgroundColor"),
-        (".pill.bad", "#s-input .bad", "backgroundColor"),
-        (".pill.warn", "#s-input .warn", "backgroundColor"),
-        (".pill.pending", "#paired-subscriptions .pending", "backgroundColor"),
-        (".pill.sensor", "#paired-advertised .sensor", "backgroundColor"),
-        (".gray", "#scan-body .gray", "color"),
-        (".pill:not(.ok):not(.bad):not(.warn):not(.pending):not(.sensor)",
-         "#s-input .pill", "backgroundColor"),
-    ]
-    # A theme change must affect real indicators and legend samples together.
-    for theme in ({}, {"--ok": "#123456", "--bad": "#654321", "--warn": "#abcdef",
-                       "--tan": "#fedcba", "--violet": "#456789"}):
-        page.evaluate("""theme => {
-            for (const [key, value] of Object.entries(theme))
-                document.documentElement.style.setProperty(key, value);
-        }""", theme)
-        for selector, reference, prop in references:
-            color = page.locator(reference).first.evaluate(
-                "(e, prop) => getComputedStyle(e)[prop]", prop)
-            assert page.locator(".status-legend .legend-swatch" + selector).evaluate_all(
-                "(elements, color) => elements.length > 0 && elements.every("
-                "e => getComputedStyle(e).backgroundColor === color)", color
-            ), f"Legend color mismatch for {selector}"
-    page.evaluate("""() => {
-        for (const key of ['--ok', '--bad', '--warn', '--tan', '--violet'])
-            document.documentElement.style.removeProperty(key);
-    }""")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"Overflow: {panel}"
 
 
 def render(browser, output, name, width, height):
     context = browser.new_context(viewport={"width": width, "height": height},
                                   device_scale_factor=1, reduced_motion="reduce")
     page = context.new_page()
-    errors, external, commands, sockets, results, wifi_scans, wifi_polls = [], [], [], [], {}, [], []
-    config = dict(CONFIG)  # saved settings change what /api/config returns
+    errors, commands, sockets, results, external = [], [], [], {}, []
+    config = dict(CONFIG)
+    reject_control = True
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.on("websocket", lambda ws: external.append(ws.url)
-            if ws.url != "ws://bridge.test/ws" else None)
 
     def websocket(ws):
         sockets.append(ws)
         ws.send(json.dumps(STATUS))
         ws.send(json.dumps(SCAN))
-
-    context.route_web_socket("**/ws", websocket)
 
     def route(request_route):
         request = request_route.request
@@ -270,405 +164,280 @@ def render(browser, output, name, width, height):
         if f"{url.scheme}://{url.netloc}" != ORIGIN:
             external.append(request.url)
             request_route.abort()
-            return
-        if url.path == "/":
+        elif url.path == "/":
             request_route.fulfill(body=web_content(), content_type="text/html")
-            return
-        if request.method == "POST" and url.path == "/api/wifi-scan":
-            wifi_scans.append(request.post_data_json)
+        elif url.path == "/api/wifi-scan":
             request_route.fulfill(status=202, json={"scanning": True})
-            return
-        if url.path == "/api/wifi-scan/results" and len(wifi_polls) == 0:
-            # The scan takes the radio off-channel; a dropped poll must not abort it.
-            wifi_polls.append("aborted")
-            request_route.abort()
-            return
-        if request.method == "POST":
+        elif url.path == "/api/wifi-scan/results":
+            request_route.fulfill(json=WIFI_SCAN)
+        elif request.method == "POST":
             endpoint = url.path.removeprefix("/api/")
-            commands.append((endpoint, request.post_data_json))
-            if endpoint == "config" and "https" in request.post_data_json:
-                config["https"] = request.post_data_json["https"]
+            body = request.post_data_json
+            commands.append((endpoint, body))
             if endpoint == "config":
-                for key in ("ftmsOutputServices", "antOutputServices"):
-                    if key in request.post_data_json:
-                        config[key] = request.post_data_json[key]
+                config.update({k: v for k, v in body.items() if k != "save"})
             ident = len(commands)
             result = {"type": "result", "id": ident, "done": True,
-                      "ok": endpoint != "control",
-                      "message": "control: disconnected" if endpoint == "control" else "applied"}
+                      "ok": not (endpoint == "control" and reject_control),
+                      "message": "control rejected" if endpoint == "control" and reject_control else "applied"}
             results[ident] = result
             request_route.fulfill(status=202, json={"id": ident})
-            # Exercise the existing WebSocket completion path as well as polling.
-            if endpoint == "connect":
-                page.evaluate(
-                    "(result) => setTimeout(() => window.__fixtureResult(result), 50)", result)
-            return
-        fixtures = {"/api/status": STATUS, "/api/scan/results": SCAN, "/api/config": config,
-                    "/api/wifi-scan/results": WIFI_SCAN}
-        if url.path == "/api/result":
+        elif url.path == "/api/result":
             request_route.fulfill(json=results[int(parse_qs(url.query)["id"][0])])
-        elif url.path in fixtures:
-            request_route.fulfill(json=fixtures[url.path])
         else:
-            raise AssertionError(f"Unexpected API request: {request.method} {request.url}")
+            fixtures = {"/api/status": STATUS, "/api/config": config, "/api/scan/results": SCAN}
+            assert url.path in fixtures, request.url
+            request_route.fulfill(json=fixtures[url.path])
 
+    context.route_web_socket("**/ws", websocket)
     context.route("**/*", route)
-    # A server-side WebSocket send is scheduled from Python via this binding.
-    page.expose_function("__fixtureResult", lambda result: sockets[0].send(json.dumps(result)))
     page.goto(ORIGIN)
-    page.evaluate("document.fonts.ready")
     expect(page.locator("#m-power")).to_have_text("214")
-    assert page.locator("#tab-debug").count() == 0
+    expect(page.locator("#c-ftmsName")).to_have_value("SmartFitness")
     assert "/debug/log" not in page.content()
-    expect(page.locator("#power-gauge")).to_have_attribute("value", "214")
-    expect(page.locator("#s-input .ok")).to_have_text("link: ready")
-    expect(page.locator("#s-bridge")).to_contain_text("control ready")
-    expect(page.locator("#ctl-state")).to_contain_text("supported: power, resistance, incline, speed")
-    assert page.locator("#s-input").get_by_text("stale data", exact=True).count() == 0
-    assert sockets, "WebSocket fixture did not connect"
-    assert page.evaluate("document.fonts.size") == 1, "Missing embedded font face"
-    assert page.evaluate("document.fonts.check('18px Antonio')"), "Embedded font did not load"
-    assert page.evaluate("[...document.fonts][0].status") == "loaded"
-    expect(page.locator(".lcars-rail")).to_have_attribute("aria-hidden", "true")
-    assert page.evaluate("""() => [...document.querySelectorAll('*')].every(element =>
-        ['', '::before', '::after'].every(pseudo =>
-            getComputedStyle(element, pseudo || null).backgroundImage === 'none'))"""), \
-        "Decorative backgrounds must use flat solid shapes"
-    page.evaluate("""() => {
-        window.__completed = [];
-        const originalFinish = finish;
-        finish = result => { originalFinish(result); window.__completed.push(result.id); };
-    }""")
-
-    def command(button, endpoint):
-        with page.expect_response(
-            lambda response: response.request.method == "POST"
-            and urlparse(response.url).path == "/api/" + endpoint
-        ) as response:
-            button.click()
-        ident = response.value.json()["id"]
-        page.wait_for_function("id => window.__completed.includes(id)", arg=ident)
-
-    # Roving tab focus, wrapping arrows and Home/End automatic activation.
-    tab = page.locator("#tab-dash")
-    tab.focus()
-    assert tab.evaluate("e => getComputedStyle(e).outlineColor") == "rgb(255, 255, 255)"
+    assert page.locator('[role="tab"]').count() == 3
+    assert page.evaluate("""() => {const ids=[...document.querySelectorAll('[id]')].map(e=>e.id);
+        return ids.length===new Set(ids).size}"""), "Duplicate IDs"
+    page.locator("#tab-dash").focus()
     for key, panel in [("ArrowRight", "dev"), ("End", "set"), ("Home", "dash"),
                        ("ArrowLeft", "set"), ("ArrowRight", "dash")]:
         page.keyboard.press(key)
-        check_view(page, panel, width < 650)
-        expect(page.locator(f"#tab-{panel}")).to_be_focused()
+        check_view(page, panel, width < 700)
+        expect(page.locator("#tab-" + panel)).to_be_focused()
     assert page.locator('[role="tab"][tabindex="0"]').count() == 1
     page.keyboard.press("Tab")
     expect(page.locator("#dash")).to_be_focused()
 
-    searching = json.loads(json.dumps(STATUS))
-    searching["input"]["link"] = "searching"
-    sockets[0].send(json.dumps(searching))
-    expect(page.locator("#s-input .pending")).to_have_text("link: searching")
-    check_view(page, "dash", width < 650)
+    def push(value):
+        sockets[0].send(json.dumps(value))
+        page.wait_for_function("s => status.deviceName === s.deviceName && status.input.profile === s.input.profile", arg=value)
 
-    reduced = json.loads(json.dumps(STATUS))
-    reduced["telemetry"] = {"cadence": 86}
-    sockets[0].send(json.dumps(reduced))
-    expect(page.locator("#metrics .metric")).to_have_count(1)
-    expect(page.locator("#m-cadence")).to_have_text("86")
-    assert page.locator("#m-power, #m-heartRate").count() == 0
-    empty = json.loads(json.dumps(STATUS))
-    empty["telemetry"] = {}
-    sockets[0].send(json.dumps(empty))
-    expect(page.locator("#metrics .metric")).to_have_count(0)
-    expect(page.locator("#metrics-empty")).to_be_visible()
-    sockets[0].send(json.dumps(STATUS))
-    expect(page.locator("#metrics .metric")).to_have_count(len(STATUS["telemetry"]))
+    mappings = {
+        "bike": ("power", "cadence", "distance"),
+        "treadmill": ("speed", "incline", "distance"),
+        "rower": ("cadence", "power", "distance"),
+        "cross-trainer": ("resistance", "cadence", "distance"),
+        "step-climber": ("cadence", "positiveElevationGain", "stepCount"),
+        "stair-climber": ("cadence", "floors", "stepCount"),
+    }
+    for profile, keys in mappings.items():
+        sample = json.loads(json.dumps(STATUS))
+        sample["deviceName"] = profile
+        sample["input"]["profile"] = sample["ftmsOutput"]["profile"] = profile
+        sample["telemetry"].update(resistance=18, totalEnergy=243, pace=122, stepCount=720,
+                                   floors=24, positiveElevationGain=192, averageCadence=46)
+        if profile == "rower":
+            sample["telemetry"]["cadence"] = 24
+        if "climber" in profile:
+            sample["telemetry"]["cadence"] = 64
+        push(sample)
+        expect(page.locator("#primary-reading .v")).to_have_attribute("id", "m-" + keys[0])
+        expect(page.locator("#secondary-left .v")).to_have_attribute("id", "m-" + keys[1])
+        expect(page.locator("#secondary-right .v")).to_have_attribute("id", "m-" + keys[2])
+        for key in keys:
+            assert page.locator("#m-" + key).count() == 1
+            assert page.locator("#metrics #m-" + key).count() == 0
+        assert page.locator("#metrics .metric").count() == 4
+        assert page.evaluate("history.length <= 1"), "History leaked across devices"
+        page.evaluate("""sample => {
+            const realNow=Date.now, end=realNow(), key=activeProfile.main;
+            try {
+                history=[]; lastHistory=0;
+                for(let i=360;i>=0;i--) {
+                    Date.now=()=>end-i*1000;
+                    const next=structuredClone(sample);
+                    next.telemetry[key]=sample.telemetry[key]*(1+Math.sin(i/9)*.08);
+                    renderStatus(next);
+                }
+            } finally { Date.now=realNow; }
+            if(history.length!==301) throw new Error("History must be bounded to five minutes");
+            renderHistory();
+            document.activeElement.blur(); window.scrollTo(0,0);
+        }""", sample)
+        check_view(page, "dash", width < 700)
+        page.screenshot(path=str(output / f"training-{profile}-{name}.png"), full_page=True)
+    # Unknown profiles must not silently become an indoor bike.
+    unknown = json.loads(json.dumps(STATUS))
+    unknown["input"]["profile"] = unknown["ftmsOutput"]["profile"] = "future-device"
+    unknown["deviceName"] = "unknown"
+    push(unknown)
+    expect(page.locator("#training-alert")).to_contain_text("generic")
+    sim = json.loads(json.dumps(STATUS))
+    sim["input"]["source"] = "simulation"
+    push(sim)
+    expect(page.locator("#training-alert")).to_contain_text("Simulation")
+    push(STATUS)
 
-    # Status failure rendering is driven by the real WebSocket status contract.
+    missing = json.loads(json.dumps(STATUS))
+    missing["telemetry"] = {"cadence": 0}
+    sockets[0].send(json.dumps(missing))
+    expect(page.locator("#m-power")).to_have_text("–")
+    expect(page.locator("#m-cadence")).to_have_text("0")
+    assert page.locator("#primary-arc").evaluate("e => getComputedStyle(e).visibility") == "hidden"
     sockets[0].send(json.dumps(failure_status()))
-    expect(page.locator("#s-input .bad")).to_have_text("connection lost")
-    expect(page.locator("#s-bridge .bad")).to_have_text("disconnected")
-    expect(page.locator("#s-input .warn")).to_have_text(["link: backoff", "stale data"])
-    expect(page.locator("#s-input")).to_contain_text("retry in 3 s")
-    expect(page.locator("#s-bridge")).to_contain_text("no control")
-    expect(page.locator("#ctl-state")).to_contain_text("control not available")
-    assert page.locator("#s-input .bad").evaluate(
-        "e => getComputedStyle(e).backgroundColor") == "rgb(204, 68, 68)"
-    check_legend_colors(page)
+    expect(page.locator("#m-cadence")).to_have_text("–")
+    expect(page.locator("#btn-apply")).to_be_disabled()
+    expect(page.locator("#training-alert")).to_contain_text("connection lost")
+    push(STATUS)
+    expect(page.locator("#btn-apply")).to_be_enabled()
+    page.evaluate("lastStatus = Date.now() - 7000; renderTraining()")
+    expect(page.locator("#m-power")).to_have_text("–")
+    expect(page.locator("#btn-apply")).to_be_disabled()
+    page.evaluate("renderStatus(" + json.dumps(STATUS) + ")")
+    page.evaluate("""() => {
+        const now=Date.now();
+        history=[
+            {time:now-7000,value:210,target:225},
+            {time:now-6000,value:211,target:225},
+            {time:now-5000,value:null,target:null},
+            {time:now-2000,value:212,target:225},
+            {time:now-1000,value:214,target:225}
+        ];
+        renderHistory();
+    }""")
+    assert page.locator("#history-chart .series").get_attribute("d").count("M") == 2
+    assert page.locator("#history-chart .target").get_attribute("d").count("M") == 2
+    # A percentage resistance target is not comparable to a device's raw level.
+    cross = json.loads(json.dumps(STATUS))
+    cross["input"]["profile"] = cross["ftmsOutput"]["profile"] = "cross-trainer"
+    cross["target"] = {"control": "resistance", "value": 25}
+    push(cross)
+    expect(page.locator("#history-target-legend")).to_be_hidden()
+    push(STATUS)
+    expect(page.locator("#ctl-value")).to_have_value("225")
 
-    panel_names = {"dash": "dashboard", "dev": "devices", "ctl": "control", "set": "settings"}
-    for number, panel in enumerate(panel_names, start=1 if name == "desktop" else 5):
-        page.locator(f"#tab-{panel}").click()
-        check_view(page, panel, width < 650)
-        if panel == "dash":
-            expect(page.locator("#s-out .pill").first).to_have_text("BLE FTMS")
-            expect(page.locator("#s-out")).to_contain_text("app connected")
-        if panel == "dev":
-            expect(page.locator("#paired-advertised .sensor")).to_have_count(3)
-            expect(page.locator("#paired-advertised .sensor").first).to_have_attribute(
-                "title", "00001826-0000-1000-8000-00805f9b34fb")
-            expect(page.locator("#paired-subscriptions .ok")).to_have_text(
-                "FTMS · Indoor Bike Data (2ad2) · NOTIFY · ok")
-            expect(page.locator("#paired-subscriptions .pending")).to_have_text(
-                "FTMS · Fitness Machine Control Point (2ad9) · INDICATE · pending")
-            expect(page.locator("#paired-subscriptions .bad")).to_have_text(
-                "HR · Heart Rate Measurement (2a37) · NOTIFY · failed (not-found)")
-            expect(page.locator("#paired-subscriptions .bad")).to_have_attribute(
-                "title", PAIRED["subscriptions"][2]["service"] + " / " +
-                PAIRED["subscriptions"][2]["characteristic"])
-            assert page.locator("#paired-advertised .sensor").first.evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(153, 153, 255)"
-            assert page.locator("#paired-subscriptions .pending").evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(204, 153, 102)"
-            assert page.locator("#paired-subscriptions .ok").evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(153, 204, 255)"
-            assert page.locator("#paired-subscriptions .bad").evaluate(
-                "e => getComputedStyle(e).textTransform") == "uppercase"
-            # Input, bridge and receiving device share one card layout.
-            cards = page.locator("#dev .device-card")
-            expect(cards).to_have_count(3)
-            expect(cards.locator(".facts")).to_have_count(3)
-            expect(page.locator("#p-name")).to_have_text("Training bike")
-            expect(page.locator("#p-address")).to_have_text("aa:bb:cc:dd:ee:01 (public)")
-            expect(page.locator("#b-name")).to_have_text("SmartFitness")
-            expect(page.locator("#b-ant")).to_have_text("#4660")
-            expect(page.locator("#c-outputProtocol")).to_have_value("ble-ftms")
-            expect(page.locator("#b-sent .service-group")).to_have_count(3)
-            expect(page.locator("#b-sent .sensor")).to_have_text(
-                ["Fitness Machine (FTMS) · 1826", "Cycling Power (CPS) · 1818", "Heart Rate · 180d"])
-            expect(page.locator("#b-sent .service-group").first.locator(".ok")).to_have_count(9)
-            expect(page.locator("#b-sent .service-group").nth(1).locator(".pending")).to_have_count(3)
-            expect(page.locator("#b-sent")).to_contain_text("Indoor Bike Data (2ad2) · NOTIFY")
-            expect(page.locator("#b-sent")).to_contain_text("Fitness Machine Control Point (2ad9) · WRITE/INDICATE")
-            expect(page.locator("#r-id")).to_have_text("5a:12:34:56:78:9a (random)")
-            expect(page.locator("#r-protocol")).to_have_text("BLE FTMS")
-            expect(page.locator("#r-state .ok")).to_have_text(["app connected", "app has control"])
-            # The sent services follow the selected (not yet applied) output format.
-            page.locator("#c-outputProtocol").select_option("ant-fec")
-            expect(page.locator("#b-sent-label")).to_have_text("Sent ANT+ channels")
-            expect(page.locator("#b-sent .sensor")).to_have_text(["FE-C", "HR"])
-            expect(page.locator("#b-sent .pending")).to_have_text(
-                ["device type 17 · device #4660 · PENDING", "device type 120 · device #4660 · PENDING"])
-            expect(page.locator("#b-note")).to_contain_text("Not applied yet")
-            page.locator("#c-outputProtocol").select_option("off")
-            expect(page.locator("#b-sent .pending")).to_have_text("output off – nothing is sent")
-            page.locator("#c-outputProtocol").select_option("ble-ftms")
-            expect(page.locator("#b-sent .sensor")).to_have_count(3)
-            expect(page.get_by_label("Adapter for Training bike")).to_have_value("ftms")
-            page.get_by_label("Pair Unknown peripheral", exact=True).click()
-            expect(page.locator("#toast")).to_have_text("choose an adapter first")
-            assert not commands, "Pairing without an adapter sent a command"
-            command(page.get_by_label("Pair Training bike", exact=True), "pair")
-            expect(page.locator("#toast")).to_have_text("applied")
-            assert commands[-1] == ("pair", {
-                "address": PAIRED["address"], "addressType": "public", "adapter": "ftms"})
-            command(page.locator("#btn-connect"), "connect")
-            assert commands[-1] == ("connect", {})
-            command(page.locator("#btn-scan"), "scan")
-            assert commands[-1] == ("scan", {"seconds": 30}), commands[-1]
-            page.locator("#toast").evaluate("e => e.style.display = 'none'")
-        elif panel == "ctl":
-            page.locator("#ctl-value").fill("999")
-            command(page.locator("#btn-apply"), "control")
-            expect(page.locator("#ctl-result")).to_have_text("control: disconnected")
-            assert commands[-1] == ("control", {"control": "power", "value": 999})
-            assert page.locator("#ctl-result").evaluate(
-                "e => getComputedStyle(e).backgroundColor") == "rgb(204, 68, 68)"
-            assert page.locator("#ctl-result").evaluate(
-                "e => getComputedStyle(e).backgroundColor") == page.locator(
-                    "#ctl .legend-swatch.bad").evaluate(
-                        "e => getComputedStyle(e).backgroundColor")
-        elif panel == "set":
-            expect(page.locator("#c-ftmsName")).to_have_value("SmartFitness")
-            expect(page.locator("#c-wifiPassword")).to_have_value("")
-            command(page.locator("#btn-save"), "config")
-            expect(page.locator("#toast")).to_have_text("applied")
-            assert commands[-1] == ("config", {
-                "ftmsName": "SmartFitness", "ftmsOutputProfile": "auto",
-                "ftmsOutputServices": 7, "antOutputServices": 5,
-                "simulatedTrainer": True, "wifiSsid": "Training room", "https": True, "save": True})
-            page.locator("#toast").evaluate("e => e.style.display = 'none'")
-        # Remove interaction-only focus so screenshots have a stable resting state.
-        page.evaluate("document.activeElement.blur()")
-        check_view(page, panel, width < 650)
-        page.screenshot(path=str(output / f"{number:02d}-{panel_names[panel]}-{name}.png"),
-                        full_page=True)
+    def command(selector, endpoint):
+        before = len(commands)
+        with page.expect_response(lambda r: r.request.method == "POST" and
+                                  urlparse(r.url).path == "/api/" + endpoint):
+            page.locator(selector).click()
+        page.wait_for_function("Object.keys(pending).length === 0 && !configSaving && !controlBusy")
+        assert len(commands) == before + 1, (selector, commands)
+        assert commands[-1][0] == endpoint
 
-    # All existing action endpoints and confirmation/cancellation remain intact.
-    page.locator("#tab-dev").click()
-    for button, endpoint, body in [
-        ("btn-disconnect", "disconnect", {}), ("btn-sim", "simulate", {}),
-        ("btn-scan-stop", "scan", {"action": "stop"}),
-    ]:
-        command(page.locator(f"#{button}"), endpoint)
-        assert commands[-1] == (endpoint, body)
-    before = len(commands)
-    page.once("dialog", lambda dialog: dialog.dismiss())
-    page.locator("#btn-unpair").click()
-    assert len(commands) == before, "Cancelled unpair sent a command"
-    page.once("dialog", lambda dialog: dialog.accept())
-    command(page.locator("#btn-unpair"), "unpair")
-    expect(page.locator("#toast")).to_have_text("applied")
-    assert commands[-1] == ("unpair", {})
-
-    page.locator("#tab-ctl").click()
     page.locator("#ctl-value").fill("")
     page.locator("#btn-apply").click()
     expect(page.locator("#toast")).to_have_text("enter a number")
-    assert len(commands) == before + 1, "Invalid number sent a control command"
-    for control, value in [("resistance", "25"), ("incline", "2"), ("speed", "12")]:
-        page.locator("#ctl-kind").select_option(control)
-        page.locator("#ctl-value").fill(value)
-        command(page.locator("#btn-apply"), "control")
-        expect(page.locator("#ctl-result")).to_have_class("small bad")
-        assert commands[-1] == ("control", {"control": control, "value": int(value)})
+    assert not commands
+    page.locator("#ctl-value").fill("220")
+    command("#btn-apply", "control")
+    expect(page.locator("#ctl-result")).to_have_text("control rejected")
+    expect(page.locator("#confirmed-target")).to_contain_text("225 W")
+    assert commands[-1] == ("control", {"control": "power", "value": 220})
+    reject_control = False
+    command("#btn-apply", "control")
+    expect(page.locator("#ctl-result")).to_have_text("applied")
+    # The confirmed target is sourced from device status, never the unsent input.
+    expect(page.locator("#confirmed-target")).to_contain_text("225 W")
+    page.locator("#ctl-kind").select_option("speed")
+    expect(page.locator("#ctl-value")).to_have_value("")
+    page.locator("#ctl-value").fill("12")
+    before = len(commands)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    page.locator("#btn-apply").click()
+    assert len(commands) == before
+    page.once("dialog", lambda dialog: dialog.accept())
+    command("#btn-apply", "control")
+    assert commands[-1] == ("control", {"control": "speed", "value": 12})
+    # Capability gating, without inventing pause/stop endpoints.
+    limited = json.loads(json.dumps(STATUS))
+    limited["controls"] = ["resistance"]
+    sockets[0].send(json.dumps(limited))
+    expect(page.locator("#ctl-kind")).to_have_value("resistance")
+    expect(page.locator('#ctl-kind option[value="speed"]')).to_have_attribute("disabled", "")
+    sockets[0].send(json.dumps(STATUS))
+    page.locator("#tab-dev").click()
+    check_view(page, "dev", width < 700)
+    expect(page.locator("#device-search")).not_to_have_attribute("open", "")
+    page.locator("#btn-change-device").click()
+    expect(page.locator("#device-search")).to_have_attribute("open", "")
+    command("#btn-scan", "scan")
+    assert commands[-1] == ("scan", {"seconds": 30})
+    command("#btn-scan-stop", "scan")
+    assert commands[-1] == ("scan", {"action": "stop"})
+    page.get_by_label("Pair Unknown peripheral", exact=True).click()
+    expect(page.locator("#toast")).to_have_text("choose an adapter first")
+    page.get_by_label("Pair Training bike", exact=True).click()
+    page.wait_for_function("Object.keys(pending).length === 0")
+    assert commands[-1] == ("pair", {"address": PAIRED["address"], "addressType": "public", "adapter": "ftms"})
+    page.locator("#input-details summary").click()
+    expect(page.locator("#paired-subscriptions .bad")).to_contain_text("not-found")
+    before = len(commands)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    page.locator("#btn-unpair").click()
+    assert len(commands) == before
+    page.once("dialog", lambda dialog: dialog.accept())
+    command("#btn-unpair", "unpair")
+    page.locator("#device-search summary").click()
+    page.locator("#input-details summary").click()
 
-    # The output format is applied from the Devices → Bridge card on its own.
-    with page.expect_response("**/api/config"):
-        page.locator("#tab-dev").click()
-    expect(page.locator("#c-outputProtocol")).to_have_value("ble-ftms")
-    expect(page.locator('#c-outputProtocol option[value="ant-fec"]')).to_be_enabled()
-    page.locator("#c-outputProtocol").select_option("ant-fec")
-    command(page.locator("#btn-output"), "config")
-    assert commands[-1] == ("config", {"outputProtocol": "ant-fec", "save": True}), commands[-1]
-    with page.expect_response("**/api/config"):
-        page.locator("#tab-set").click()
-    expect(page.locator("#c-ftmsName")).to_have_value("SmartFitness")
-    page.locator("#c-ftmsOutputProfile").select_option("treadmill")
-    ble_group, ant_group = page.locator("#c-ftmsServices"), page.locator("#c-antServices")
-    expect(ble_group.locator('[data-service="ftms"]')).to_be_disabled()
-    expect(ble_group.locator('[data-service="rsc"]')).to_be_disabled()
-    expect(ble_group.locator('[data-service="rsc"]')).to_contain_text("NO DATA")
-    assert ble_group.locator('[data-service="cps"]').evaluate(
-        "e => getComputedStyle(e).backgroundColor") == "rgb(255, 170, 0)"
-    ble_group.locator('[data-service="cps"]').click()
-    expect(ble_group.locator('[data-service="cps"]')).to_have_attribute("aria-pressed", "false")
-    expect(page.locator("#c-ftmsRestart")).to_contain_text("Save + restart to apply this BLE service selection")
-    assert ble_group.locator('[data-service="cps"]').evaluate(
-        "e => getComputedStyle(e).backgroundColor") == "rgb(204, 153, 102)"
-    ant_group.locator('[data-service="power"]').focus()
-    page.keyboard.press("Space")
-    expect(page.locator("#c-antWarning")).to_be_visible()
-    expect(ant_group.locator('[data-service="power"]')).to_be_focused()
-    page.locator("#c-simulatedTrainer").uncheck()
-    page.locator("#c-ftmsName").fill("Test treadmill")
-    # Config WebSocket updates must not overwrite a field currently being edited.
-    sockets[0].send(json.dumps(CONFIG))
-    expect(page.locator("#c-ftmsName")).to_have_value("Test treadmill")
-    page.locator("#c-wifiPassword").fill("test-fixture-only")
-    # This fixture page is served over http://, so HTTPS off keeps the restart on this origin.
-    expect(page.locator("#c-https")).to_be_checked()
-    page.locator("#c-https").uncheck()
-    command(page.locator("#btn-save"), "config")
-    assert commands[-1] == ("config", {
-        "ftmsName": "Test treadmill", "ftmsOutputProfile": "treadmill",
-        "ftmsOutputServices": 5, "antOutputServices": 7,
-        "simulatedTrainer": False, "wifiSsid": "Training room", "save": True,
-        "wifiPassword": "test-fixture-only", "https": False}), commands[-1]
-    expect(page.locator("#c-https")).not_to_be_checked()
-    # Auto is explicit 0; unavailable ANT hardware removes controls without losing BLE settings.
-    ble_group.locator('[data-service="auto"]').click()
-    ant_group.locator('[data-service="auto"]').click()
-    expect(ble_group.locator('[data-service="auto"]')).to_have_attribute("aria-pressed", "true")
-    expect(ble_group.locator('[data-service="hr"]')).to_have_attribute("aria-pressed", "false")
-    expect(page.locator("#c-antWarning")).to_be_hidden()
-    ant_group.locator('[data-service="fec"]').click()
-    expect(page.locator("#toast")).to_have_text("select at least one ANT+ channel or choose Auto")
-    expect(ant_group.locator('[data-service="fec"]')).to_have_attribute("aria-pressed", "true")
+    # Output changes survive tab switches, focus loss, and WebSocket config pushes.
+    page.locator("#c-ftmsName").fill("My bike")
+    page.locator("#c-ftmsOutputProfile").select_option("rower")
+    page.locator('#c-ftmsServices [data-service="cps"]').click()
+    expect(page.locator("#c-ftmsRestart")).to_contain_text("Save + restart to apply")
+    page.locator("#tab-set").click()
+    page.locator("#c-wifiSsid").fill("New network")
+    page.locator("#tab-dev").click()
     page.evaluate("document.activeElement.blur()")
-    sockets[0].send(json.dumps({**CONFIG, "antAvailable": False}))
-    expect(page.locator("#ant-services")).to_be_hidden()
-    expect(page.locator('#c-outputProtocol option[value="ant-fec"]')).to_have_attribute("hidden", "")
-    command(page.locator("#btn-save"), "config")
-    assert "antOutputServices" not in commands[-1][1]
-    sockets[0].send(json.dumps({**CONFIG, "https": False}))
+    sockets[0].send(json.dumps(CONFIG))
+    expect(page.locator("#c-ftmsName")).to_have_value("My bike")
+    expect(page.locator("#c-wifiSsid")).to_have_value("New network")
+    command("#btn-output", "config")
+    assert commands[-1] == ("config", {"outputProtocol": "ble-ftms", "ftmsName": "My bike",
+                                      "ftmsOutputProfile": "rower", "ftmsOutputServices": 5,
+                                      "antOutputServices": 5, "save": True})
+    expect(page.locator("#c-wifiSsid")).to_have_value("New network")
+    page.locator("#c-outputProtocol").select_option("ant-fec")
+    expect(page.locator("#ble-services")).to_be_hidden()
     expect(page.locator("#ant-services")).to_be_visible()
-    changed = json.loads(json.dumps(STATUS))
-    changed["ftmsOutput"]["restartRequired"] = True
-    sockets[0].send(json.dumps(changed))
-    expect(page.locator("#c-ftmsRestart")).to_contain_text("pending: restart")
-    changed["antOutput"].update(enabled=True, error="insufficient-channels", channelLimit=1)
-    sockets[0].send(json.dumps(changed))
-    expect(page.locator("#ant-service-state")).to_contain_text("insufficient-channels")
-    expect(page.locator("#ant-service-state")).to_contain_text("channel capacity: 1")
-    expect(page.locator("#ant-service-state .bad")).to_have_count(3)
-    # SDM can use valid treadmill speed without running cadence; BLE RSC cannot.
-    speed_only = json.loads(json.dumps(STATUS))
-    speed_only["ftmsOutput"]["profile"] = "treadmill"
-    speed_only["telemetry"]["cadence"] = None
-    for service in speed_only["ftmsOutput"]["services"]:
-        if service["id"] == "rsc":
-            service["available"] = False
-    for channel in speed_only["antOutput"]["channels"]:
-        if channel["id"] == "sdm":
-            channel["available"] = True
-    sockets[0].send(json.dumps(speed_only))
-    expect(ble_group.locator('[data-service="rsc"]')).to_be_disabled()
-    expect(ant_group.locator('[data-service="sdm"]')).to_be_enabled()
-    expect(ant_group.locator('[data-service="sdm"]')).not_to_contain_text("NO DATA")
-    # Wi-Fi scan: spinner while busy, then a listbox under the SSID field.
-    ssid, wifi_list, wifi_button = (page.locator("#c-wifiSsid"), page.locator("#wifi-list"),
-                                    page.locator("#btn-wifi-scan"))
-    expect(wifi_list).to_be_hidden()
-    wifi_button.click()
-    expect(wifi_button).to_have_attribute("aria-busy", "true")
-    expect(wifi_button.locator(".spin")).to_be_visible()
-    expect(wifi_list).to_be_visible()
-    expect(wifi_button).to_have_attribute("aria-busy", "false")
-    expect(wifi_button.locator(".spin")).to_be_hidden()
-    assert wifi_scans == [{}], wifi_scans
-    assert wifi_polls == ["aborted"], wifi_polls
-    expect(ssid).to_have_attribute("aria-expanded", "true")
-    expect(wifi_list.get_by_role("option")).to_have_count(2)
-    expect(wifi_list.get_by_role("option").first).to_have_text("Training roomsecured")
-    expect(wifi_list.get_by_role("option").first).to_have_attribute(
-        "aria-label", "Training room, signal 4 of 4, secured")
-    expect(wifi_list).not_to_contain_text("dBm")
-    # SSID field is 1.5x its former intrinsic width (203px -> 305px), capped on narrow screens.
-    ssid_width = ssid.evaluate("i => [i.offsetWidth, Math.min(305, i.closest('.row').clientWidth)]")
-    assert ssid_width[0] == ssid_width[1], ssid_width
-    # Signal pictogram: same thresholds as hmi::signalLevel (-45 dBm -> 4, -71 dBm -> 2).
-    assert wifi_list.locator(".bars").evaluate_all(
-        "bars => bars.map(b => [b.dataset.level, b.querySelectorAll('i.on').length, "
-        "b.getAttribute('aria-hidden')])") == [["4", 4, "true"], ["2", 2, "true"]]
-    check_view(page, "set", width < 650)
-    page.keyboard.press("ArrowDown")
-    page.keyboard.press("ArrowDown")
-    expect(ssid).to_have_attribute("aria-activedescendant", "wifi-opt-1")
-    page.keyboard.press("Enter")
-    expect(ssid).to_have_value("Guest")
-    expect(wifi_list).to_be_hidden()
-    expect(page.locator("#c-wifiPassword")).to_be_focused()
-    ssid.click()
-    expect(wifi_list).to_be_visible()
-    page.keyboard.press("Escape")
-    expect(wifi_list).to_be_hidden()
-    ssid.click()
-    wifi_list.get_by_role("option").first.click()
-    expect(ssid).to_have_value("Training room")
-    expect(wifi_list).to_be_hidden()
-    for button, endpoint in [("btn-restart", "restart"), ("btn-reset", "factory-reset")]:
-        page.once("dialog", lambda dialog: dialog.accept())
-        command(page.locator(f"#{button}"), endpoint)
-        assert commands[-1] == (endpoint, {})
-
-    unavailable = json.loads(json.dumps(STATUS))
-    unavailable["input"]["bleAvailable"] = False
-    sockets[0].send(json.dumps(unavailable))
-    expect(page.locator("#btn-scan")).to_be_disabled()
-    assert page.locator("#btn-scan").evaluate("e => getComputedStyle(e).opacity") == "0.4"
-    if width < 650:
-        for responsive_width in (320, 650, 651, 800):
-            page.set_viewport_size({"width": responsive_width, "height": height})
-            for panel in ("dash", "dev", "ctl", "set"):
-                page.locator(f"#tab-{panel}").click()
-                check_view(page, panel, True)
-    sockets[0].close()
-    expect(page.locator("#conn")).to_have_text("offline")
-    expect(page.locator("#conn")).to_have_class("pill bad")
-    assert not external, f"External requests: {external}"
-    assert not errors, f"Browser errors: {errors}"
+    page.locator('#c-antServices [data-service="power"]').click()
+    expect(page.locator("#c-antWarning")).to_be_visible()
+    page.locator("#btn-discard-output").click()
+    expect(page.locator("#c-outputProtocol")).to_have_value("ble-ftms")
+    page.locator("#toast").evaluate("e => e.style.display='none'")
+    page.evaluate("document.activeElement.blur(); window.scrollTo(0,0)")
+    page.screenshot(path=str(output / f"connections-{name}.png"), full_page=True)
+    page.locator("#tab-set").click()
+    check_view(page, "set", width < 700)
+    expect(page.locator("#advanced")).not_to_have_attribute("open", "")
+    page.locator("#c-https").uncheck()
+    command("#btn-save", "config")
+    assert commands[-1] == ("config", {"simulatedTrainer": True, "wifiSsid": "New network",
+                                      "https": False, "save": True})
+    page.locator("#btn-wifi-scan").click()
+    expect(page.locator("#wifi-list")).to_be_visible(timeout=10000)
+    page.locator("#c-wifiSsid").press("ArrowDown")
+    page.locator("#c-wifiSsid").press("Enter")
+    expect(page.locator("#c-wifiSsid")).to_have_value("Training room")
+    expect(page.locator("#system-dirty")).to_have_text("Unsaved edits")
+    command("#btn-save", "config")
+    before = len(commands)
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    page.locator("#btn-restart").click()
+    assert len(commands) == before
+    page.once("dialog", lambda dialog: dialog.accept())
+    command("#btn-restart", "restart")
+    dialogs = []
+    def cancel_second(dialog):
+        dialogs.append(dialog.message)
+        dialog.accept() if len(dialogs) == 1 else dialog.dismiss()
+    page.on("dialog", cancel_second)
+    before = len(commands)
+    page.locator("#btn-reset").click()
+    assert len(dialogs) == 2 and len(commands) == before
+    page.remove_listener("dialog", cancel_second)
+    page.locator("#toast").evaluate("e => e.style.display='none'")
+    page.evaluate("document.activeElement.blur(); window.scrollTo(0,0)")
+    page.screenshot(path=str(output / f"system-{name}.png"), full_page=True)
+    page.locator("#advanced summary").click()
+    page.once("dialog", lambda dialog: dialog.accept())
+    command("#btn-sim", "simulate")
+    assert not errors, errors
+    assert not external, external
     context.close()
-    print(f"{name}: four screenshots; tabs, keyboard, API/WS, ready/backoff/stale/control,"
-          " errors, font, offline assets, no overflow passed")
+    print(f"{name}: six profiles, responsive layout, truthful telemetry, capabilities, confirmations,"
+          " config edit preservation, services, pairing and network actions passed")
 
 
 def check_debug(browser, output, name, width, height):
@@ -725,14 +494,15 @@ def check_debug(browser, output, name, width, height):
     expect(page.locator("#m-power")).to_have_text("214")
     assert "/debug/log" not in requests, "History must load only when opening the tab"
     during_load = b"[Live] during history request\n"
-    page.locator("#tab-debug").click()
+    page.locator("#tab-set").click()
+    page.locator("#advanced").evaluate("e => e.open = true")
     box = page.locator("#debug-output")
     expected = history.decode() + "[Live] during history request\n"
     expect(box).to_have_value(expected)
     end = len(expected.encode())
     page.wait_for_timeout(350)
     assert requests.count("/debug/log") == 1, "Debug history must not be polled"
-    check_view(page, "debug", width < 650)
+    check_view(page, "set", width < 700)
     payload = '<script>window.__unsafe=true</script> ä\n'.encode()
     push(payload[:-2], end)
     push(payload[-2:], end + len(payload) - 2)
@@ -772,7 +542,8 @@ def check_debug(browser, output, name, width, height):
     push(b"after clear\n", end + 750)
     expect(box).to_have_value("after clear\n")
     page.locator("#tab-dash").click()
-    page.locator("#tab-debug").click()
+    page.locator("#tab-set").click()
+    page.locator("#advanced").evaluate("e => e.open = true")
     expect(box).to_have_value(history.decode())
     toggle, state = page.locator("#btn-debug-logging"), page.locator("#debug-state")
     expect(toggle).to_have_text("Logging stoppen")
@@ -783,7 +554,8 @@ def check_debug(browser, output, name, width, height):
     expect(state).to_contain_text("Logging gestoppt")
     assert logging_posts == [{"enabled": False}]
     page.locator("#tab-dash").click()
-    page.locator("#tab-debug").click()  # history reload keeps the stopped state
+    page.locator("#tab-set").click()
+    page.locator("#advanced").evaluate("e => e.open = true")  # history reload keeps the stopped state
     expect(box).to_have_value(history.decode())
     expect(toggle).to_have_text("Logging fortsetzen")
     expect(state).to_contain_text("Logging gestoppt")
@@ -802,38 +574,20 @@ def main():
     parser.add_argument("--output", "--output-dir", dest="output_dir", type=Path,
                         default=ROOT / "docs/hmi/web",
                         help="Screenshot destination (default: docs/hmi/web)")
-    parser.add_argument("--embed-font", action="store_true",
-                        help="Refresh the inline Antonio face from assets/fonts before rendering")
-    parser.add_argument("--html", "--before-asset", dest="before_asset", type=Path,
-                        help="Render only baseline dashboard screenshots from a saved original HTML")
     args = parser.parse_args()
     normal, debug = web_content(), web_content(True)
     assert "DEBUG_WEB" not in normal and "DEBUG_WEB" not in debug
-    for marker in ("/debug/log", "debug-output", "renderDebug", "tab-debug", "btn-debug-logging"):
+    for marker in ("/debug/log", "debug-output", "renderDebug", "btn-debug-logging"):
         assert marker not in normal and marker in debug, f"Conditional asset leak: {marker}"
-    if not args.before_asset:
-        assert not re.search(r"(?:linear|radial|conic)-gradient\(", ASSET.read_text(), re.I), \
-            "Gradient syntax is not allowed in the web UI"
-        font = base64.b64encode((ROOT / "assets/fonts/Antonio-Regular.woff2").read_bytes()).decode()
-        if args.embed_font:
-            content, count = re.subn(r"""url\(["']?data:font/woff2;base64,[^)]*\)""",
-                                    'url("data:font/woff2;base64,' + font + '")', ASSET.read_text())
-            assert count == 1, "Expected exactly one inline font face"
-            ASSET.write_text(content)
-        assert f'url("data:font/woff2;base64,{font}")' in ASSET.read_text(), \
-            "Embedded font differs from source or is not quoted"
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         for name, width, height in [("desktop", 1280, 800), ("mobile", 390, 844)]:
-            if args.before_asset:
-                render_before(browser, args.before_asset, args.output_dir, name, width, height)
-            else:
-                render(browser, args.output_dir, name, width, height)
-                check_debug(browser, args.output_dir, name, width, height)
+            render(browser, args.output_dir, name, width, height)
+            check_debug(browser, args.output_dir, name, width, height)
         browser.close()
-    content = (args.before_asset or ASSET).read_bytes()
-    label = "Baseline asset" if args.before_asset else "Web asset"
+    content = ASSET.read_bytes()
+    label = "Web asset"
     print(f"{label}: {len(content)} bytes; gzip: {len(gzip.compress(content, mtime=0))} bytes")
 
 

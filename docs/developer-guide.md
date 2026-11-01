@@ -65,15 +65,17 @@ never starts Wi-Fi.
 
 ## User interfaces
 
-Both variants share an **LCARS-inspired** palette, Antonio typography, swept
-frames, pill controls and telemetry gauges. Existing commands and safety
-confirmations are unchanged. The screenshots are simulator/browser renders, not
+The round HMI retains its **LCARS-inspired** palette and Antonio typography.
+The web interface uses dark cards, system typography, sport-specific accents,
+and three areas: **Training**, **Connections**, and **System**. Training combines
+telemetry with compact target controls; diagnostics are under **System → Advanced**.
+The shared command/API contract is unchanged. The screenshots are simulator/browser renders, not
 photographs; for hardware test status see
 [Overview and project status](#overview-and-project-status).
 
 ![Round HMI dashboard](hmi/hmi/01-dashboard-bike.png)
 ![Round HMI speed confirmation](hmi/hmi/10-confirm-speed.png)
-![Web dashboard](hmi/web/01-dashboard-desktop.png)
+![Web dashboard](hmi/web/training-bike-desktop.png)
 
 [Design system, HMI/web galleries and regeneration instructions](hmi/README.md).
 
@@ -120,15 +122,15 @@ pio run -e crowpanel128   # HMI variant
 
 Uncomment `-DDEBUG_WEB` in the `esp32s3dev` environment's `build_flags` in
 `platformio.ini`, then rebuild and flash. This captures queued application logs
-and ESP-IDF logs in the **Debug** tab. The tab loads the current log
+and ESP-IDF logs under **System → Advanced → Diagnostics**. Opening the area loads the current log
 when opened and receives new output over the existing WebSocket (no polling).
 **Logfile herunterladen** downloads `/debug/log` as `debug.log`;
 **Anzeige leeren** only clears the browser display.
 **Logging stoppen** (`POST /debug/logging` with `{"enabled":false}`) stops the
-Debug-tab output and writes no further entries to `/debug.log` until
+diagnostic output and writes no further entries to `/debug.log` until
 **Logging fortsetzen** is pressed; the Serial console keeps logging. The stop and
 resume are marked in the log, and logging is enabled again after every reboot.
-Every line in `/debug.log`, the Debug tab and the Serial console starts with the
+Every line in `/debug.log`, the Diagnostics area and the Serial console starts with the
 uptime since boot as `HH:MM:SS.mmm` (e.g. `00:12:34.567 [BLE] connected; ...`).
 The output includes state changes for BLE input, FTMS/ANT output, bridge source
 and output selection, Wi-Fi, executed API commands, and WebSocket clients.
@@ -142,7 +144,7 @@ log from ISRs. NimBLE-Arduino 1.4.3 uses `console_printf` for its Arduino logs
 (rather than ESP-IDF `esp_log`), so those remain on UART; its level is limited
 to warnings/errors to avoid flooding the console.
 
-BLE diagnostics use these prefixes in both the Debug tab and LittleFS
+BLE diagnostics use these prefixes in both the Diagnostics area and LittleFS
 `/debug.log` (download via `/debug/log`):
 
 ```text
@@ -176,7 +178,7 @@ the BLE drop counters when diagnosing missing packets.
 All these diagnostics, formatters and additional subscriptions compile out
 unless both `ARDUINO` and `DEBUG_WEB` are defined; normal host tests are unchanged.
 
-ANT+ diagnostics use the same `DEBUG_WEB` flag, Debug tab, and downloadable log
+ANT+ diagnostics use the same `DEBUG_WEB` flag, Diagnostics area, and downloadable log
 (USB stick or UART radio). They trace complete ANT serial messages at the shared
 output layer, including received FE-C display controls:
 
@@ -407,7 +409,7 @@ The diagram shows the web variant; in the HMI variant the Wi-Fi block is absent 
    UI; if not, open **`https://192.168.4.1/`** (or the AP IP printed on Serial).
    The browser warns about the self-signed certificate once; see
    [HTTPS and the self-signed certificate](#https-and-the-self-signed-certificate).
-3. Open **Settings**, enter the home Wi-Fi SSID and password, and choose a new AP
+3. Open **System**, enter the home Wi-Fi SSID and password, and choose a new AP
    password (8–63 printable ASCII characters). Click **Save**, wait for the result,
    then **Restart**. Console equivalent:
    ```text
@@ -443,7 +445,7 @@ Wi-Fi/AP edits (including factory reset) require a restart to change the running
 
 ### HTTPS and the self-signed certificate
 
-- HTTPS is **on by default** and can be switched off in **Settings → HTTPS**
+- HTTPS is **on by default** and can be switched off in **System → HTTPS**
   (or console `https off`, then `save` and `restart`; API `{"https":false,"save":true}`).
   The change applies after a restart; the settings page then opens the new
   address itself. With HTTPS off the web UI, REST API and WebSocket
@@ -693,11 +695,17 @@ except pairing/unpairing, which persist their own changes immediately.
 
 ## Web interface
 ### Using the UI
-The single-page app (`src/variants/web/assets/index.html`, web variant only, plain HTML/JS/CSS, gzipped into flash at build time by `scripts/embed_web_assets.py`, no external resources) has four tabs:
-- **Dashboard:** live power, cadence, speed, heart rate, incline, control target, input/link/stale state, active input profile, effective output profile, trainer/control state and the active output (BLE FTMS client state, or ANT+ stick/channel/display state) (WebSocket, ≤ 4 Hz).
-- **Devices:** pairing walkthrough – 1. *Scan* (put the equipment into pairing mode and disconnect it from other apps first), 2. pick a result (name, RSSI, detected type, services), optionally change the adapter type, 3. *Pair*. The pairing is saved immediately and reconnected on boot. Advertised services and actual notify/indicate subscriptions are separate pills; subscription state is **OK**, **PENDING** or **FAILED** (not inferred from advertisements). Hover a pill for full service/characteristic UUIDs. *Disconnect*, *Connect* and *Unpair* are on the same page; *Use simulation* switches to the simulated device. Below the paired device, cards in the same layout (facts, pills, legend) show the **Bridge** – its BLE (FTMS) name, ANT+ device number and the *Output format* selection (*BLE FTMS*, *ANT+ FE-C* – hidden without an ANT transport – or *Off*; *Apply* saves it) with the services/characteristics (BLE: service and characteristic UUIDs with READ/NOTIFY/WRITE/INDICATE) or ANT+ channels (device type and number) sent for the selected format – and the **Receiving device**: the connected BLE app's address (BLE centrals send no name) or the ANT+ display state (ANT+ displays transmit no device number of their own).
-- **Control:** set target power/resistance/incline/speed; the result (`applied`, `not a trainer`, `unsupported control`, …) is shown.
-- **Settings:** BLE service and ANT+ channel pills, FTMS name, output machine-profile override (applies to FTMS and FE-C), Wi-Fi credentials (*Scan* next to the SSID field searches nearby networks for 15 s and offers them in a drop-down with the same four-bar signal pictogram as the HMI scan list), AP password, HTTPS on/off (applied after restart), save, factory reset, restart and firmware version. Selected services are golden, off/pending tan; **NO DATA** choices are disabled. **Auto** preserves the original FTMS/FE-C-only behavior. FTMS is mandatory for an explicit BLE selection; ANT+ may use sensor-only channels. **Save and restart** to apply a changed BLE GATT topology, then re-pair clients that cache services; Save alone persists the preference but does not rebuild an initialized server. Selecting both FE-C and Power warns about duplicate power sources.
+The single-page app (`src/variants/web/assets/index.html`, web variant only, plain
+HTML/JS/CSS, gzipped into flash by `scripts/embed_web_assets.py`, no external
+resources) has three tabs:
+
+- **Training:** all six effective machine profiles have a primary arc, two secondary values, four metric cards and a five-minute browser-local history. Values appear once. Missing or stale readings show `–`. Compact power/resistance/incline/speed controls follow `controls` and `canControl`; the asynchronous result is separate from the confirmed target. Speed changes require confirmation. Pause/Stop are omitted because the web API has no such commands.
+- **Connections:** add/change device opens scan and adapter selection; pairing is saved immediately. Technical details separate advertised services from actual subscription state. The bridge output card groups name, format, profile and BLE services/ANT+ channels with one Save output action. Unavailable services remain disabled; Auto retains baseline FTMS/FE-C-only behavior. BLE topology changes still require save, restart and client re-pairing. FE-C plus Power warns about duplicate power sources. Receiving app connection and control ownership are displayed separately.
+- **System:** Wi-Fi scan/credentials, AP password, HTTPS, restart, factory reset and firmware. Network changes apply after restart. Output and system edits are tracked separately and preserved across navigation and WebSocket configuration updates. Factory reset has two confirmations. **Advanced** is collapsed by default and contains simulation and, in `DEBUG_WEB` builds, diagnostic logs.
+
+The [web design and gallery](hmi/README.md#web-design) describe responsive layouts,
+metric units, profile mapping and history limits. All history is collected from
+observed status messages, not synthesized or stored on the ESP32.
 
 ## REST / WebSocket API
 
