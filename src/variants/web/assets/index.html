@@ -360,12 +360,18 @@ function bars(rssi){const b=el("span",null,"bars"),level=signalLevel(rssi);b.set
  for(let k=0;k<4;k++)b.append(el("i",null,k<level?"on":""));return b}
 function renderWifi(nets){wifiNets=nets;fill(wifiList,nets.map((n,i)=>{const li=el("li");li.id="wifi-opt-"+i;li.setAttribute("role","option");li.setAttribute("aria-selected","false");
  const sec=n.secure?"secured":"open";li.setAttribute("aria-label",n.ssid+", signal "+signalLevel(n.rssi)+" of 4, "+sec);
- li.append(bars(n.rssi),el("span",n.ssid,"ssid"),el("span",sec,"small"));li.onmousedown=e=>e.preventDefault();li.onclick=()=>wifiPick(n);return li}))}
+ li.append(bars(n.rssi),el("span",n.ssid,"ssid"),el("span",sec,"small"));li.onclick=()=>wifiPick(n);return li}))}
 ssid.onkeydown=e=>{const items=wifiList.children,i=[...items].findIndex(li=>li.getAttribute("aria-selected")==="true");
  if(e.key==="ArrowDown"||e.key==="ArrowUp"){if(!wifiNets.length)return;e.preventDefault();if(wifiList.hidden){wifiOpen(true);wifiMark(e.key==="ArrowDown"?0:items.length-1);return}
   wifiMark(e.key==="ArrowDown"?(i+1)%items.length:(i<=0?items.length:i)-1)}
  else if(e.key==="Enter"&&!wifiList.hidden&&i>=0){e.preventDefault();wifiPick(wifiNets[i])}else if(e.key==="Escape"&&!wifiList.hidden){e.preventDefault();wifiOpen(false)}};
-ssid.onclick=()=>wifiOpen(wifiList.hidden);ssid.oninput=()=>wifiOpen(false);ssid.onblur=()=>wifiOpen(false);
+// Item presses keep input focus. A press on the list itself hits its scrollbar: let it scroll natively,
+// ignore the resulting blur and return focus once released. Without a mouseup, the next press elsewhere closes.
+let wifiDrag=false;
+wifiList.onmousedown=e=>{if(e.target!==wifiList)e.preventDefault()};
+addEventListener("mousedown",e=>{wifiDrag=e.target===wifiList;if(!wifiDrag&&document.activeElement!==ssid&&!wifiList.contains(e.target))wifiOpen(false)},true);
+addEventListener("mouseup",()=>{if(wifiDrag){wifiDrag=false;ssid.focus({preventScroll:true})}},true);
+ssid.onclick=()=>wifiOpen(wifiList.hidden);ssid.oninput=()=>wifiOpen(false);ssid.onblur=()=>{if(!wifiDrag)wifiOpen(false)};
 $("btn-wifi-scan").onclick=async()=>{const b=$("btn-wifi-scan");if(b.getAttribute("aria-busy")==="true")return;b.setAttribute("aria-busy","true");wifiOpen(false);
  try{const r=await fetch("/api/wifi-scan",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
   if(r.status!==202){const j=await r.json().catch(()=>({}));throw new Error(j.error||("HTTP "+r.status))}

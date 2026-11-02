@@ -125,7 +125,8 @@ CONFIG = {
 WIFI_SCAN = {
     "type": "wifi-scan", "scanning": False,
     "networks": [{"ssid": "Training room", "rssi": -45, "secure": True},
-                 {"ssid": "Guest", "rssi": -71, "secure": False}],
+                 {"ssid": "Guest", "rssi": -71, "secure": False}]
+                + [{"ssid": f"Neighbour {i}", "rssi": -60 - i * 3, "secure": True} for i in range(1, 9)],
 }
 
 
@@ -420,6 +421,23 @@ def render(browser, output, name, width, height):
                                       "https": False, "save": True})
     page.locator("#btn-wifi-scan").click()
     expect(page.locator("#wifi-list")).to_be_visible(timeout=10000)
+    # Headless Chromium hides scrollbars, so emulate a scrollbar press: mousedown on the list itself,
+    # then the focus loss real browsers cause. The list must stay open and get focus back on release.
+    page.evaluate("""() => {
+        const list = document.getElementById("wifi-list");
+        list.dispatchEvent(new MouseEvent("mousedown", {bubbles: true, cancelable: true}));
+        document.getElementById("c-wifiSsid").blur();
+        list.scrollTop = list.scrollHeight;
+    }""")
+    expect(page.locator("#wifi-list")).to_be_visible()
+    assert page.evaluate("document.getElementById('wifi-list').scrollTop") > 0
+    page.evaluate("dispatchEvent(new MouseEvent('mouseup', {bubbles: true}))")
+    expect(page.locator("#c-wifiSsid")).to_be_focused()
+    expect(page.locator("#wifi-list")).to_be_visible()
+    page.locator("#c-wifiSsid").blur()
+    expect(page.locator("#wifi-list")).to_be_hidden()
+    page.locator("#c-wifiSsid").click()
+    expect(page.locator("#wifi-list")).to_be_visible()
     page.locator("#c-wifiSsid").press("ArrowDown")
     page.locator("#c-wifiSsid").press("Enter")
     expect(page.locator("#c-wifiSsid")).to_have_value("Training room")
