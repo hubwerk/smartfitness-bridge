@@ -15,7 +15,7 @@ LV_FONT_DECLARE(sf_antonio_48);
 namespace hmi::lcars {
 
 // Historical names are retained for the existing diagnostic widgets.
-constexpr std::uint32_t Black = 0x07111D;
+constexpr std::uint32_t Black = 0x07111D;  // also baked into sf_tex_sky
 constexpr std::uint32_t Orange = 0x142E43;
 constexpr std::uint32_t Golden = 0x16364A;
 constexpr std::uint32_t Peach = 0x204560;
@@ -29,7 +29,7 @@ constexpr std::uint32_t Alert = 0x78313B;
 constexpr std::uint32_t Muted = 0x9BB5CA;
 constexpr std::uint32_t Border = 0x2B465D;
 // Top of the screen background gradient (fades into Black).
-constexpr std::uint32_t Sky = 0x10283C;
+constexpr std::uint32_t Sky = 0x10283C;  // baked into sf_tex_sky (scripts/gen_hmi_icons.py)
 // Purely decorative layers (gradients, glow); never focusable or interactive.
 // Layout checks in the simulator skip them.
 constexpr lv_obj_flag_t Decor = LV_OBJ_FLAG_USER_1;

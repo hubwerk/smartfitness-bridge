@@ -15,4 +15,7 @@ LV_IMAGE_DECLARE(sf_icon_sport_cross_trainer);
 LV_IMAGE_DECLARE(sf_icon_sport_step_climber);
 LV_IMAGE_DECLARE(sf_icon_sport_stair_climber);
 LV_IMAGE_DECLARE(sf_icon_sport_generic);
+// Dithered background textures: RGB565 sky, A8 glow disc (recoloured per sport).
+LV_IMAGE_DECLARE(sf_tex_sky);
+LV_IMAGE_DECLARE(sf_tex_glow);
 }

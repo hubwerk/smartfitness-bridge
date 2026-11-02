@@ -1,5 +1,7 @@
 #include "lcars_theme.h"
 
+#include "hmi_icons.h"
+
 #include <algorithm>
 
 #include "scroll_arc.h"
@@ -152,36 +154,22 @@ void band(lv_obj_t* object, std::uint32_t color) {
 void background(lv_obj_t* screen) {
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(screen, lv_color_hex(Black), 0);
-    lv_obj_t* sky = lv_obj_create(screen);
-    lv_obj_remove_style_all(sky);
+    // Pre-dithered texture: an LVGL gradient bands visibly on the RGB565 panel.
+    lv_obj_t* sky = lv_image_create(screen);
+    lv_image_set_src(sky, &sf_tex_sky);
     lv_obj_remove_flag(sky, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
     lv_obj_add_flag(sky, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_IGNORE_LAYOUT | Decor));
-    lv_obj_set_size(sky, lv_pct(100), 112);
-    lv_obj_set_style_bg_opa(sky, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(sky, lv_color_hex(Sky), 0);
-    lv_obj_set_style_bg_grad_color(sky, lv_color_hex(Sky), 0);
-    lv_obj_set_style_bg_main_opa(sky, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_grad_opa(sky, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_grad_dir(sky, LV_GRAD_DIR_VER, 0);
 }
 
 lv_obj_t* accentGlow(lv_obj_t* parent, std::uint32_t color) {
-    // A circle whose upper edge fades in: reads as a radial glow below the arc.
-    lv_obj_t* glow = lv_obj_create(parent);
-    lv_obj_remove_style_all(glow);
+    // Dithered radial disc rising from the bottom edge, recoloured to the accent.
+    lv_obj_t* glow = lv_image_create(parent);
+    lv_image_set_src(glow, &sf_tex_glow);
     lv_obj_remove_flag(glow, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
     lv_obj_add_flag(glow, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_IGNORE_LAYOUT | Decor));
-    lv_obj_set_size(glow, 220, 220);
-    lv_obj_align(glow, LV_ALIGN_BOTTOM_MID, 0, 110);
-    lv_obj_set_style_radius(glow, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(glow, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(glow, lv_color_hex(color), 0);
-    lv_obj_set_style_bg_main_opa(glow, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_grad_opa(glow, 60, 0);
-    lv_obj_set_style_bg_grad_color(glow, lv_color_hex(color), 0);
-    lv_obj_set_style_bg_grad_dir(glow, LV_GRAD_DIR_VER, 0);
-    lv_obj_set_style_bg_main_stop(glow, 0, 0);
-    lv_obj_set_style_bg_grad_stop(glow, 140, 0);
+    lv_obj_align(glow, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_image_recolor(glow, lv_color_hex(color), 0);
+    lv_obj_set_style_image_recolor_opa(glow, LV_OPA_COVER, 0);
     return glow;
 }
 
