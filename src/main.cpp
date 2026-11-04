@@ -14,9 +14,9 @@
 #include "nimble_central.h"
 #include "platform/factory_wipe.h"
 
-#if defined(SF_VARIANT_HMI)
+// HMI: LVGL rendering; web: on-device ECDSA key + X.509 certificate generation
+// (mbedTLS ECP/PEM) overflows the default 8 KB loop task stack.
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
-#endif
 
 SimulatedDeviceAdapter simulationAdapter;
 NimbleCentral bleCentral;
