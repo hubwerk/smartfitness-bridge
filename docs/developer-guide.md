@@ -488,7 +488,12 @@ Wi-Fi/AP edits require a restart to change the running network; factory reset re
   `https://<station IP>/` always shows the warning.
 - Captive-portal mini browsers (Android/iOS sign-in pop-ups) may refuse the
   self-signed certificate; open `https://192.168.4.1/` in the normal browser instead.
-- Each TLS session uses about 35 kB of internal RAM; the server keeps at most
+- Each TLS session uses about 35 kB. Arduino-ESP32 2.x builds mbedTLS for internal RAM
+  only, which next to Wi-Fi and BLE fits just a few sessions (handshakes then fail with
+  `mbedtls_ssl_setup returned -0x7F00`, the browser reports a network error). The web
+  variant therefore redirects mbedTLS blocks larger than 4 kB to PSRAM
+  (`mbedtls_platform_set_calloc_free`); Serial prints `[Mem] ...` with the free internal
+  RAM and PSRAM at start-up and after each Wi-Fi scan. The server keeps at most
   **4** HTTPS connections (least-recently-used ones are closed first; WebSocket
   listeners count as recently used on every broadcast) and 2 redirect connections.
 

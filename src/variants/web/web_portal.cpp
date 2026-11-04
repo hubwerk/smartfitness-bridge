@@ -6,8 +6,10 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_http_server.h>
 #include <esp_https_server.h>
+#include <mbedtls/platform.h>
 
 #include <algorithm>
 #include <array>
@@ -30,13 +32,35 @@
 namespace {
 constexpr std::uint16_t kDnsPort = 53;
 constexpr std::uint32_t kPolicyIntervalMs = 1000;
-// Each TLS session holds ~35 kB of internal RAM (mbedTLS record buffers).
+// Each TLS session holds ~35 kB (mbedTLS record buffers), in PSRAM when present (see useTlsPsram).
 constexpr std::size_t kMaxHttpsSockets = 4;
 constexpr std::size_t kMaxRedirectSockets = 2;
 constexpr std::size_t kMaxPlainSockets = 7;  // HTTPS off: UI/API on port 80
 constexpr std::size_t kMaxClientSockets = kMaxPlainSockets;
 constexpr std::uint16_t kHttpsCtrlPort = 32768;
 constexpr std::uint16_t kHttpCtrlPort = 32769;
+// Arduino-ESP32 2.x builds mbedTLS with CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC: next to Wi-Fi and
+// BLE, internal RAM then only fits a few TLS sessions and further handshakes fail with
+// MBEDTLS_ERR_SSL_ALLOC_FAILED (-0x7F00). Large blocks go to PSRAM; internal RAM is the fallback.
+constexpr std::size_t kTlsInternalMax = 4096;
+void* tlsCalloc(std::size_t count, std::size_t size) {
+    void* block = count * size > kTlsInternalMax ? heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+                                                 : nullptr;
+    return block ? block : heap_caps_calloc(count, size, MALLOC_CAP_8BIT);
+}
+void tlsFree(void* block) { heap_caps_free(block); }
+void useTlsPsram() {
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) return;
+    mbedtls_platform_set_calloc_free(tlsCalloc, tlsFree);
+}
+
+void logMemory(const char* when) {
+    DBG_SERIAL.printf("[Mem] %s: internal %u kB free (largest %u kB), PSRAM %u/%u kB free\n", when,
+                      static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                      static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+                      static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                      static_cast<unsigned>(heap_caps_get_total_size(MALLOC_CAP_SPIRAM) / 1024));
+}
 constexpr std::size_t kMaxSocketFrame = 128;  // clients only listen; anything larger closes the socket
 constexpr int kBodyRecvRetries = 3;
 
@@ -475,6 +499,7 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     applyMode(policy_.begin(!ssid_.empty(), millis()));
     api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
 
+    if (https_) useTlsPsram();
     if (https_ && !impl_->startHttps()) {
         // Keep the web interface reachable (e.g. to switch HTTPS off) rather than losing it.
         DBG_SERIAL.println("[Web] HTTPS server start failed; falling back to plain HTTP");
@@ -494,6 +519,7 @@ void WebPortal::begin(const std::string& ssid, const std::string& password, cons
     }
     DBG_SERIAL.printf("[Web] %s%s.local/ (or the address shown above)%s\n", https_ ? "https://" : "http://", kHostname,
                   https_ ? "; self-signed certificate" : "; HTTPS is off");
+    logMemory("web started");
 }
 
 void WebPortal::applyMode(WifiMode mode) {
@@ -568,6 +594,7 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
     else beginStation();
     api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
     DBG_SERIAL.printf("[WiFi] network scan finished: %u network(s)\n", static_cast<unsigned>(wifiScan_.networks().size()));
+    logMemory("after Wi-Fi scan");
 }
 
 NetworkStatus WebPortal::networkStatus() const {
