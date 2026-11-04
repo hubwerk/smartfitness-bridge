@@ -16,7 +16,8 @@
 //    broadcasts are queued onto the server task (httpd_queue_work).
 //  * Wi-Fi network scan (POST /api/wifi-scan): the main loop runs async scan
 //    passes for WifiScan::kDurationMs (a single pass while the station is
-//    connected) and publishes the merged networks.
+//    connected or the access point has clients) and publishes the merged
+//    networks. Short per-channel dwell keeps the access point reachable.
 
 #ifdef ARDUINO
 
@@ -37,6 +38,9 @@ public:
     static constexpr std::uint32_t kStatusIntervalMs = 250;  // WebSocket push <= 4 Hz
     static constexpr std::uint32_t kScanIntervalMs = 1000;
     static constexpr std::uint32_t kWifiScanRetryMs = 500;
+    // Off-channel time per scanned channel; the Arduino default (300 ms) misses
+    // several AP beacons in a row, so AP clients drop during the scan.
+    static constexpr std::uint32_t kWifiScanChannelMs = 100;
 
     WebPortal(BridgeController& ui, ApiExchange& api);
     // Starts Wi-Fi and the server; credentials come from the configuration.

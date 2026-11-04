@@ -533,7 +533,9 @@ void WebPortal::beginStation() {
 
 void WebPortal::updateWifiScan(std::uint32_t now) {
     const bool connected = WiFi.status() == WL_CONNECTED;
-    if (wifiScanRequested_.exchange(false) && wifiScan_.start(now, connected)) {
+    const unsigned apStations = applied_ != WifiMode::Sta ? WiFi.softAPgetStationNum() : 0;
+    if (wifiScanRequested_.exchange(false) &&
+        wifiScan_.start(now, WifiScan::singlePassFor(connected, apStations))) {
         // A station that is still connecting blocks scans; resume it afterwards.
         if (applied_ != WifiMode::Ap && !connected) WiFi.disconnect();
         WiFi.scanDelete();
@@ -557,7 +559,7 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
     if (wifiScan_.windowOpen(now)) {
         if (now - lastWifiScanAttemptMs_ >= kWifiScanRetryMs) {
             lastWifiScanAttemptMs_ = now;
-            WiFi.scanNetworks(true);
+            WiFi.scanNetworks(true, false, false, kWifiScanChannelMs);
         }
         return;
     }
