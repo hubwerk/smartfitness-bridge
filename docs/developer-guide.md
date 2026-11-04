@@ -739,7 +739,7 @@ fixed order and stop at the first failure, **without rollback**.
 | GET | `/api/config` | – | Settings (passwords are never returned; `wifiPasswordSet` instead) |
 | POST | `/api/config` | `{"ftmsName":"My Bridge","ftmsOutputProfile":"auto","outputProtocol":"ble-ftms","ftmsOutputServices":7,"antOutputServices":0,"ftmsInput":true,"simulatedTrainer":true,"wifiSsid":"HomeNetwork","wifiPassword":"your-home-passphrase","apPassword":"your-new-ap-passphrase","https":true,"save":true}` | Any subset; order: profile, name, output protocol (`off`, `ble-ftms`, `ant-fec`), BLE/ANT service masks, input, simulated trainer, Wi-Fi, AP password, HTTPS, save |
 | POST | `/api/factory-reset`, `/api/restart` | `{}` | Factory reset / reboot |
-| POST | `/api/wifi-scan` | `{}` | `202 {"scanning":true}`; scan Wi-Fi networks for 15 s (repeated passes merged by SSID, strongest signal first; a station still connecting pauses until the scan ends) |
+| POST | `/api/wifi-scan` | `{}` | `202 {"scanning":true}`; scan Wi-Fi networks for 15 s (repeated passes merged by SSID, strongest signal first; a single pass while the station is connected or the access point has clients, since scanning interrupts the access point; a station still connecting pauses until the scan ends) |
 | GET | `/api/wifi-scan/results` | – | `{"type":"wifi-scan","scanning":…,"networks":[{"ssid","rssi","secure"}]}` (max. 32, hidden networks omitted) |
 | GET | `/api/result?id=1` | – | Poll queued command result; see below |
 | GET | `/` | – | Gzipped HTML/JS/CSS app (`200`, not JSON) |

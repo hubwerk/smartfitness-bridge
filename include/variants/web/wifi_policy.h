@@ -48,9 +48,10 @@ private:
 
 // Wi-Fi network scan requested from the web UI: repeated scan passes during
 // a fixed window, merged by SSID (strongest signal wins, hidden networks are
-// skipped). While the station is connected a single pass is run instead:
-// every pass takes the radio off the home channel, and back-to-back passes
-// would cut off the web clients reaching the bridge through that network.
+// skipped). While web clients depend on the radio (station connected or
+// clients on the access point) a single pass is run instead: every pass takes
+// the radio off the home channel, the access point stops beaconing meanwhile,
+// and back-to-back passes would cut those clients off.
 // The firmware drives the passes; this class only keeps the state.
 struct WifiNetwork {
     std::string ssid;
@@ -63,6 +64,10 @@ public:
     static constexpr std::uint32_t kDurationMs = 15000;
     static constexpr std::size_t kMaxNetworks = 32;
 
+    // A single pass whenever someone reaches the bridge over Wi-Fi.
+    static bool singlePassFor(bool stationConnected, unsigned apStations) {
+        return stationConnected || apStations > 0;
+    }
     // Starts a new window and clears previous results; false while one runs.
     // singlePass closes the window after the first completed pass.
     bool start(std::uint32_t nowMs, bool singlePass = false);

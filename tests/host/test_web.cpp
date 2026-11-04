@@ -767,6 +767,11 @@ void testWifiScan() {
     assert(document["scanning"] == false);
     assert(document["networks"].as<JsonArrayConst>().size() == 0);
 
+    assert(!WifiScan::singlePassFor(false, 0));
+    assert(WifiScan::singlePassFor(true, 0));
+    assert(WifiScan::singlePassFor(false, 1));  // fresh board: AP only, browser connected to it
+    assert(WifiScan::singlePassFor(true, 2));
+
     assert(scan.start(1000));
     assert(!scan.start(2000));  // already running
     assert(scan.windowOpen(1000 + WifiScan::kDurationMs - 1));
