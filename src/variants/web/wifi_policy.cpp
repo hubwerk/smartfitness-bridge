@@ -46,7 +46,8 @@ bool WifiScan::start(std::uint32_t nowMs, bool singlePass) {
     if (scanning_) return false;
     scanning_ = true;
     singlePass_ = singlePass;
-    passCompleted_ = false;
+    passWithResults_ = false;
+    emptyPasses_ = 0;
     startedMs_ = nowMs;
     networks_.clear();
     return true;

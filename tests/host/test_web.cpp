@@ -796,7 +796,7 @@ void testWifiScan() {
     scan.finish();
     assert(!scan.scanning() && !scan.windowOpen(1001));
     assert(scan.start(50000) && scan.networks().empty());  // a new window clears old results
-    scan.passCompleted();
+    scan.passCompleted(3);
     assert(scan.windowOpen(50001));  // repeated passes until the window ends
     scan.finish();
 
@@ -804,13 +804,32 @@ void testWifiScan() {
     assert(scan.start(60000, true));
     assert(scan.windowOpen(60000));
     scan.add({"Home", -60, true});
-    scan.passCompleted();
+    scan.passCompleted(1);
     assert(!scan.windowOpen(60001) && scan.scanning());
     assert(scan.networks().size() == 1);
     scan.finish();
     assert(scan.start(70000) && scan.windowOpen(70000));  // single-pass state does not stick
-    scan.passCompleted();
+    scan.passCompleted(1);
     assert(scan.windowOpen(70001));
+    scan.finish();
+
+    // Single pass: empty passes (e.g. right after the station interface came up) are retried.
+    assert(scan.start(80000, true));
+    for (unsigned pass = 1; pass < WifiScan::kMaxEmptyPasses; ++pass) {
+        scan.passCompleted(0);
+        assert(scan.windowOpen(80001));
+    }
+    scan.passCompleted(0);
+    assert(!scan.windowOpen(80001));  // gives up when there really is nothing
+    scan.finish();
+    assert(scan.start(90000, true));
+    scan.passCompleted(0);
+    scan.passCompleted(5);
+    assert(!scan.windowOpen(90001));
+    scan.finish();
+    assert(scan.start(100000, true));  // empty-pass count does not stick
+    scan.passCompleted(0);
+    assert(scan.windowOpen(100001));
 
     ApiExchange api;
     assert(api.snapshot(ApiExchange::Snapshot::WifiScan) == "{}");

@@ -565,7 +565,9 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
         // A station that is still connecting blocks scans; resume it afterwards.
         if (applied_ != WifiMode::Ap && !connected) WiFi.disconnect();
         WiFi.scanDelete();
-        lastWifiScanAttemptMs_ = now - kWifiScanRetryMs;
+        // Switch the station interface on first and let it start before the first pass.
+        if (applied_ == WifiMode::Ap) WiFi.enableSTA(true);
+        lastWifiScanAttemptMs_ = now;
         api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
         DBG_SERIAL.println("[WiFi] network scan started");
     }
@@ -580,7 +582,8 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
     }
     if (found >= 0) {
         WiFi.scanDelete();
-        wifiScan_.passCompleted();
+        wifiScan_.passCompleted(static_cast<unsigned>(found));
+        DBG_SERIAL.printf("[WiFi] scan pass: %d access point(s)\n", found);
     }
     if (wifiScan_.windowOpen(now)) {
         if (now - lastWifiScanAttemptMs_ >= kWifiScanRetryMs) {
