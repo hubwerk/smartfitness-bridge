@@ -21,6 +21,7 @@ inline unsigned formats = 0;
 inline unsigned opens = 0;
 inline unsigned flushes = 0;
 inline unsigned mounts = 0;
+inline unsigned unmounts = 0;
 inline unsigned mutexAllocations = 0;
 inline unsigned mutexAllocationFailAt = 0;
 inline bool allMutexAllocationsFail = false;
@@ -158,6 +159,10 @@ struct FakeLittleFS {
             fake::mounted = true;
         }
         return fake::mounted;
+    }
+    void end() {
+        assert(!fake::isr);
+        ++fake::unmounts;
     }
     File open(const char* path, const char* mode) {
         assert(!fake::isr && std::strcmp(path, "/debug.log") == 0);

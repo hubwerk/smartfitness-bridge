@@ -324,8 +324,13 @@ void testConfigViewTracksCommands() {
     config = rig.controller.configView();
     assert(config.ftmsName == FtmsOutput::kDefaultName && config.outputProtocol == OutputProtocol::BleFtms &&
            config.wifiSsid.empty());
-    assert(!rig.controller.restartRequested());
-    assert(rig.controller.execute(make(CommandType::Restart)).ok && rig.controller.restartRequested());
+    assert(reset.message.find("erasing all storage and restarting") != std::string::npos);
+    assert(rig.controller.restartRequested() && rig.controller.factoryWipeRequested());
+
+    ControllerRig plain;
+    assert(!plain.controller.restartRequested() && !plain.controller.factoryWipeRequested());
+    assert(plain.controller.execute(make(CommandType::Restart)).ok && plain.controller.restartRequested());
+    assert(!plain.controller.factoryWipeRequested());
 }
 
 void testOutputProtocolSelection() {

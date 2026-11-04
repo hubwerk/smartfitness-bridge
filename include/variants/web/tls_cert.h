@@ -7,8 +7,9 @@
 //    for "no well-defined expiration date": the certificate never expires.
 //  * Subject CN and SAN: smartfitness.local, plus the SoftAP address as SAN IP.
 //  * Firmware: stored in NVS namespace "sftls", separate from the configuration
-//    blob, so factory resets and firmware updates keep the certificate (and the
-//    browser exception for it). An unreadable or mismatching pair is replaced.
+//    blob, so configuration changes and firmware updates keep the certificate (and
+//    the browser exception for it). Factory reset erases all of NVS and thus
+//    creates a new one. An unreadable or mismatching pair is replaced.
 
 #include <array>
 #include <cstdint>

@@ -380,6 +380,16 @@ void setLoggingEnabled(bool enabled) {
 
 bool loggingEnabled() { return fileLogging.load(); }
 
+void shutdown() {
+    if (rejectIsr()) return;
+    Lock lock(fsMutex);
+    if (!lock) return;
+    // Serial output continues; file output and web reads stop until the reboot.
+    writable = false;
+    if (logFile) logFile.close();
+    LittleFS.end();
+}
+
 Chunk readChunk(std::uint64_t offset, char* data, std::size_t capacity) {
     Chunk result;
     if (rejectIsr()) return result;

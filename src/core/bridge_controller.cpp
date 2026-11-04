@@ -319,8 +319,11 @@ CommandResult BridgeController::execute(const Command& command) {
             bridge_.disconnect();
             const bool erased = config_.factoryReset();
             applyConfig();
+            // The firmware then wipes all persistent storage (NVS, log, core dump) and reboots.
+            factoryWipeRequested_ = true;
+            restartRequested_ = true;
             return {erased, std::string(erased ? "factory defaults restored; " : "erase failed; defaults restored in RAM; ") +
-                                status()};
+                                "erasing all storage and restarting; " + status()};
         }
         case CommandType::FtmsName: {
             const auto& value = command.text;

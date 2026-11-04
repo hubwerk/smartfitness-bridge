@@ -118,7 +118,7 @@ constexpr Entry kTable[] = {
     {Str::Confirm, {"Confirm", nullptr}},
     {Str::Erase, {"Erase all", nullptr}},
     {Str::ConfirmResetTitle, {"Factory reset?", nullptr}},
-    {Str::ConfirmResetText1, {"Erases all settings\nand the pairing.", nullptr}},
+    {Str::ConfirmResetText1, {"Erases everything\nand restarts.", nullptr}},
     {Str::ConfirmResetText2, {"Really erase\neverything?", nullptr}},
     {Str::ConfirmRestartTitle, {"Restart?", nullptr}},
     {Str::ConfirmRestartText, {"Unsaved changes are lost.", nullptr}},

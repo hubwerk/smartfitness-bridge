@@ -12,6 +12,7 @@
 #include "bt_device_adapter.h"
 #include "ble_input_adapter.h"
 #include "nimble_central.h"
+#include "platform/factory_wipe.h"
 
 #if defined(SF_VARIANT_HMI)
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
@@ -82,7 +83,13 @@ void loop() {
     if (controller.restartRequested()) {
         // Give the HTTP/WebSocket response (or the HMI message) time to leave before rebooting.
         if (restartAtMs == 0) restartAtMs = millis() + 1000;
-        if (static_cast<std::int32_t>(millis() - restartAtMs) >= 0) ESP.restart();
+        if (static_cast<std::int32_t>(millis() - restartAtMs) >= 0) {
+            if (controller.factoryWipeRequested()) {
+                platform::wipeAllStorage();
+                delay(200);  // let the debug logger flush the result to Serial
+            }
+            ESP.restart();
+        }
     }
     delay(5);
 }
