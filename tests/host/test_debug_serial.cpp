@@ -30,7 +30,7 @@ void reset() {
     fake::openFails = fake::readFails = false;
     fake::writeLimit = SIZE_MAX;
     fake::otherFiles = 0;
-    fake::formats = fake::opens = fake::flushes = fake::mounts = 0;
+    fake::formats = fake::opens = fake::flushes = fake::mounts = fake::unmounts = 0;
     fake::serialCalls = fake::fsCalls = fake::mutexCalls = 0;
     fake::maxSize = 0;
     fake::currentTask = nullptr;
@@ -380,6 +380,24 @@ void testStopLogging() {
     assert(fake::file.find("sss") == std::string::npos);
 }
 
+void testShutdown() {
+    reset();
+    debugweb::begin();
+    writeText("before wipe\n");
+    pump();
+    const auto end = absoluteEnd;
+    debugweb::shutdown();
+    assert(fake::unmounts == 1 && !writable && !logFile);
+    writeText("after wipe\n");
+    pump();
+    assert(absoluteEnd == end);
+    assert(Serial.output.find("after wipe\n") != std::string::npos);
+    char data[8];
+    assert(debugweb::readChunk(0, data, sizeof(data)).size == 0);
+    Snapshot snapshot;
+    assert(!debugweb::streamLog(sink, &snapshot));
+}
+
 void testTimestamps() {
     reset();
     debugweb::begin();
@@ -417,6 +435,7 @@ int main() {
     testEspLogForwarding();
     testConcurrentProducers();
     testStopLogging();
+    testShutdown();
     testTimestamps();
     reset();
     debugweb::begin();

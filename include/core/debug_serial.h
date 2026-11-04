@@ -20,6 +20,8 @@ bool streamLog(LogSink sink, void* context);
 // console is unaffected. Logging is enabled again after every reboot.
 void setLoggingEnabled(bool enabled);
 bool loggingEnabled();
+// Closes the log and unmounts LittleFS for good (factory wipe right before a reboot).
+void shutdown();
 }  // namespace debugweb
 
 #ifdef ARDUINO

@@ -446,7 +446,7 @@ home Wi-Fi password is never logged. Credentials are stored in NVS.
 AP passwords must be 8–63 printable ASCII characters. Invalid stored AP passwords
 fall back to the default while preserving other valid settings; a failed SoftAP
 start is logged and retried with the default. Change that default before normal use.
-Wi-Fi/AP edits (including factory reset) require a restart to change the running network.
+Wi-Fi/AP edits require a restart to change the running network; factory reset restarts by itself.
 
 ### HTTPS and the self-signed certificate
 
@@ -459,8 +459,8 @@ Wi-Fi/AP edits (including factory reset) require a restart to change the running
   mDNS announces `_http._tcp`. Passwords entered in the UI then cross the network
   in clear text. If the certificate cannot be created or the HTTPS server fails to
   start, the bridge falls back to plain HTTP so the interface stays reachable.
-  Factory reset switches HTTPS back on. The stored certificate is kept while
-  HTTPS is off.
+  Factory reset switches HTTPS back on and creates a new certificate. The stored
+  certificate is kept while HTTPS is off.
 - With HTTPS on, the web UI, REST API and WebSocket (`wss://<host>/ws`) are served only over
   **HTTPS on port 443** (ESP-IDF `esp_https_server`, TLS 1.2). Port 80 only answers
   with `302` redirects to the same path on HTTPS; captive-portal probes and foreign
@@ -473,9 +473,9 @@ Wi-Fi/AP edits (including factory reset) require a restart to change the running
   `9999-12-31 23:59:59 UTC`, the RFC 5280 value for "no well-defined expiration
   date". The bridge has no real-time clock, so this also avoids clock-related errors.
 - Key and certificate are stored in NVS namespace `sftls`, separate from the
-  configuration: factory reset, configuration changes and firmware updates keep
-  them (and the browser exception). Only erasing the whole flash
-  (`pio run -t erase`) creates a new certificate. The private key is stored
+  configuration: configuration changes and firmware updates keep them (and the
+  browser exception). Factory reset or erasing the whole flash (`pio run -t erase`)
+  creates a new certificate, so the browser warning appears again. The private key is stored
   unencrypted in flash (no flash encryption).
 - Browsers show a warning such as *"Your connection is not private"* because no
   public CA signed the certificate. Check the certificate details and accept the
@@ -975,7 +975,7 @@ Settings changed on the console are edited in RAM; `status` ends with `unsaved=1
 | `save` | Writes the configuration to NVS. Nothing is written when the stored record would not change. |
 | `load` | Reloads the configuration from NVS (discarding unsaved edits) and applies it. |
 | `unpair` | Disconnects, clears the paired device and persists only that change immediately. |
-| `factory-reset` | Disconnects, erases the `sfbridge` NVS namespace and restores the defaults. |
+| `factory-reset` | Disconnects, restores the defaults, then erases the whole NVS partition (configuration, TLS certificate, HMI preferences, Wi-Fi data), the LittleFS partition (debug log) and the core dump, and restarts. |
 
 On boot the stored configuration is loaded before the outputs are enabled, so `ftms-name`, the output-profile override, the output protocol, the FTMS input toggle, the simulated trainer flag and the pairing survive a reboot. A missing, corrupt or unknown-version record falls back to the defaults (the record is replaced on the next `save`).
 
@@ -1028,9 +1028,12 @@ Pairing persists only the source/name/adapter and enabled input; unpair persists
 only removal of the pairing, leaving other RAM edits unsaved.
 
 Writes/erases happen from explicit console/web commands on the main loop, not
-periodically or in BLE/HTTP callbacks. `factory-reset` erases the namespace and
-restores RAM defaults, disconnects the source, and applies output settings; it
-does **not** reboot. Restart to apply default Wi-Fi/AP settings. CRC detects
+periodically or in BLE/HTTP callbacks. `factory-reset` erases the namespace,
+restores RAM defaults, disconnects the source, and applies output settings. About
+one second later (after the response has been sent) the firmware erases the whole
+NVS partition, the LittleFS partition and the core dump partition and reboots,
+so the device starts exactly like a freshly flashed one (default Wi-Fi/AP, new
+TLS certificate, LittleFS formatted on boot). CRC detects
 corruption, not tampering or encryption.
 
 ## FTMS output (Bluetooth LE)

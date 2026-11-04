@@ -42,6 +42,8 @@ public:
 
     // Set by "restart" or a saved Wi-Fi change; the firmware reboots when idle.
     bool restartRequested() const { return restartRequested_; }
+    // Set by "factory-reset": before rebooting, the firmware erases all persistent storage.
+    bool factoryWipeRequested() const { return factoryWipeRequested_; }
 
 private:
     void applyConfig();
@@ -55,6 +57,7 @@ private:
     InputSelector* selector_ = nullptr;
     BleInputAdapter* ble_ = nullptr;
     bool restartRequested_ = false;
+    bool factoryWipeRequested_ = false;
     bool outputProtocolLogged_ = false;
     smartfitness::OutputProtocol lastOutputProtocol_ = smartfitness::OutputProtocol::Off;
     std::string input_;
