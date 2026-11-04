@@ -63,21 +63,28 @@ class WifiScan {
 public:
     static constexpr std::uint32_t kDurationMs = 15000;
     static constexpr std::size_t kMaxNetworks = 32;
+    // A single-pass window still retries empty passes: the first pass right after the
+    // station interface is switched on can come back empty.
+    static constexpr unsigned kMaxEmptyPasses = 3;
 
     // A single pass whenever someone reaches the bridge over Wi-Fi.
     static bool singlePassFor(bool stationConnected, unsigned apStations) {
         return stationConnected || apStations > 0;
     }
     // Starts a new window and clears previous results; false while one runs.
-    // singlePass closes the window after the first completed pass.
+    // singlePass closes the window after the first pass with results (or kMaxEmptyPasses empty ones).
     bool start(std::uint32_t nowMs, bool singlePass = false);
     // True while further scan passes may be started.
     bool windowOpen(std::uint32_t nowMs) const {
-        return scanning_ && !(singlePass_ && passCompleted_) && nowMs - startedMs_ < kDurationMs;
+        return scanning_ && !(singlePass_ && (passWithResults_ || emptyPasses_ >= kMaxEmptyPasses)) &&
+               nowMs - startedMs_ < kDurationMs;
     }
     void add(const WifiNetwork& network);
-    // A scan pass finished (successfully, even without results).
-    void passCompleted() { passCompleted_ = true; }
+    // A scan pass finished successfully with the given number of access points.
+    void passCompleted(unsigned found) {
+        if (found > 0) passWithResults_ = true;
+        else ++emptyPasses_;
+    }
     void finish() { scanning_ = false; }
     bool scanning() const { return scanning_; }
     // Sorted by signal strength, strongest first.
@@ -86,7 +93,8 @@ public:
 private:
     bool scanning_ = false;
     bool singlePass_ = false;
-    bool passCompleted_ = false;
+    bool passWithResults_ = false;
+    unsigned emptyPasses_ = 0;
     std::uint32_t startedMs_ = 0;
     std::vector<WifiNetwork> networks_;
 };
