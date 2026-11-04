@@ -73,10 +73,11 @@ radio. Affiliate links are provided for convenience and are not an endorsement.
 
 | | Web | HMI |
 |---|---|---|
-| **Board (PlatformIO environment)** | [ESP32-S3 DevKitC-1 N16R8](https://link.amazon/B04sCBCRH) (`esp32s3dev`) | [ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display](https://link.amazon/B0eHDSltG) (`crowpanel128`) |
+| **Board (PlatformIO environment)** | [Diymore ESP32-S3 DevKitC-1 N16R8 with case](https://link.amazon/B04sCBCRH) <br> or <br> [Freenove ESP32 ESP32-S3 Development Board Kit (16 MB Flash) without case](https://link.amazon/B0cnHp22D) <br> (`esp32s3dev`) | [ELECROW CrowPanel 1.28" ESP32-S3 Rotary Display](https://link.amazon/B0eHDSltG) (`crowpanel128`) |
 | **Base peripherals** | USB data cable for flashing; no extra hardware for BLE FTMS | USB data cable for flashing; display and controls are integrated; no extra hardware for BLE FTMS |
 | **Optional ANT+ hardware and affiliate links** | [Coospo ANT+ USB stick](https://link.amazon/B0dalQtFe) and [USB-C to USB-A OTG adapter (LogiLink AU0055)](https://link.amazon/B01z26VJ2). USB-stick ANT+ output is hardware-verified on this variant. | — |
 | **Example** | <img src="docs/hmi/web/training-bike-desktop.png" alt="Web training dashboard" width="480"> | <img src="docs/hmi/hmi/01-dashboard-bike.png" alt="CrowPanel HMI dashboard" width="240"> |
+The difference of the diymore and the freenove board is, the diymore is available with case but needs manual soldering for bridging the usb-otg pins on the backside of the board in order to power the usb-c output with 5V. The Freenove board does not need the manual soldering, but is not available from Amazon with a case.
 
 Use the USB-C connection to flash the CrowPanel.
 
