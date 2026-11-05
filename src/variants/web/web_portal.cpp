@@ -5,15 +5,18 @@
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
-#include <WiFiUdp.h>
 #include <esp_heap_caps.h>
 #include <esp_http_server.h>
 #include <esp_https_server.h>
+#include <lwip/sockets.h>
 #include <mbedtls/platform.h>
+
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -35,6 +38,10 @@ namespace {
 constexpr std::uint16_t kDnsPort = 53;
 constexpr int kDnsPacketsPerLoop = 4;
 constexpr std::size_t kMaxDnsQuery = 512;
+constexpr std::uint32_t kDnsDropLogMs = 10000;
+// While a Wi-Fi scan takes the radio off-channel, status pushes are throttled
+// so the Wi-Fi TX buffers stay free for the browser's requests.
+constexpr std::uint32_t kScanStatusIntervalMs = 1000;
 constexpr std::uint32_t kPolicyIntervalMs = 1000;
 // Each TLS session holds ~35 kB (mbedTLS record buffers), in PSRAM when present (see useTlsPsram).
 constexpr std::size_t kMaxHttpsSockets = 4;
@@ -167,13 +174,20 @@ struct WebPortal::Impl {
     httpd_handle_t server = nullptr;    // UI, REST API and WebSocket (HTTPS on 443, or HTTP on 80)
     httpd_handle_t redirect = nullptr;  // HTTPS mode only: port 80 -> HTTPS
     web::TlsIdentity tls;
-    WiFiUDP dns;
+    // Plain lwIP socket instead of WiFiUDP: replies dropped while the Wi-Fi TX
+    // buffers are full (ENOMEM) are counted and logged rate-limited, not per packet.
+    int dnsSocket = -1;
     web::CaptiveDns captiveDns;
     std::vector<std::uint8_t> dnsReply;
     bool dnsRunning = false;
+    unsigned dnsDropped = 0;
+    int dnsLastErrno = 0;
+    std::uint32_t lastDnsDropLogMs = 0;
     bool mdnsRunning = false;
     bool scanPending = false;
     bool configPending = false;
+    bool wifiScanPending = false;
+    std::string wifiScanJson;
     std::atomic<bool> sending{false};
 #ifdef DEBUG_WEB
     std::uint64_t debugCursor = 0;
@@ -273,6 +287,27 @@ struct WebPortal::Impl {
 #endif
 
     explicit Impl(WebPortal& owner) : portal(owner) {}
+
+    bool startDns() {
+        dnsSocket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (dnsSocket < 0) return false;
+        const int reuse = 1;
+        ::setsockopt(dnsSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(kDnsPort);
+        address.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (::bind(dnsSocket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+            stopDns();
+            return false;
+        }
+        return true;
+    }
+
+    void stopDns() {
+        if (dnsSocket >= 0) ::close(dnsSocket);
+        dnsSocket = -1;
+    }
 
     static Impl& of(httpd_req_t* request) { return *static_cast<Impl*>(request->user_ctx); }
 
@@ -541,13 +576,13 @@ void WebPortal::applyMode(WifiMode mode) {
                 DBG_SERIAL.println("[WiFi] access point retry failed");
         }
         if (impl_ && !impl_->dnsRunning) {
-            impl_->dnsRunning = impl_->dns.begin(kDnsPort);
+            impl_->dnsRunning = impl_->startDns();
             if (!impl_->dnsRunning) DBG_SERIAL.println("[WiFi] captive DNS start failed");
         }
         DBG_SERIAL.printf("[WiFi] access point \"%s\" (password configured) at %s%s/\n", apSsid_.c_str(),
                       https_ ? "https://" : "http://", WiFi.softAPIP().toString().c_str());
     } else if (impl_ && impl_->dnsRunning) {
-        impl_->dns.stop();
+        impl_->stopDns();
         impl_->dnsRunning = false;
     }
     applied_ = mode;
@@ -574,6 +609,7 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
         // Switch the station interface on first and let it start before the first pass.
         if (applied_ == WifiMode::Ap) WiFi.enableSTA(true);
         lastWifiScanAttemptMs_ = now;
+        impl_->wifiScanPending = false;
         api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
         DBG_SERIAL.println("[WiFi] network scan started");
     }
@@ -607,32 +643,41 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
     wifiScan_.finish();
     if (applied_ == WifiMode::Ap) WiFi.enableSTA(false);  // scanning switched the station interface on
     else beginStation();
-    api_.publish(ApiExchange::Snapshot::WifiScan, web::wifiScanJson(wifiScan_));
+    impl_->wifiScanJson = web::wifiScanJson(wifiScan_);
+    api_.publish(ApiExchange::Snapshot::WifiScan, impl_->wifiScanJson);
+    impl_->wifiScanPending = true;  // also pushed over the WebSocket in case polls stall
     DBG_SERIAL.printf("[WiFi] network scan finished: %u network(s)\n", static_cast<unsigned>(wifiScan_.networks().size()));
     logMemory("after Wi-Fi scan");
 }
 
 void WebPortal::processDns() {
-    web::CaptiveDns& captive = impl_->captiveDns;
+    Impl& impl = *impl_;
+    web::CaptiveDns& captive = impl.captiveDns;
     captive.hostname = kHostname;
     const IPAddress ip = WiFi.softAPIP();
     captive.address = {ip[0], ip[1], ip[2], ip[3]};
     captive.answerAll = !https_;
-    std::uint8_t query[kMaxDnsQuery];
+    std::uint8_t query[kMaxDnsQuery + 1];
     for (int packet = 0; packet < kDnsPacketsPerLoop; ++packet) {
-        const int size = impl_->dns.parsePacket();
-        if (size <= 0) return;
-        if (static_cast<std::size_t>(size) > sizeof(query)) {
-            impl_->dns.flush();
-            continue;
+        sockaddr_in from{};
+        socklen_t fromLength = sizeof(from);
+        const int length = recvfrom(impl.dnsSocket, query, sizeof(query), MSG_DONTWAIT,
+                                    reinterpret_cast<sockaddr*>(&from), &fromLength);
+        if (length <= 0) break;
+        if (static_cast<std::size_t>(length) > kMaxDnsQuery) continue;  // oversized (possibly truncated)
+        if (!captive.reply(query, static_cast<std::size_t>(length), impl.dnsReply)) continue;
+        if (sendto(impl.dnsSocket, impl.dnsReply.data(), impl.dnsReply.size(), MSG_DONTWAIT,
+                   reinterpret_cast<sockaddr*>(&from), fromLength) < 0) {
+            ++impl.dnsDropped;
+            impl.dnsLastErrno = errno;
         }
-        const int length = impl_->dns.read(query, sizeof(query));
-        impl_->dns.flush();
-        if (length <= 0 || !captive.reply(query, static_cast<std::size_t>(length), impl_->dnsReply)) continue;
-        if (impl_->dns.beginPacket(impl_->dns.remoteIP(), impl_->dns.remotePort())) {
-            impl_->dns.write(impl_->dnsReply.data(), impl_->dnsReply.size());
-            impl_->dns.endPacket();
-        }
+    }
+    const std::uint32_t now = millis();
+    if (impl.dnsDropped && now - impl.lastDnsDropLogMs >= kDnsDropLogMs) {
+        impl.lastDnsDropLogMs = now;
+        DBG_SERIAL.printf("[DNS] %u repl%s dropped (errno %d%s)\n", impl.dnsDropped, impl.dnsDropped == 1 ? "y" : "ies",
+                          impl.dnsLastErrno, impl.dnsLastErrno == ENOMEM ? ": Wi-Fi TX buffers full" : "");
+        impl.dnsDropped = 0;
     }
 }
 
@@ -654,7 +699,8 @@ NetworkStatus WebPortal::networkStatus() const {
 }
 
 void WebPortal::publish(std::uint32_t now) {
-    if (now - lastStatusMs_ >= kStatusIntervalMs) {
+    const std::uint32_t statusInterval = wifiScan_.scanning() ? kScanStatusIntervalMs : kStatusIntervalMs;
+    if (now - lastStatusMs_ >= statusInterval) {
         lastStatusMs_ = now;
         const std::string status = web::statusJson(ui_.statusView(), networkStatus());
         api_.publish(ApiExchange::Snapshot::Status, status);
@@ -677,6 +723,7 @@ void WebPortal::publish(std::uint32_t now) {
     }
     if (impl_->scanPending && impl_->broadcast(lastScanJson_)) impl_->scanPending = false;
     if (impl_->configPending && impl_->broadcast(lastConfigJson_)) impl_->configPending = false;
+    if (impl_->wifiScanPending && impl_->broadcast(impl_->wifiScanJson)) impl_->wifiScanPending = false;
 }
 
 void WebPortal::loop() {
@@ -693,7 +740,7 @@ void WebPortal::loop() {
     }
     publish(now);
 #ifdef DEBUG_WEB
-    impl_->publishDebug();
+    if (!wifiScan_.scanning()) impl_->publishDebug();  // the log catches up after the scan
 #endif
     updateWifiScan(now);
     if (impl_->dnsRunning) processDns();
