@@ -583,6 +583,7 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
     if (found >= 0) {
         WiFi.scanDelete();
         wifiChannelScanPending_ = false;
+        lastWifiScanAttemptMs_ = now;  // stay on the home channel for kWifiScanRetryMs
         if (wifiScan_.channelCompleted(static_cast<unsigned>(found)))
             DBG_SERIAL.printf("[WiFi] scan sweep: %u access point(s)\n", wifiScan_.lastSweepFound());
     } else if (wifiChannelScanPending_) {
