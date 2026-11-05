@@ -476,6 +476,8 @@ Wi-Fi/AP edits require a restart to change the running network; factory reset re
   (Serial: `mbedtls_ssl_handshake returned -0x7780`) and the handshake flood
   exhausts CPU and internal RAM (`esp-aes: Failed to allocate memory`,
   `could not send data: 12`). See `include/variants/web/captive_dns.h`.
+  Replies dropped because the Wi-Fi TX buffers are full (`ENOMEM`) are counted and
+  logged at most every 10 s (`[DNS] … dropped (errno 12: Wi-Fi TX buffers full)`).
 - On first boot each bridge generates its own **ECDSA P-256** key and a
   **self-signed** X.509 v3 certificate with its hardware RNG (takes about a second;
   Serial shows `[Web] generating self-signed TLS certificate`). Subject/SAN:
@@ -973,9 +975,13 @@ Empty arrays mean no reported advertisements/subscriptions, not a transport erro
 
 Connect to `ws://smartfitness.local/ws` (or the IP). An initial `status` snapshot
 is sent on connection; subsequent `status` messages are sent at most every 250 ms
-when clients can accept writes. `scan` and password-free `config` are sent on change, checked every 1000 ms
+when clients can accept writes (every 1000 ms while a Wi-Fi scan runs; `DEBUG_WEB` log
+streaming pauses until it ends). `scan` and password-free `config` are sent on change, checked every 1000 ms
 (a completed API job also triggers an immediate snapshot refresh).
-`result` is sent when a queued job finishes. These use the JSON shapes above.
+`result` is sent when a queued job finishes. The final `wifi-scan` result
+(`"scanning":false`) is pushed once when a Wi-Fi scan ends, so the UI finishes even if
+its `/api/wifi-scan/results` polls stall (each poll times out after 4 s; the UI gives up
+after 30 s). These use the JSON shapes above.
 All broadcasts check client count and write availability to avoid flooding slow
 clients. Unsent scan/config changes are retained (latest snapshot) for a later loop;
 command results remain retrievable through `/api/result` even if not broadcast.

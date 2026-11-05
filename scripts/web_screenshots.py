@@ -11,6 +11,7 @@ import base64
 import gzip
 import json
 import re
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -165,6 +166,7 @@ def render(browser, output, name, width, height):
     errors, commands, sockets, results, external = [], [], [], {}, []
     config = dict(CONFIG)
     reject_control = True
+    stalled_wifi_polls = []  # routes left pending to emulate requests stalled on the radio
     page.on("pageerror", lambda error: errors.append(str(error)))
 
     def websocket(ws):
@@ -183,7 +185,10 @@ def render(browser, output, name, width, height):
         elif url.path == "/api/wifi-scan":
             request_route.fulfill(status=202, json={"scanning": True})
         elif url.path == "/api/wifi-scan/results":
-            request_route.fulfill(json=WIFI_SCAN)
+            if stalled_wifi_polls:
+                stalled_wifi_polls.append(request_route)
+            else:
+                request_route.fulfill(json=WIFI_SCAN)
         elif request.method == "POST":
             endpoint = url.path.removeprefix("/api/")
             body = request.post_data_json
@@ -461,6 +466,25 @@ def render(browser, output, name, width, height):
     page.locator("#c-wifiSsid").press("ArrowDown")
     page.locator("#c-wifiSsid").press("Enter")
     expect(page.locator("#c-wifiSsid")).to_have_value("Training room")
+    # A stalled poll must not keep the scan busy; the result pushed over the WebSocket finishes it.
+    page.locator("#c-wifiSsid").blur()
+    stalled_wifi_polls.append(None)
+    page.locator("#btn-wifi-scan").click()
+    expect(page.locator("#btn-wifi-scan")).to_have_attribute("aria-busy", "true")
+    deadline = time.monotonic() + 5
+    while len(stalled_wifi_polls) < 2 and time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+    assert len(stalled_wifi_polls) >= 2, "no Wi-Fi scan poll issued"
+    sockets[0].send(json.dumps(WIFI_SCAN))
+    expect(page.locator("#wifi-list")).to_be_visible(timeout=10000)
+    expect(page.locator("#btn-wifi-scan")).to_have_attribute("aria-busy", "false")
+    for stalled in stalled_wifi_polls[1:]:
+        try:
+            stalled.abort()
+        except Exception:  # the page already cancelled the timed-out request
+            pass
+    stalled_wifi_polls.clear()
+    page.locator("#c-wifiSsid").blur()
     expect(page.locator("#system-dirty")).to_have_text("Unsaved edits")
     command("#btn-save", "config")
     before = len(commands)
