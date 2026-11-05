@@ -46,10 +46,25 @@ bool WifiScan::start(std::uint32_t nowMs, bool singlePass) {
     if (scanning_) return false;
     scanning_ = true;
     singlePass_ = singlePass;
-    passWithResults_ = false;
-    emptyPasses_ = 0;
+    channel_ = 1;
+    sweeps_ = 0;
+    sweepFound_ = 0;
+    lastSweepFound_ = 0;
     startedMs_ = nowMs;
     networks_.clear();
+    return true;
+}
+
+bool WifiScan::channelCompleted(unsigned found) {
+    sweepFound_ += found;
+    if (channel_ < kChannels) {
+        ++channel_;
+        return false;
+    }
+    channel_ = 1;
+    ++sweeps_;
+    lastSweepFound_ = sweepFound_;
+    sweepFound_ = 0;
     return true;
 }
 

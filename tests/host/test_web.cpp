@@ -796,40 +796,37 @@ void testWifiScan() {
     scan.finish();
     assert(!scan.scanning() && !scan.windowOpen(1001));
     assert(scan.start(50000) && scan.networks().empty());  // a new window clears old results
-    scan.passCompleted(3);
-    assert(scan.windowOpen(50001));  // repeated passes until the window ends
-    scan.finish();
-
-    // Station connected: one pass only, so the web clients keep their connection.
-    assert(scan.start(60000, true));
-    assert(scan.windowOpen(60000));
-    scan.add({"Home", -60, true});
-    scan.passCompleted(1);
-    assert(!scan.windowOpen(60001) && scan.scanning());
-    assert(scan.networks().size() == 1);
-    scan.finish();
-    assert(scan.start(70000) && scan.windowOpen(70000));  // single-pass state does not stick
-    scan.passCompleted(1);
-    assert(scan.windowOpen(70001));
-    scan.finish();
-
-    // Single pass: empty passes (e.g. right after the station interface came up) are retried.
-    assert(scan.start(80000, true));
-    for (unsigned pass = 1; pass < WifiScan::kMaxEmptyPasses; ++pass) {
-        scan.passCompleted(0);
-        assert(scan.windowOpen(80001));
+    assert(scan.channel() == 1);
+    for (unsigned channel = 1; channel < WifiScan::kChannels; ++channel) {
+        assert(!scan.channelCompleted(channel == 6 ? 2 : 0));  // one channel at a time
+        assert(scan.channel() == channel + 1);
     }
-    scan.passCompleted(0);
-    assert(!scan.windowOpen(80001));  // gives up when there really is nothing
+    assert(scan.channelCompleted(1));  // channel 13 completes the sweep
+    assert(scan.channel() == 1 && scan.lastSweepFound() == 3);
+    assert(scan.windowOpen(50001));  // repeated sweeps until the window ends
+    assert(!scan.channelCompleted(0));
     scan.finish();
-    assert(scan.start(90000, true));
-    scan.passCompleted(0);
-    scan.passCompleted(5);
-    assert(!scan.windowOpen(90001));
+
+    // Station connected or AP clients: one sweep only, the web clients keep their connection.
+    assert(scan.start(60000, true));
+    assert(scan.channel() == 1 && scan.lastSweepFound() == 0);  // channel and counts do not stick
+    scan.add({"Home", -60, true});
+    for (unsigned channel = 1; channel < WifiScan::kChannels; ++channel) {
+        scan.channelCompleted(channel == 1 ? 1 : 0);
+        assert(scan.windowOpen(60001));  // a single channel does not close the window
+    }
+    assert(scan.channelCompleted(0));
+    assert(!scan.windowOpen(60001) && scan.scanning());
+    assert(scan.lastSweepFound() == 1 && scan.networks().size() == 1);
     scan.finish();
-    assert(scan.start(100000, true));  // empty-pass count does not stick
-    scan.passCompleted(0);
-    assert(scan.windowOpen(100001));
+    assert(scan.start(70000, true));  // an empty sweep also closes a single-sweep window
+    for (unsigned channel = 1; channel <= WifiScan::kChannels; ++channel) scan.channelCompleted(0);
+    assert(!scan.windowOpen(70001) && scan.lastSweepFound() == 0);
+    scan.finish();
+    assert(scan.start(80000) && scan.windowOpen(80000));  // single-sweep state does not stick
+    for (unsigned channel = 1; channel <= WifiScan::kChannels; ++channel) scan.channelCompleted(1);
+    assert(scan.windowOpen(80001));
+    scan.finish();
 
     ApiExchange api;
     assert(api.snapshot(ApiExchange::Snapshot::WifiScan) == "{}");
