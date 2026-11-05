@@ -727,7 +727,7 @@ resources) has three tabs:
 
 - **Training:** all six effective machine profiles have a primary arc, two secondary values, four metric cards and a five-minute browser-local history. Values appear once. Missing or stale readings show `–`. Compact power/resistance/incline/speed controls follow `controls` and `canControl`; the asynchronous result is separate from the confirmed target. Speed changes require confirmation. Pause/Stop are omitted because the web API has no such commands.
 - **Connections:** add/change device opens scan and adapter selection; pairing is saved immediately. Technical details separate advertised services from actual subscription state. The bridge output card groups name, format, profile and BLE services/ANT+ channels with one Save output action. Unavailable services remain disabled; Auto retains baseline FTMS/FE-C-only behavior. BLE topology changes still require save, restart and client re-pairing. FE-C plus Power warns about duplicate power sources. Receiving app connection and control ownership are displayed separately.
-- **System:** Wi-Fi scan/credentials, AP password, HTTPS, restart, factory reset and firmware. Network changes apply after restart: once the SSID, Wi-Fi/AP password or HTTPS differs from the saved configuration, the save button reads **Save & restart**, asks for confirmation, saves, restarts and tells where to reconnect (other system edits keep a plain **Save system**). Output and system edits are tracked separately and preserved across navigation and WebSocket configuration updates. Factory reset has two confirmations. **Advanced** is collapsed by default and contains simulation and, in `DEBUG_WEB` builds, diagnostic logs.
+- **System:** Wi-Fi scan/credentials, AP password, HTTPS, restart, factory reset and firmware. Network changes apply after restart: once the SSID, Wi-Fi/AP password or HTTPS differs from the saved configuration, or saved network settings are not yet active (`networkRestartPending`), the save button reads **Save & restart**, asks for confirmation, saves, restarts and tells where to reconnect (other system edits keep a plain **Save system**). Output and system edits are tracked separately and preserved across navigation and WebSocket configuration updates. Factory reset has two confirmations. **Advanced** is collapsed by default and contains simulation and, in `DEBUG_WEB` builds, diagnostic logs.
 
 The [web design and gallery](hmi/README.md#web-design) describe responsive layouts,
 metric units, profile mapping and history limits. All history is collected from
@@ -967,12 +967,12 @@ Empty arrays mean no reported advertisements/subscriptions, not a transport erro
   "outputProtocol":"ble-ftms","antAvailable":true,"ftmsOutputProfile":"auto","ftmsInput":false,
   "ftmsOutputServices":0,"antOutputServices":0,
   "simulatedTrainer":true,"wifiSsid":"","wifiPasswordSet":false,
-  "apPasswordDefault":true,"https":true,"unsaved":false
+  "apPasswordDefault":true,"https":true,"networkRestartPending":false,"unsaved":false
 }
 ```
 
 **Passwords are never returned** by API snapshots/results: only
-`wifiPasswordSet` and `apPasswordDefault` flags are exposed.
+`wifiPasswordSet` and `apPasswordDefault` flags are exposed. `networkRestartPending` is true while the configured Wi-Fi, AP password or HTTPS settings differ from those the bridge booted with.
 
 ### WebSocket messages
 

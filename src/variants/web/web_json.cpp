@@ -227,6 +227,7 @@ std::string configJson(const ConfigView& config) {
     document["wifiPasswordSet"] = config.wifiPasswordSet;
     document["apPasswordDefault"] = config.apPasswordDefault;
     document["https"] = config.https;
+    document["networkRestartPending"] = config.networkRestartPending;
     document["unsaved"] = config.unsaved;
     return serialized(document);
 }
