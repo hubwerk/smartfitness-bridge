@@ -52,11 +52,13 @@ constexpr std::uint16_t kHttpsCtrlPort = 32768;
 constexpr std::uint16_t kHttpCtrlPort = 32769;
 // Arduino-ESP32 2.x builds mbedTLS with CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC: next to Wi-Fi and
 // BLE, internal RAM then only fits a few TLS sessions and further handshakes fail with
-// MBEDTLS_ERR_SSL_ALLOC_FAILED (-0x7F00). Large blocks go to PSRAM; internal RAM is the fallback.
-constexpr std::size_t kTlsInternalMax = 4096;
+// MBEDTLS_ERR_SSL_ALLOC_FAILED (-0x7F00). Small blocks matter too: every session parses its own
+// copy of the certificate and key, and handshakes allocate many small bignums. Internal RAM
+// left over must cover the Wi-Fi TX buffers and the AES/SHA DMA bounce buffers (otherwise
+// "esp-aes: Failed to allocate memory" and "could not send data: 12"), so all mbedTLS blocks go
+// to PSRAM; internal RAM is only the fallback.
 void* tlsCalloc(std::size_t count, std::size_t size) {
-    void* block = count * size > kTlsInternalMax ? heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-                                                 : nullptr;
+    void* block = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     return block ? block : heap_caps_calloc(count, size, MALLOC_CAP_8BIT);
 }
 void tlsFree(void* block) { heap_caps_free(block); }
@@ -678,6 +680,7 @@ void WebPortal::processDns() {
         DBG_SERIAL.printf("[DNS] %u repl%s dropped (errno %d%s)\n", impl.dnsDropped, impl.dnsDropped == 1 ? "y" : "ies",
                           impl.dnsLastErrno, impl.dnsLastErrno == ENOMEM ? ": Wi-Fi TX buffers full" : "");
         impl.dnsDropped = 0;
+        logMemory("DNS replies dropped");
     }
 }
 

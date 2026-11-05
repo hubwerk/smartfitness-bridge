@@ -504,9 +504,12 @@ Wi-Fi/AP edits require a restart to change the running network; factory reset re
 - Each TLS session uses about 35 kB. Arduino-ESP32 2.x builds mbedTLS for internal RAM
   only, which next to Wi-Fi and BLE fits just a few sessions (handshakes then fail with
   `mbedtls_ssl_setup returned -0x7F00`, the browser reports a network error). The web
-  variant therefore redirects mbedTLS blocks larger than 4 kB to PSRAM
-  (`mbedtls_platform_set_calloc_free`); Serial prints `[Mem] ...` with the free internal
-  RAM and PSRAM at start-up and after each Wi-Fi scan. The server keeps at most
+  variant therefore allocates all mbedTLS blocks in PSRAM, internal RAM only as fallback
+  (`mbedtls_platform_set_calloc_free`): small blocks add up too (each session parses its own
+  certificate/key copy, handshakes allocate many small bignums), and the remaining internal
+  RAM is needed for Wi-Fi TX buffers and the AES/SHA DMA bounce buffers (`esp-aes: Failed to
+  allocate memory`, `could not send data: 12`). Serial prints `[Mem] ...` with the free internal
+  RAM and PSRAM at start-up, after each Wi-Fi scan and with each `[DNS] … dropped` report. The server keeps at most
   **4** HTTPS connections (least-recently-used ones are closed first; WebSocket
   listeners count as recently used on every broadcast) and 2 redirect connections.
 
@@ -981,7 +984,7 @@ streaming pauses until it ends). `scan` and password-free `config` are sent on c
 `result` is sent when a queued job finishes. The final `wifi-scan` result
 (`"scanning":false`) is pushed once when a Wi-Fi scan ends, so the UI finishes even if
 its `/api/wifi-scan/results` polls stall (each poll times out after 4 s; the UI gives up
-after 30 s). These use the JSON shapes above.
+after 30 s; the `POST /api/wifi-scan` request is retried once). These use the JSON shapes above.
 All broadcasts check client count and write availability to avoid flooding slow
 clients. Unsent scan/config changes are retained (latest snapshot) for a later loop;
 command results remain retrievable through `/api/result` even if not broadcast.

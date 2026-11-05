@@ -408,7 +408,8 @@ async function fetchWithin(url,ms,options={}){const c=new AbortController(),t=se
  try{return await fetch(url,{...options,cache:"no-store",signal:c.signal})}catch(e){throw e.name==="AbortError"?new Error("timeout"):e}finally{clearTimeout(t)}}
 let wifiPushed=null;
 $("btn-wifi-scan").onclick=async()=>{const b=$("btn-wifi-scan");if(b.getAttribute("aria-busy")==="true")return;b.setAttribute("aria-busy","true");wifiOpen(false);wifiPushed=null;
- try{const r=await fetchWithin("/api/wifi-scan",5000,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+ try{let r;for(let attempt=0;;attempt++){try{r=await fetchWithin("/api/wifi-scan",5000,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});break}
+   catch(x){if(attempt)throw x}} // one retry: a busy bridge may drop the first TLS handshake
   if(r.status!==202){const j=await r.json().catch(()=>({}));throw new Error(j.error||("HTTP "+r.status))}
   // Scanning takes the radio off-channel, so single polls may fail; only the last one counts.
   // The bridge also pushes the final result over the WebSocket.

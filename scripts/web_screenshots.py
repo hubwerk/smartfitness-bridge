@@ -166,7 +166,8 @@ def render(browser, output, name, width, height):
     errors, commands, sockets, results, external = [], [], [], {}, []
     config = dict(CONFIG)
     reject_control = True
-    stalled_wifi_polls = []  # routes left pending to emulate requests stalled on the radio
+    stalled_wifi_polls = []
+    failing_wifi_posts = [1]  # the first scan request fails like a dropped TLS handshake  # routes left pending to emulate requests stalled on the radio
     page.on("pageerror", lambda error: errors.append(str(error)))
 
     def websocket(ws):
@@ -183,7 +184,11 @@ def render(browser, output, name, width, height):
         elif url.path == "/":
             request_route.fulfill(body=web_content(), content_type="text/html")
         elif url.path == "/api/wifi-scan":
-            request_route.fulfill(status=202, json={"scanning": True})
+            if failing_wifi_posts[0]:
+                failing_wifi_posts[0] -= 1
+                request_route.abort("connectionreset")
+            else:
+                request_route.fulfill(status=202, json={"scanning": True})
         elif url.path == "/api/wifi-scan/results":
             if stalled_wifi_polls:
                 stalled_wifi_polls.append(request_route)
@@ -446,6 +451,7 @@ def render(browser, output, name, width, height):
                                       "https": False, "save": True})
     page.locator("#btn-wifi-scan").click()
     expect(page.locator("#wifi-list")).to_be_visible(timeout=10000)
+    assert failing_wifi_posts == [0], "scan request was not retried"
     # Headless Chromium hides scrollbars, so emulate a scrollbar press: mousedown on the list itself,
     # then the focus loss real browsers cause. The list must stay open and get focus back on release.
     page.evaluate("""() => {
