@@ -73,7 +73,7 @@ details{min-width:0}summary{cursor:pointer;color:#bed1e2;font-size:12px;min-heig
 <section id="set" role="tabpanel" aria-labelledby="tab-set" tabindex="0" hidden><h2>System</h2><div class="two-column">
 <div class="card" id="network-settings"><h3>Wi-Fi & access</h3><label class="field" for="c-wifiSsid"><span>Network (SSID)</span></label><div class="row"><div class="combo"><input id="c-wifiSsid" maxlength="32" placeholder="empty = access point only" role="combobox" aria-autocomplete="none" aria-expanded="false" aria-controls="wifi-list" autocomplete="off"><ul id="wifi-list" role="listbox" aria-label="Wi-Fi networks" hidden></ul></div><button class="b sec" id="btn-wifi-scan" aria-busy="false"><span class="spin" aria-hidden="true"></span>Scan</button></div>
 <label class="field"><span>Wi-Fi password</span><input id="c-wifiPassword" type="password" maxlength="63" placeholder="unchanged"></label><label class="field"><span>Access point password</span><input id="c-apPassword" type="password" maxlength="63" placeholder="unchanged"></label><div class="row"><label for="c-https">HTTPS</label><input id="c-https" type="checkbox"></div>
-<p class="small">HTTPS uses a self-signed certificate. Disabling it serves this interface unencrypted. Network changes take effect after restart.</p><div class="row"><button class="b primary" id="btn-save">Save system</button><span id="system-dirty" class="small" role="status">No unsaved edits</span></div><details class="technical"><summary>Network details</summary><div id="s-net"></div></details></div>
+<p class="small">HTTPS uses a self-signed certificate. Disabling it serves this interface unencrypted. Network changes take effect after a restart: “Save & restart” applies them right away.</p><div class="row"><button class="b primary" id="btn-save">Save system</button><span id="system-dirty" class="small" role="status">No unsaved edits</span></div><details class="technical"><summary>Network details</summary><div id="s-net"></div></details></div>
 <div class="card"><h3>System actions</h3><p class="small">Restarting interrupts device and app connections. Finish your training first.</p><button class="b sec" id="btn-restart">Restart…</button><div class="technical"><h3>Factory settings</h3><p class="small">Erases everything (configuration, pairing, Wi-Fi, HTTPS certificate, logs) and restarts. Requires two confirmations.</p><button class="b danger" id="btn-reset">Factory reset…</button></div><p class="small">Firmware <span id="fw"></span> · <span id="unsaved"></span></p></div></div>
 <details class="card system-advanced" id="advanced"><summary><div><h3>Advanced</h3><span class="small">Diagnostics, logs & simulation · setup and troubleshooting</span></div></summary><div class="two-column">
 <div><h3>Simulation</h3><p class="small">Replaces the real training source with simulated measurements.</p><button class="b" id="btn-sim">Use simulation…</button><div class="row"><label for="c-simulatedTrainer">Simulation is a trainer</label><input id="c-simulatedTrainer" type="checkbox"></div><p class="small">Save this option with “Save system”. Connect a real device under Connections to leave simulation.</p></div>
@@ -87,10 +87,14 @@ details{min-width:0}summary{cursor:pointer;color:#bed1e2;font-size:12px;min-heig
 const $=id=>document.getElementById(id);
 let status={},scan={devices:[],adapters:[]},pending={};
 const dirty=new Set();
+let cfgHttps=location.protocol==="https:",cfgSsid="";
 const editVersion={output:0,system:0};
 let configLoaded=false,configSaving=false;
 function markDirty(scope){dirty.add(scope);editVersion[scope]++;renderDirty()}
-function renderDirty(){for(const scope of["output","system"])$(scope+"-dirty").textContent=dirty.has(scope)?"Unsaved edits":"No unsaved edits"}
+function renderDirty(){for(const scope of["output","system"])$(scope+"-dirty").textContent=dirty.has(scope)?"Unsaved edits":"No unsaved edits";
+ $("btn-save").textContent=networkChanged()?"Save & restart":"Save system"}
+// Wi-Fi, access point and HTTPS settings only take effect after a restart.
+function networkChanged(){return $("c-wifiSsid").value!==cfgSsid||!!$("c-wifiPassword").value||!!$("c-apPassword").value||$("c-https").checked!==cfgHttps}
 let serviceMasks={ftms:0,ant:0},antAvailable=false,configuredFtmsServices=0,outputDirty=false,configuredOutput="ble-ftms";
 const outputServices={ftms:[["ftms","FTMS",1],["cps","CPS",2],["hr","HR",4],["csc","CSC",8],["rsc","RSC",16]],ant:[["fec","FE-C",1],["power","Power",2],["hr","HR",4],["speed-cadence","Speed / cadence",8],["sdm","Footpod",16]]};
 function outputEntries(kind){return kind==="ftms"?(status.ftmsOutput||{}).services||[]:(status.antOutput||{}).channels||[]}
@@ -303,7 +307,6 @@ function renderScan(sc){
    btn.disabled=true;await run("pair",{address:d.address,addressType:d.addressType,adapter:sel.value});btn.disabled=false};
   const svc=el("td",(d.services||[]).join(" "),"small"),ad=el("td"),act=el("td");ad.append(sel);act.append(btn);
   const rssi=el("td",d.rssi);rssi.dataset.label="RSSI";svc.dataset.label="Services";ad.dataset.label="Adapter";tr.append(name,rssi,svc,ad,act);return tr}));}
-let cfgHttps=location.protocol==="https:";
 function renderConfig(c){
  configLoaded=true;
  if(!dirty.has("output")){
@@ -314,7 +317,7 @@ function renderConfig(c){
  $("c-outputHint").hidden=$("c-outputProtocol").value!=="ant-fec";
  $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";renderBridge();
  }
- cfgHttps=c.https!==false;
+ cfgHttps=c.https!==false;cfgSsid=c.wifiSsid||"";
  if(!dirty.has("system")){
  $("c-simulatedTrainer").checked=!!c.simulatedTrainer;$("c-https").checked=cfgHttps;
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
@@ -328,11 +331,11 @@ $("btn-connect").onclick=()=>run("connect");$("btn-disconnect").onclick=()=>run(
 $("c-outputProtocol").onchange=()=>{outputDirty=$("c-outputProtocol").value!==configuredOutput;$("c-outputHint").hidden=$("c-outputProtocol").value!=="ant-fec";renderBridge();renderServiceControls()};
 for(const[id,scope]of[["card-bridge","output"],["network-settings","system"],["advanced","system"]])for(const event of["input","change"])$(id).addEventListener(event,e=>{if(e.target.matches("input,select"))markDirty(scope)});
 $("btn-discard-output").onclick=()=>{dirty.delete("output");outputDirty=false;loadConfig()};
-async function saveConfig(scope,body){
+async function saveConfig(scope,body,quiet){
  if(configSaving)return;
  if(!configLoaded){toast("Load settings before saving.",false);return}
  const version=editVersion[scope];configSaving=true;$("btn-save").disabled=true;$("btn-output").disabled=true;
- try{const r=await run("config",{...body,save:true});if(r?.ok){if(editVersion[scope]===version)dirty.delete(scope);if(scope==="output"&&!dirty.has(scope))outputDirty=false;await loadConfig()}}
+ try{const r=await run("config",{...body,save:true},quiet);if(r?.ok){if(editVersion[scope]===version)dirty.delete(scope);if(scope==="output"&&!dirty.has(scope))outputDirty=false;await loadConfig()}return !!r?.ok}
  finally{configSaving=false;$("btn-save").disabled=false;$("btn-output").disabled=false;renderDirty()}
 }
 $("btn-output").onclick=()=>{const body={outputProtocol:$("c-outputProtocol").value,ftmsName:$("c-ftmsName").value,ftmsOutputProfile:$("c-ftmsOutputProfile").value,ftmsOutputServices:serviceMasks.ftms};if(antAvailable)body.antOutputServices=serviceMasks.ant;saveConfig("output",body)};
@@ -345,10 +348,18 @@ $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value),kind=$
  const commandSource=sourceKey;controlBusy=true;$("ctl-result").textContent="";renderControls();
  try{const r=await run("control",{control:kind,value:v},true);if(commandSource===sourceKey){$("ctl-result").textContent=r?r.message:"Request failed; target not confirmed.";$("ctl-result").className="small "+(r?.ok?"ok":"bad")}}
  finally{controlBusy=false;renderControls()}};
-$("btn-save").onclick=()=>{const b={simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value};
+$("btn-save").onclick=async()=>{if(configSaving)return;const b={simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value};
  b.https=$("c-https").checked;
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
- saveConfig("system",b)};
+ const restart=networkChanged(),ssidChanged=b.wifiSsid!==cfgSsid;
+ if(restart&&!confirm("Save and restart the bridge now? This interrupts device and app connections"+(ssidChanged?" and may disconnect this page.":".")))return;
+ if(!await saveConfig("system",b,restart)||!restart)return;
+ const r=await run("restart",undefined,true);if(!r)return;if(!r.ok){toast(r.message,false);return}
+ const where=(b.https?"https://":"http://")+"smartfitness.local/",
+  hint=!ssidChanged?"Saved; the bridge is restarting.":b.wifiSsid?"Saved; the bridge restarts and joins “"+b.wifiSsid+"”. Connect this device to that network and open "+where+" (if it cannot join, its access point returns after about 20 s).":"Saved; the bridge restarts as access point only. Connect to its access point and open "+where;
+ $("system-dirty").textContent=hint;toast(hint,true);
+ if(!ssidChanged)afterRestart()};
+function afterRestart(){if(cfgHttps!==(location.protocol==="https:"))setTimeout(()=>{location.href=(cfgHttps?"https://":"http://")+location.hostname+"/"},8000)}
 // Select-only dropdowns with the Wi-Fi list look. The hidden native select stays the source of truth,
 // so programmatic .value writes, option.disabled/hidden and change listeners keep working.
 function dropdown(sel){
@@ -421,7 +432,7 @@ $("btn-wifi-scan").onclick=async()=>{const b=$("btn-wifi-scan");if(b.getAttribut
   renderWifi(s.networks||[]);if(wifiNets.length){ssid.focus();wifiOpen(true)}else toast("no Wi-Fi networks found",false)}
  catch(e){toast("Wi-Fi scan failed: "+e.message,false)}finally{wifiPushed=null;b.setAttribute("aria-busy","false")}};
 $("btn-restart").onclick=async()=>{if(dirty.size){toast("Save or discard your edits before restarting.",false);return}if(!confirm("Restart the bridge and interrupt all connections?"))return;const r=await run("restart");
- if(r&&r.ok&&cfgHttps!==(location.protocol==="https:"))setTimeout(()=>{location.href=(cfgHttps?"https://":"http://")+location.hostname+"/"},8000)};
+ if(r&&r.ok)afterRestart()};
 $("btn-reset").onclick=()=>{if(confirm("Erase all settings, the pairing, Wi-Fi, the HTTPS certificate and logs?")&&confirm("This cannot be undone. Restore factory settings and restart?"))run("factory-reset",undefined,true).then(r=>{if(!r)return;dirty.clear();
  toast(r.ok?"Factory reset: the bridge restarts as access point SmartFitness-XXXX with the default password.":r.message,r.ok)})};
 // #ifdef DEBUG_WEB

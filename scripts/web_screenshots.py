@@ -339,6 +339,20 @@ def render(browser, output, name, width, height):
         assert len(commands) == before + 1, (selector, commands)
         assert commands[-1][0] == endpoint
 
+    def save_and_restart(hint):
+        expect(page.locator("#btn-save")).to_have_text("Save & restart")
+        before = len(commands)
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        page.locator("#btn-save").click()
+        page.wait_for_timeout(200)
+        assert len(commands) == before, "saved without confirmation"
+        page.once("dialog", lambda dialog: dialog.accept())
+        page.locator("#btn-save").click()
+        expect(page.locator("#system-dirty")).to_contain_text(hint)
+        page.wait_for_function("Object.keys(pending).length === 0 && !configSaving")
+        assert [c[0] for c in commands[before:]] == ["config", "restart"], commands[before:]
+        expect(page.locator("#btn-save")).to_have_text("Save system")
+
     page.locator("#ctl-value").fill("")
     page.locator("#btn-apply").click()
     expect(page.locator("#toast")).to_have_text("enter a number")
@@ -445,10 +459,20 @@ def render(browser, output, name, width, height):
     page.locator("#tab-set").click()
     check_view(page, "set", width < 700)
     expect(page.locator("#advanced")).not_to_have_attribute("open", "")
+    expect(page.locator("#btn-save")).to_have_text("Save & restart")  # SSID edited above
     page.locator("#c-https").uncheck()
-    command("#btn-save", "config")
-    assert commands[-1] == ("config", {"simulatedTrainer": True, "wifiSsid": "New network",
+    save_and_restart("joins “New network”")
+    assert commands[-2] == ("config", {"simulatedTrainer": True, "wifiSsid": "New network",
                                       "https": False, "save": True})
+    # Settings that apply live keep the plain save.
+    page.evaluate("""() => {const box=document.getElementById("c-simulatedTrainer");
+        box.checked=false; box.dispatchEvent(new Event("change", {bubbles: true}))}""")
+    expect(page.locator("#btn-save")).to_have_text("Save system")
+    command("#btn-save", "config")
+    page.locator("#c-wifiSsid").fill("Other")
+    expect(page.locator("#btn-save")).to_have_text("Save & restart")
+    page.locator("#c-wifiSsid").fill("New network")
+    expect(page.locator("#btn-save")).to_have_text("Save system")
     page.locator("#btn-wifi-scan").click()
     expect(page.locator("#wifi-list")).to_be_visible(timeout=10000)
     assert failing_wifi_posts == [0], "scan request was not retried"
@@ -492,7 +516,9 @@ def render(browser, output, name, width, height):
     stalled_wifi_polls.clear()
     page.locator("#c-wifiSsid").blur()
     expect(page.locator("#system-dirty")).to_have_text("Unsaved edits")
-    command("#btn-save", "config")
+    page.locator("#c-wifiPassword").fill("training-pass")
+    save_and_restart("joins “Training room”")
+    assert commands[-2][1]["wifiPassword"] == "training-pass"
     before = len(commands)
     page.once("dialog", lambda dialog: dialog.dismiss())
     page.locator("#btn-restart").click()

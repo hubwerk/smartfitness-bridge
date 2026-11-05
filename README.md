@@ -38,8 +38,8 @@ the board's 16 MB flash layout; do not select a different partition scheme.
 1. After flashing, connect to the Wi-Fi access point named `SmartFitness-XXXX`.
    Its initial password is `smartfitness`; change it before normal use.
 2. Open `https://192.168.4.1/` and accept the browser warning for the
-   self-signed certificate. In **System**, enter your home Wi-Fi details and
-   save/restart, or continue using the access point.
+   self-signed certificate. In **System**, pick your home Wi-Fi with **Scan**,
+   enter its password and click **Save & restart**, or continue using the access point.
 3. Wake the fitness device, disconnect other apps from it, then use
    **Connections → Add device → Scan** and **Pair**. Check **Training** for
    live measurements.
