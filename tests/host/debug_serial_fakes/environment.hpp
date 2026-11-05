@@ -184,6 +184,13 @@ inline const esp_partition_t* esp_partition_find_first(int, int, const char*) {
     static esp_partition_t partition{fake::partition.size()};
     return &partition;
 }
+inline int esp_littlefs_format(const char* label) {
+    assert(!fake::isr && std::strcmp(label, "spiffs") == 0);
+    ++fake::formats;
+    fake::mounted = true;
+    fake::partition.front() = 0;  // superblock written
+    return ESP_OK;
+}
 inline int esp_partition_read(const esp_partition_t*, std::size_t offset, void* data, std::size_t count) {
     assert(!fake::isr);
     std::memcpy(data, fake::partition.data() + offset, count);

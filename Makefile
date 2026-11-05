@@ -12,8 +12,8 @@ CORE_TESTS = tests/host/test_main.cpp tests/host/test_bridge_core.cpp tests/host
 	tests/host/test_vendor_treadmills.cpp tests/host/test_vendor_bikes.cpp tests/host/test_vendor_cardio.cpp \
 	tests/host/test_ant.cpp
 
-# Web variant (pure C++ parts): API exchange, JSON renderer, Wi-Fi policy.
-WEB_SOURCES = src/variants/web/web_api.cpp src/variants/web/web_json.cpp src/variants/web/wifi_policy.cpp
+# Web variant (pure C++ parts): API exchange, JSON renderer, Wi-Fi policy, captive DNS.
+WEB_SOURCES = src/variants/web/captive_dns.cpp src/variants/web/web_api.cpp src/variants/web/web_json.cpp src/variants/web/wifi_policy.cpp
 WEB_TESTS = tests/host/test_web.cpp
 
 # HMI variant (pure C++ parts): view logic shared by the LVGL screens.

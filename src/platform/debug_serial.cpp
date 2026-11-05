@@ -2,6 +2,7 @@
 #include "debug_serial.h"
 
 #include <LittleFS.h>
+#include <esp_littlefs.h>
 #include <esp_partition.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -23,6 +24,7 @@ constexpr char kPath[] = "/debug.log";
 // Headroom for raw BLE + decoded telemetry bursts and short log downloads.
 constexpr std::size_t kQueueBytes = 16 * 1024;
 constexpr std::size_t kBlockBytes = 1024;
+constexpr const char* kPartitionLabel = "spiffs";
 // Per-byte destination flags of the queued output.
 constexpr std::uint8_t kToSerial = 1;
 constexpr std::uint8_t kToFile = 2;
@@ -74,7 +76,7 @@ void warning(const char* message) {
 // partition is erased. In particular, a damaged or foreign filesystem is kept.
 bool blankPartition() {
     const esp_partition_t* partition = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, kPartitionLabel);
     if (!partition) return false;
     std::uint8_t block[kBlockBytes];
     for (std::size_t offset = 0; offset < partition->size; offset += sizeof(block)) {
@@ -347,8 +349,11 @@ void begin() {
         useSerialFallback("[Debug] logger mutex allocation failed; direct Serial fallback\n");
         return;
     }
-    bool mounted = LittleFS.begin(false);
-    if (!mounted && blankPartition()) mounted = LittleFS.begin(true);
+    // An erased partition (first flash, factory reset) is formatted BEFORE mounting; mounting it
+    // first only fails with "Corrupted dir pair" errors. A partition with data is never formatted.
+    if (blankPartition() && esp_littlefs_format(kPartitionLabel) != ESP_OK)
+        warning("[Debug] LittleFS format failed\n");
+    const bool mounted = LittleFS.begin(false);
     if (!mounted) {
         warning("[Debug] LittleFS mount failed; existing partition NOT formatted; Serial only\n");
     } else {

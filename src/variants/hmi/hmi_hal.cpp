@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include "debug_serial.h"
 #include <Preferences.h>
+#include "config_backend.h"
 #include <Wire.h>
 #include <esp_heap_caps.h>
 
@@ -305,7 +306,7 @@ void CrowPanelHal::setLedRing(bool enabled, const Rgb& color) {
 HmiSettings CrowPanelHal::loadSettings() {
     HmiSettings settings;
     Preferences prefs;
-    if (!prefs.begin("sfhmi", true)) return settings;
+    if (!nvsNamespaceExists("sfhmi") || !prefs.begin("sfhmi", true)) return settings;
     const std::size_t length = prefs.getBytesLength("ui");
     if (length > 0 && length <= 16) {
         std::vector<std::uint8_t> data(length);

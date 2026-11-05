@@ -1,6 +1,7 @@
 #include "config_backend.h"
 #ifdef ARDUINO
 #include <Preferences.h>
+#include <nvs.h>
 #endif
 
 bool MemoryConfigBackend::read(std::vector<std::uint8_t>& data) {
@@ -30,11 +31,18 @@ void MemoryConfigBackend::setRecord(const std::vector<std::uint8_t>& data) {
 }
 
 #ifdef ARDUINO
+bool nvsNamespaceExists(const char* name) {
+    nvs_iterator_t entry = nvs_entry_find(NVS_DEFAULT_PART_NAME, name, NVS_TYPE_ANY);
+    if (!entry) return false;
+    nvs_release_iterator(entry);
+    return true;
+}
+
 bool NvsConfigBackend::read(std::vector<std::uint8_t>& data) {
     data.clear();
     Preferences preferences;
     // Read-only so loading never writes flash; fails (no record) until the namespace exists.
-    if (!preferences.begin(kNamespace, true)) return false;
+    if (!nvsNamespaceExists(kNamespace) || !preferences.begin(kNamespace, true)) return false;
     if (!preferences.isKey(kKey)) {
         preferences.end();
         return false;

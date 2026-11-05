@@ -15,6 +15,7 @@
 #include <Arduino.h>
 #include "debug_serial.h"
 #include <Preferences.h>
+#include "config_backend.h"
 #endif
 
 namespace web {
@@ -154,7 +155,7 @@ bool validTlsIdentity(const TlsIdentity& identity) {
 bool loadOrCreateTlsIdentity(const std::string& dnsName, const std::array<std::uint8_t, 4>& ipAddress,
                              TlsIdentity& identity) {
     Preferences prefs;
-    if (prefs.begin("sftls", true)) {
+    if (nvsNamespaceExists("sftls") && prefs.begin("sftls", true)) {
         identity.certificatePem = prefs.getString("cert", "").c_str();
         identity.privateKeyPem = prefs.getString("key", "").c_str();
         prefs.end();

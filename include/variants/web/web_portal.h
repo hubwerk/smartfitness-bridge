@@ -60,6 +60,7 @@ private:
     NetworkStatus networkStatus() const;
     void beginStation();
     void updateWifiScan(std::uint32_t now);
+    void processDns();
 
     BridgeController& ui_;
     ApiExchange& api_;

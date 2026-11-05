@@ -40,6 +40,10 @@ private:
 };
 
 #ifdef ARDUINO
+// True when the NVS namespace holds at least one key. Preferences::begin(name, true) logs
+// "nvs_open failed: NOT_FOUND" for a missing namespace (first boot, after factory reset).
+bool nvsNamespaceExists(const char* name);
+
 // Flash (NVS) backend using the Arduino-ESP32 Preferences API.
 class NvsConfigBackend final : public ConfigBackend {
 public:
