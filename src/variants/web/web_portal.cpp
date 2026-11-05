@@ -289,15 +289,15 @@ struct WebPortal::Impl {
     explicit Impl(WebPortal& owner) : portal(owner) {}
 
     bool startDns() {
-        dnsSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        dnsSocket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (dnsSocket < 0) return false;
         const int reuse = 1;
-        setsockopt(dnsSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        ::setsockopt(dnsSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_port = htons(kDnsPort);
         address.sin_addr.s_addr = htonl(INADDR_ANY);
-        if (bind(dnsSocket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        if (::bind(dnsSocket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
             stopDns();
             return false;
         }
@@ -305,7 +305,7 @@ struct WebPortal::Impl {
     }
 
     void stopDns() {
-        if (dnsSocket >= 0) close(dnsSocket);
+        if (dnsSocket >= 0) ::close(dnsSocket);
         dnsSocket = -1;
     }
 
