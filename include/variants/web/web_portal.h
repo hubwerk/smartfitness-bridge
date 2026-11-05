@@ -15,9 +15,10 @@
 //    BridgeController and publishes fresh snapshots via loop(). WebSocket
 //    broadcasts are queued onto the server task (httpd_queue_work).
 //  * Wi-Fi network scan (POST /api/wifi-scan): the main loop runs async scan
-//    passes for WifiScan::kDurationMs (a single pass while the station is
+//    sweeps for WifiScan::kDurationMs (a single sweep while the station is
 //    connected or the access point has clients) and publishes the merged
-//    networks. Short per-channel dwell keeps the access point reachable.
+//    networks. Each async scan covers one channel with a short dwell, so the
+//    access point stays reachable between them.
 
 #ifdef ARDUINO
 
@@ -37,9 +38,11 @@ public:
     static constexpr std::uint16_t kHttpPort = 80;  // redirects to HTTPS
     static constexpr std::uint32_t kStatusIntervalMs = 250;  // WebSocket push <= 4 Hz
     static constexpr std::uint32_t kScanIntervalMs = 1000;
-    static constexpr std::uint32_t kWifiScanRetryMs = 500;
-    // Off-channel time per scanned channel; the Arduino default (300 ms) misses
-    // several AP beacons in a row, so AP clients drop during the scan.
+    // Time on the home channel between two channel scans (and before retrying a failed one).
+    static constexpr std::uint32_t kWifiScanRetryMs = 250;
+    // Off-channel time per scanned channel. Arduino-ESP32 also derives the scan
+    // timeout from it (20x, i.e. 2 s): far too short for an all-channel scan,
+    // which then gets reported as failed and aborted by the next start.
     static constexpr std::uint32_t kWifiScanChannelMs = 100;
 
     WebPortal(BridgeController& ui, ApiExchange& api);
@@ -80,6 +83,7 @@ private:
     std::atomic<int> stationDisconnectReason_{-1};
     WifiScan wifiScan_;
     std::uint32_t lastWifiScanAttemptMs_ = 0;
+    bool wifiChannelScanPending_ = false;
     int lastApStationCount_ = -1;
 };
 

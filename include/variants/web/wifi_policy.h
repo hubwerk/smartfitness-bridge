@@ -46,13 +46,13 @@ private:
     std::uint32_t connectedSinceMs_ = 0;
 };
 
-// Wi-Fi network scan requested from the web UI: repeated scan passes during
-// a fixed window, merged by SSID (strongest signal wins, hidden networks are
-// skipped). While web clients depend on the radio (station connected or
-// clients on the access point) a single pass is run instead: every pass takes
-// the radio off the home channel, the access point stops beaconing meanwhile,
-// and back-to-back passes would cut those clients off.
-// The firmware drives the passes; this class only keeps the state.
+// Wi-Fi network scan requested from the web UI: repeated sweeps over all
+// channels during a fixed window, merged by SSID (strongest signal wins,
+// hidden networks are skipped). Each sweep scans one channel at a time so the
+// radio returns to the home channel in between: the access point keeps
+// beaconing and serving its clients. While web clients depend on the radio
+// (station connected or clients on the access point) a single sweep is run.
+// The firmware drives the channel scans; this class only keeps the state.
 struct WifiNetwork {
     std::string ssid;
     int rssi = 0;  // dBm
@@ -63,28 +63,27 @@ class WifiScan {
 public:
     static constexpr std::uint32_t kDurationMs = 15000;
     static constexpr std::size_t kMaxNetworks = 32;
-    // A single-pass window still retries empty passes: the first pass right after the
-    // station interface is switched on can come back empty.
-    static constexpr unsigned kMaxEmptyPasses = 3;
+    static constexpr std::uint8_t kChannels = 13;
 
-    // A single pass whenever someone reaches the bridge over Wi-Fi.
+    // A single sweep whenever someone reaches the bridge over Wi-Fi.
     static bool singlePassFor(bool stationConnected, unsigned apStations) {
         return stationConnected || apStations > 0;
     }
-    // Starts a new window and clears previous results; false while one runs.
-    // singlePass closes the window after the first pass with results (or kMaxEmptyPasses empty ones).
+    // Starts a new window at channel 1 and clears previous results; false while one runs.
+    // singlePass closes the window after the first complete sweep.
     bool start(std::uint32_t nowMs, bool singlePass = false);
-    // True while further scan passes may be started.
+    // True while further channel scans may be started.
     bool windowOpen(std::uint32_t nowMs) const {
-        return scanning_ && !(singlePass_ && (passWithResults_ || emptyPasses_ >= kMaxEmptyPasses)) &&
-               nowMs - startedMs_ < kDurationMs;
+        return scanning_ && !(singlePass_ && sweeps_ > 0) && nowMs - startedMs_ < kDurationMs;
     }
+    // Channel (1..kChannels) the next scan has to cover.
+    std::uint8_t channel() const { return channel_; }
     void add(const WifiNetwork& network);
-    // A scan pass finished successfully with the given number of access points.
-    void passCompleted(unsigned found) {
-        if (found > 0) passWithResults_ = true;
-        else ++emptyPasses_;
-    }
+    // The scan of channel() finished with the given number of access points;
+    // advances to the next channel. True when this completed a sweep.
+    bool channelCompleted(unsigned found);
+    // Access points seen during the last complete sweep.
+    unsigned lastSweepFound() const { return lastSweepFound_; }
     void finish() { scanning_ = false; }
     bool scanning() const { return scanning_; }
     // Sorted by signal strength, strongest first.
@@ -93,8 +92,10 @@ public:
 private:
     bool scanning_ = false;
     bool singlePass_ = false;
-    bool passWithResults_ = false;
-    unsigned emptyPasses_ = 0;
+    std::uint8_t channel_ = 1;
+    unsigned sweeps_ = 0;
+    unsigned sweepFound_ = 0;
+    unsigned lastSweepFound_ = 0;
     std::uint32_t startedMs_ = 0;
     std::vector<WifiNetwork> networks_;
 };
