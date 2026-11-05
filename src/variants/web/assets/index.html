@@ -87,14 +87,15 @@ details{min-width:0}summary{cursor:pointer;color:#bed1e2;font-size:12px;min-heig
 const $=id=>document.getElementById(id);
 let status={},scan={devices:[],adapters:[]},pending={};
 const dirty=new Set();
-let cfgHttps=location.protocol==="https:",cfgSsid="";
+let cfgHttps=location.protocol==="https:",cfgSsid="",cfgRestartPending=false;
 const editVersion={output:0,system:0};
 let configLoaded=false,configSaving=false;
 function markDirty(scope){dirty.add(scope);editVersion[scope]++;renderDirty()}
-function renderDirty(){for(const scope of["output","system"])$(scope+"-dirty").textContent=dirty.has(scope)?"Unsaved edits":"No unsaved edits";
- $("btn-save").textContent=networkChanged()?"Save & restart":"Save system"}
+function renderDirty(){for(const scope of["output","system"])$(scope+"-dirty").textContent=dirty.has(scope)?"Unsaved edits":scope==="system"&&cfgRestartPending?"Saved network settings apply after a restart":"No unsaved edits";
+ $("btn-save").textContent=needsRestart()?"Save & restart":"Save system"}
 // Wi-Fi, access point and HTTPS settings only take effect after a restart.
 function networkChanged(){return $("c-wifiSsid").value!==cfgSsid||!!$("c-wifiPassword").value||!!$("c-apPassword").value||$("c-https").checked!==cfgHttps}
+function needsRestart(){return cfgRestartPending||networkChanged()}
 let serviceMasks={ftms:0,ant:0},antAvailable=false,configuredFtmsServices=0,outputDirty=false,configuredOutput="ble-ftms";
 const outputServices={ftms:[["ftms","FTMS",1],["cps","CPS",2],["hr","HR",4],["csc","CSC",8],["rsc","RSC",16]],ant:[["fec","FE-C",1],["power","Power",2],["hr","HR",4],["speed-cadence","Speed / cadence",8],["sdm","Footpod",16]]};
 function outputEntries(kind){return kind==="ftms"?(status.ftmsOutput||{}).services||[]:(status.antOutput||{}).channels||[]}
@@ -317,7 +318,7 @@ function renderConfig(c){
  $("c-outputHint").hidden=$("c-outputProtocol").value!=="ant-fec";
  $("c-ftmsOutputProfile").value=c.ftmsOutputProfile||"auto";renderBridge();
  }
- cfgHttps=c.https!==false;cfgSsid=c.wifiSsid||"";
+ cfgHttps=c.https!==false;cfgSsid=c.wifiSsid||"";cfgRestartPending=!!c.networkRestartPending;
  if(!dirty.has("system")){
  $("c-simulatedTrainer").checked=!!c.simulatedTrainer;$("c-https").checked=cfgHttps;
  $("c-wifiSsid").value=c.wifiSsid||"";$("c-wifiPassword").value="";$("c-apPassword").value="";
@@ -351,7 +352,7 @@ $("btn-apply").onclick=async()=>{const v=parseFloat($("ctl-value").value),kind=$
 $("btn-save").onclick=async()=>{if(configSaving)return;const b={simulatedTrainer:$("c-simulatedTrainer").checked,wifiSsid:$("c-wifiSsid").value};
  b.https=$("c-https").checked;
  if($("c-wifiPassword").value)b.wifiPassword=$("c-wifiPassword").value;if($("c-apPassword").value)b.apPassword=$("c-apPassword").value;
- const restart=networkChanged(),ssidChanged=b.wifiSsid!==cfgSsid;
+ const restart=needsRestart(),ssidChanged=b.wifiSsid!==cfgSsid||cfgRestartPending;
  if(restart&&!confirm("Save and restart the bridge now? This interrupts device and app connections"+(ssidChanged?" and may disconnect this page.":".")))return;
  if(!await saveConfig("system",b,restart)||!restart)return;
  const r=await run("restart",undefined,true);if(!r)return;if(!r.ok){toast(r.message,false);return}

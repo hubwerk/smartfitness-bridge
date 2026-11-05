@@ -122,6 +122,7 @@ CONFIG = {
     "ftmsOutputServices": 7, "antOutputServices": 5,
     "simulatedTrainer": True, "wifiSsid": "Training room",
     "wifiPasswordSet": True, "apPasswordDefault": True, "https": True, "unsaved": False,
+    "networkRestartPending": False,
 }
 WIFI_SCAN = {
     "type": "wifi-scan", "scanning": False,
@@ -519,6 +520,11 @@ def render(browser, output, name, width, height):
     page.locator("#c-wifiPassword").fill("training-pass")
     save_and_restart("joins “Training room”")
     assert commands[-2][1]["wifiPassword"] == "training-pass"
+    # Network settings saved earlier but not yet active still offer the restart.
+    sockets[0].send(json.dumps({**CONFIG, "wifiSsid": "Training room", "networkRestartPending": True}))
+    expect(page.locator("#system-dirty")).to_have_text("Saved network settings apply after a restart")
+    save_and_restart("joins “Training room”")
+    assert "wifiPassword" not in commands[-2][1], commands[-2]
     before = len(commands)
     page.once("dialog", lambda dialog: dialog.dismiss())
     page.locator("#btn-restart").click()

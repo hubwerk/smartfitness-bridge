@@ -59,6 +59,11 @@ private:
     bool restartRequested_ = false;
     bool factoryWipeRequested_ = false;
     bool outputProtocolLogged_ = false;
+    // Network settings the running Wi-Fi/web server started with (see begin()).
+    std::string bootWifiSsid_;
+    std::string bootWifiPassword_;
+    std::string bootApPassword_;
+    bool bootHttps_ = true;
     smartfitness::OutputProtocol lastOutputProtocol_ = smartfitness::OutputProtocol::Off;
     std::string input_;
     bool overflow_ = false;

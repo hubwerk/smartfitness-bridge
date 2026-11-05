@@ -289,7 +289,16 @@ void testPairOverrideAndExclusion() {
 
 void testWifiCommands() {
     Rig rig;
+    assert(!rig.ui.configView().networkRestartPending);
     assert(rig.ui.handleCommand("wifi Home short") == "password must be empty or 8-63 printable characters");
+    assert(rig.ui.handleCommand("wifi Home secret-pass") == "wifi: Home; save and restart to apply");
+    assert(rig.ui.configView().networkRestartPending);
+    assert(parse(rig.configJson())["networkRestartPending"] == true);
+    assert(rig.ui.handleCommand("wifi-clear") == "wifi cleared (access point only); save and restart to apply");
+    assert(!rig.ui.configView().networkRestartPending);  // back to the settings the bridge runs with
+    assert(rig.ui.handleCommand("https off") == "https off; save and restart to apply");
+    assert(rig.ui.configView().networkRestartPending);
+    assert(rig.ui.handleCommand("https on") == "https on; save and restart to apply");
     assert(rig.ui.handleCommand("wifi Home secret-pass") == "wifi: Home; save and restart to apply");
     assert(rig.config.config().wifiSsid == "Home" && rig.config.config().wifiPassword == "secret-pass");
     assert(rig.ui.handleCommand("ap-pass 1234") == "access point password must be 8-63 printable ASCII characters");

@@ -134,6 +134,11 @@ void BridgeController::applyConfig() {
 }
 
 void BridgeController::begin() {
+    const BridgeConfig& config = config_.config();
+    bootWifiSsid_ = config.wifiSsid;
+    bootWifiPassword_ = config.wifiPassword;
+    bootApPassword_ = config.apPassword;
+    bootHttps_ = config.httpsEnabled;
     applyConfig();
     // Auto-connect the paired BLE device on boot.
     if (bleSelected()) bridge_.scanAndConnect();
@@ -568,6 +573,8 @@ ConfigView BridgeController::configView() const {
     view.wifiPasswordSet = !config.wifiPassword.empty();
     view.apPasswordDefault = config.apPassword == BridgeConfig{}.apPassword;
     view.https = config.httpsEnabled;
+    view.networkRestartPending = config.wifiSsid != bootWifiSsid_ || config.wifiPassword != bootWifiPassword_ ||
+                                 config.apPassword != bootApPassword_ || config.httpsEnabled != bootHttps_;
     view.unsaved = config_.hasUnsavedChanges();
     view.ftmsOutputServices = config.ftmsOutputServices;
     view.antOutputServices = config.antOutputServices;

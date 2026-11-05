@@ -175,6 +175,8 @@ struct ConfigView {
     bool wifiPasswordSet = false;  // passwords are never exposed
     bool apPasswordDefault = true;
     bool https = true;  // web interface over HTTPS (applied after restart)
+    // Wi-Fi, access point or HTTPS settings differ from the ones the bridge started with.
+    bool networkRestartPending = false;
     bool unsaved = false;
     std::uint8_t ftmsOutputServices = 0;
     std::uint8_t antOutputServices = 0;
