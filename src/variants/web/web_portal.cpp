@@ -3,9 +3,9 @@
 #include "web_portal.h"
 
 #include <Arduino.h>
-#include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <esp_heap_caps.h>
 #include <esp_http_server.h>
 #include <esp_https_server.h>
@@ -18,8 +18,10 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <vector>
 
 #include "generated/web_assets.h"
+#include "captive_dns.h"
 #include "config_store.h"
 #include "tls_cert.h"
 #include "web_request.h"
@@ -31,6 +33,8 @@
 
 namespace {
 constexpr std::uint16_t kDnsPort = 53;
+constexpr int kDnsPacketsPerLoop = 4;
+constexpr std::size_t kMaxDnsQuery = 512;
 constexpr std::uint32_t kPolicyIntervalMs = 1000;
 // Each TLS session holds ~35 kB (mbedTLS record buffers), in PSRAM when present (see useTlsPsram).
 constexpr std::size_t kMaxHttpsSockets = 4;
@@ -163,7 +167,9 @@ struct WebPortal::Impl {
     httpd_handle_t server = nullptr;    // UI, REST API and WebSocket (HTTPS on 443, or HTTP on 80)
     httpd_handle_t redirect = nullptr;  // HTTPS mode only: port 80 -> HTTPS
     web::TlsIdentity tls;
-    DNSServer dns;
+    WiFiUDP dns;
+    web::CaptiveDns captiveDns;
+    std::vector<std::uint8_t> dnsReply;
     bool dnsRunning = false;
     bool mdnsRunning = false;
     bool scanPending = false;
@@ -535,8 +541,8 @@ void WebPortal::applyMode(WifiMode mode) {
                 DBG_SERIAL.println("[WiFi] access point retry failed");
         }
         if (impl_ && !impl_->dnsRunning) {
-            impl_->dns.setErrorReplyCode(DNSReplyCode::NoError);
-            impl_->dnsRunning = impl_->dns.start(kDnsPort, "*", WiFi.softAPIP());
+            impl_->dnsRunning = impl_->dns.begin(kDnsPort);
+            if (!impl_->dnsRunning) DBG_SERIAL.println("[WiFi] captive DNS start failed");
         }
         DBG_SERIAL.printf("[WiFi] access point \"%s\" (password configured) at %s%s/\n", apSsid_.c_str(),
                       https_ ? "https://" : "http://", WiFi.softAPIP().toString().c_str());
@@ -600,6 +606,30 @@ void WebPortal::updateWifiScan(std::uint32_t now) {
     logMemory("after Wi-Fi scan");
 }
 
+void WebPortal::processDns() {
+    web::CaptiveDns& captive = impl_->captiveDns;
+    captive.hostname = kHostname;
+    const IPAddress ip = WiFi.softAPIP();
+    captive.address = {ip[0], ip[1], ip[2], ip[3]};
+    captive.answerAll = !https_;
+    std::uint8_t query[kMaxDnsQuery];
+    for (int packet = 0; packet < kDnsPacketsPerLoop; ++packet) {
+        const int size = impl_->dns.parsePacket();
+        if (size <= 0) return;
+        if (static_cast<std::size_t>(size) > sizeof(query)) {
+            impl_->dns.flush();
+            continue;
+        }
+        const int length = impl_->dns.read(query, sizeof(query));
+        impl_->dns.flush();
+        if (length <= 0 || !captive.reply(query, static_cast<std::size_t>(length), impl_->dnsReply)) continue;
+        if (impl_->dns.beginPacket(impl_->dns.remoteIP(), impl_->dns.remotePort())) {
+            impl_->dns.write(impl_->dnsReply.data(), impl_->dnsReply.size());
+            impl_->dns.endPacket();
+        }
+    }
+}
+
 NetworkStatus WebPortal::networkStatus() const {
     NetworkStatus status;
     status.mode = wifiModeName(applied_);
@@ -660,7 +690,7 @@ void WebPortal::loop() {
     impl_->publishDebug();
 #endif
     updateWifiScan(now);
-    if (impl_->dnsRunning) impl_->dns.processNextRequest();
+    if (impl_->dnsRunning) processDns();
     if (now - lastPolicyMs_ >= kPolicyIntervalMs) {
         lastPolicyMs_ = now;
         const int stations = applied_ != WifiMode::Sta ? WiFi.softAPgetStationNum() : 0;

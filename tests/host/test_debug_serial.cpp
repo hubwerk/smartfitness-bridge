@@ -39,6 +39,7 @@ void reset() {
     fake::emitNestedLog = false;
     fake::file.clear();
     fake::partition.assign(fake::partition.size(), 0xff);
+    fake::partition.front() = 0;  // formatted filesystem
     Serial.output.clear();
 }
 
@@ -108,13 +109,16 @@ void testMountAndBoot() {
     pump();
     assert(fake::flushes == flushesBefore);  // No filesystem activity when idle.
 
+    // Erased partition (first flash, factory reset): formatted before the only mount attempt.
     reset();
     fake::mounted = false;
+    fake::partition.front() = 0xff;
     debugweb::begin();
-    assert(fake::formats == 1 && fake::mounts == 2 && writable);
+    assert(fake::formats == 1 && fake::mounts == 1 && writable);
 
     reset();
     fake::mounted = false;
+    fake::partition.front() = 0xff;
     fake::partition.back() = 0;  // Check ALL of the partition, not just a header.
     fake::file = "preserve corrupted filesystem";
     debugweb::begin();

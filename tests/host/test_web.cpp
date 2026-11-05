@@ -23,6 +23,7 @@
 #include "ftms_output.h"
 #include "web_api.h"
 #include "bridge_controller.h"
+#include "captive_dns.h"
 #include "web_json.h"
 #include "web_request.h"
 #include "wifi_policy.h"
@@ -931,6 +932,93 @@ void testBodyReceipt() {
     assert(body.invalid);
 }
 
+std::vector<std::uint8_t> dnsQuery(const std::string& name, std::uint16_t type = 1, std::uint16_t id = 0x1234) {
+    std::vector<std::uint8_t> query{static_cast<std::uint8_t>(id >> 8), static_cast<std::uint8_t>(id), 0x01, 0x00,
+                                    0, 1, 0, 0, 0, 0, 0, 0};
+    std::size_t start = 0;
+    while (start <= name.size()) {
+        const std::size_t dot = std::min(name.find('.', start), name.size());
+        query.push_back(static_cast<std::uint8_t>(dot - start));
+        query.insert(query.end(), name.begin() + start, name.begin() + dot);
+        start = dot + 1;
+    }
+    query.push_back(0);
+    query.push_back(static_cast<std::uint8_t>(type >> 8));
+    query.push_back(static_cast<std::uint8_t>(type));
+    query.push_back(0);
+    query.push_back(1);
+    return query;
+}
+
+void testCaptiveDns() {
+    web::CaptiveDns dns;
+    dns.hostname = "smartfitness";
+    dns.address = {192, 168, 4, 1};
+
+    // HTTPS off: classic captive portal, every name resolves.
+    dns.answerAll = true;
+    assert(dns.resolves("api.example.com") && dns.resolves("smartfitness.local"));
+
+    // HTTPS on: only the bridge and OS connectivity probes resolve.
+    dns.answerAll = false;
+    assert(dns.resolves("smartfitness") && dns.resolves("SmartFitness.Local.") &&
+           dns.resolves("connectivitycheck.gstatic.com") && dns.resolves("captive.apple.com") &&
+           dns.resolves("www.msftconnecttest.com") && dns.resolves("detectportal.firefox.com"));
+    assert(!dns.resolves("www.google.com") && !dns.resolves("mtalk.google.com") && !dns.resolves("") &&
+           !dns.resolves("evil-smartfitness.local") && !dns.resolves("captive.apple.com.evil"));
+
+    std::vector<std::uint8_t> reply;
+    auto query = dnsQuery("CoNnEcTiViTyChEcK.gstatic.com");
+    assert(dns.reply(query.data(), query.size(), reply));
+    assert(reply.size() == query.size() + 16);
+    assert(reply[0] == 0x12 && reply[1] == 0x34 && reply[2] == 0x85 && reply[3] == 0x00);
+    assert(reply[5] == 1 && reply[7] == 1 && reply[9] == 0 && reply[11] == 0);
+    assert(std::equal(query.begin() + 12, query.end(), reply.begin() + 12));  // question echoed (0x20 case)
+    const std::vector<std::uint8_t> answer(reply.end() - 16, reply.end());
+    assert((answer == std::vector<std::uint8_t>{0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 168, 4, 1}));
+
+    // Foreign names: NXDOMAIN without answer, so no TLS connection reaches the bridge.
+    query = dnsQuery("graph.facebook.com", 1, 0xbeef);
+    assert(dns.reply(query.data(), query.size(), reply));
+    assert(reply.size() == query.size() && reply[0] == 0xbe && reply[1] == 0xef);
+    assert(reply[3] == 3 && reply[7] == 0);
+    dns.answerAll = true;
+    assert(dns.reply(query.data(), query.size(), reply) && reply[3] == 0 && reply[7] == 1);
+    dns.answerAll = false;
+
+    // Known name, AAAA: empty NOERROR reply.
+    query = dnsQuery("smartfitness.local", 28);
+    assert(dns.reply(query.data(), query.size(), reply) && reply[3] == 0 && reply[7] == 0 &&
+           reply.size() == query.size());
+
+    // EDNS additional record is accepted and not echoed.
+    query = dnsQuery("smartfitness");
+    query[11] = 1;
+    const std::size_t questionEnd = query.size();
+    query.insert(query.end(), {0, 0, 41, 0x10, 0, 0, 0, 0, 0, 0, 0});
+    assert(dns.reply(query.data(), query.size(), reply) && reply.size() == questionEnd + 16 && reply[11] == 0);
+
+    // Malformed or non-query packets are dropped.
+    query = dnsQuery("smartfitness");
+    assert(!dns.reply(query.data(), 12, reply) && reply.empty());
+    assert(!dns.reply(nullptr, 0, reply));
+    auto bad = query;
+    bad[2] |= 0x80;  // response
+    assert(!dns.reply(bad.data(), bad.size(), reply));
+    bad = query;
+    bad[2] |= 0x28;  // opcode 5 (update)
+    assert(!dns.reply(bad.data(), bad.size(), reply));
+    bad = query;
+    bad[5] = 2;  // two questions
+    assert(!dns.reply(bad.data(), bad.size(), reply));
+    bad = query;
+    bad[12] = 0xc0;  // compression pointer in the question
+    assert(!dns.reply(bad.data(), bad.size(), reply));
+    bad = query;
+    bad.resize(bad.size() - 2);  // truncated QCLASS
+    assert(!dns.reply(bad.data(), bad.size(), reply));
+}
+
 }  // namespace
 
 void runWebTests() {
@@ -950,4 +1038,5 @@ void runWebTests() {
     testRequestProtection();
     testBodyReceipt();
     testHttpsRedirect();
+    testCaptiveDns();
 }

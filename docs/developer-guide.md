@@ -245,7 +245,9 @@ previous Arduino `default_16MB.csv`: two 6400-KiB app slots, unchanged NVS and
 coredump, and a **3456-KiB filesystem** at `0xc90000`. This leaves ample room for
 the log and filesystem metadata. Web assets remain embedded in firmware, so
 they do not consume filesystem space. The web environment selects LittleFS;
-startup checks free space and warns if the full log cannot fit.
+an erased (blank) partition is formatted before it is mounted, a partition with
+data that fails to mount is never formatted (Serial only). Startup checks free
+space and warns if the full log cannot fit.
 Without `DEBUG_WEB`, no logger, filesystem mounting, debug assets or debug
 endpoint is compiled in; Serial output and the existing flash layout are unchanged.
 CI builds the web firmware both with and without this flag, plus the normal HMI variant.
@@ -465,6 +467,15 @@ Wi-Fi/AP edits require a restart to change the running network; factory reset re
   **HTTPS on port 443** (ESP-IDF `esp_https_server`, TLS 1.2). Port 80 only answers
   with `302` redirects to the same path on HTTPS; captive-portal probes and foreign
   hosts are sent to `https://<SoftAP IP>/`.
+- Captive DNS on the SoftAP: with HTTPS off every name resolves to the SoftAP IP.
+  With HTTPS on only `smartfitness`/`smartfitness.local` and the plain-HTTP
+  connectivity probes of Android, Apple, Windows, Firefox and Linux
+  (`connectivitycheck.gstatic.com`, `captive.apple.com`, `www.msftconnecttest.com`,
+  ...) resolve; all other names get `NXDOMAIN`. Otherwise every background HTTPS
+  connection of a joined phone ends at the bridge, fails the certificate check
+  (Serial: `mbedtls_ssl_handshake returned -0x7780`) and the handshake flood
+  exhausts CPU and internal RAM (`esp-aes: Failed to allocate memory`,
+  `could not send data: 12`). See `include/variants/web/captive_dns.h`.
 - On first boot each bridge generates its own **ECDSA P-256** key and a
   **self-signed** X.509 v3 certificate with its hardware RNG (takes about a second;
   Serial shows `[Web] generating self-signed TLS certificate`). Subject/SAN:
