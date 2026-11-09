@@ -3,12 +3,12 @@
 #include <cmath>
 #include <optional>
 
+#include "units.hpp"
+
 namespace smartfitness {
 namespace ant {
 namespace fec {
 namespace {
-
-constexpr float kPi = 3.14159265358979323846F;
 
 std::uint32_t clampRound(float value, std::uint32_t maximum) {
     if (!std::isfinite(value) || value <= 0.0F) return 0;
@@ -50,7 +50,7 @@ public:
     // Grade in % from the incline, else from the ramp angle.
     std::optional<float> incline() const {
         if (const auto grade = get(Metric::Incline)) return grade;
-        if (const auto angle = get(Metric::RampAngle)) return std::tan(*angle * kPi / 180.0F) * 100.0F;
+        if (const auto angle = get(Metric::RampAngle)) return std::tan(*angle * units::kPi / 180.0F) * 100.0F;
         return std::nullopt;
     }
     // kcal/h from the hourly rate, else from the per-minute rate.

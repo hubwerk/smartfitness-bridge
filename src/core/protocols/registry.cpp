@@ -79,7 +79,7 @@ bool matchesFtms(const ble::Advertisement& advertisement) { return hasFtms(adver
 bool matchesCps(const ble::Advertisement& advertisement) {
     return advertisement.hasService(sensors::kCyclingPowerService);
 }
-bool matchesCsc(const ble::Advertisement& advertisement) { return advertisement.hasService(sensors::kCscService); }
+bool matchesCsc(const ble::Advertisement& advertisement) { return advertisement.hasService(sensors::kCyclingSpeedCadenceService); }
 bool matchesHrs(const ble::Advertisement& advertisement) {
     return advertisement.hasService(sensors::kHeartRateService);
 }

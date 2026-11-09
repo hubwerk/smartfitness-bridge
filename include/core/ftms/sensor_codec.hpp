@@ -10,7 +10,6 @@ constexpr std::uint8_t kCps = 2;
 constexpr std::uint8_t kHr = 4;
 constexpr std::uint8_t kCsc = 8;
 constexpr std::uint8_t kRsc = 16;
-constexpr double kWheelCircumferenceMetres = 2.105;
 
 std::uint8_t effectiveServices(std::uint8_t raw, MachineProfile profile);
 

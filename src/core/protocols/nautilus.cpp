@@ -12,6 +12,8 @@
 #include <memory>
 #include <string>
 
+#include "units.hpp"
+
 namespace smartfitness {
 namespace protocols {
 namespace nautilus {
@@ -24,7 +26,6 @@ constexpr const char* kBowflexNotify[] = {
     "35ddd0a0-9803-11e3-9a8b-0002a5d5c51b", "6be8f580-9803-11e3-ab03-0002a5d5c51b",
     "a46a4a80-9803-11e3-8f3c-0002a5d5c51b", "b8066ec0-9803-11e3-8346-0002a5d5c51b",
     "d57cda20-9803-11e3-8426-0002a5d5c51b"};
-constexpr float kMile = 1.60934F;
 
 struct Service {
     const char* uuid;
@@ -153,7 +154,7 @@ bool decode(const Variant& variant, const std::uint8_t* data, std::size_t length
                 return true;
             }
             if (length != 14) return false;
-            set(out.speed, u16(data, 3) / 100.0F * (variant.layout == Layout::BikeMiles ? kMile : 1.0F));
+            set(out.speed, u16(data, 3) / 100.0F * (variant.layout == Layout::BikeMiles ? units::kMilesToKm : 1.0F));
             set(out.power, u16(data, 6) / 100.0F);
             setSigned(out.cadence, data[1]);
             return true;
@@ -183,14 +184,14 @@ bool decode(const Variant& variant, const std::uint8_t* data, std::size_t length
             if (v1) {
                 set(out.speed, u16(data, 7) / 10.0F);
             } else {
-                set(out.speed, u16(data, 3) / 100.0F * (variant.layout == Layout::EllipticalV2 ? kMile : 1.0F));
+                set(out.speed, u16(data, 3) / 100.0F * (variant.layout == Layout::EllipticalV2 ? units::kMilesToKm : 1.0F));
             }
             set(out.cadence, variant.layout == Layout::EllipticalV2 ? data[1] : data[5]);
             return true;
         }
         case Layout::Treadmill:
             if (length != 12) return false;
-            set(out.speed, u16(data, 3) * kMile / 100.0F);
+            set(out.speed, u16(data, 3) * units::kMilesToKm / 100.0F);
             if (!variant.t628) setSigned(out.incline, data[6]);
             return true;
         case Layout::Bowflex:

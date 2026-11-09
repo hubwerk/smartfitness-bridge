@@ -19,6 +19,7 @@
 #include <string>
 
 #include "ftms/ftms_codec.hpp"
+#include "units.hpp"
 
 namespace smartfitness {
 namespace protocols {
@@ -304,7 +305,9 @@ void EchelonStrideSource::onNotify(std::size_t, const std::uint8_t* data, std::s
     if (frame.reply) queueWrite(echelon_ext::svc(), echelon_ext::wr(), ble::Bytes(data, data + length));
     switch (frame.kind) {
         case echelon_ext::StrideFrame::Kind::Speed:
-            sample_.speed = {frame.speed * echelon_ext::kMilesToKm, true};
+            // Upstream multiplies the reported Stride speed by 1.60934 with its
+            // default sole_treadmill_miles = true, i.e. the console reports mph.
+            sample_.speed = {frame.speed * units::kMilesToKm, true};
             break;
         case echelon_ext::StrideFrame::Kind::Incline:
             sample_.incline = {frame.incline, true};

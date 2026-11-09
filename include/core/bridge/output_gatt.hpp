@@ -5,19 +5,20 @@
 
 #include <cstdint>
 #include <vector>
+#include "ble/sig_uuids.hpp"
 #include "bridge/output_services.hpp"
 #include "ftms/ftms_codec.hpp"
 
 namespace smartfitness {
 
 namespace gatt {
-constexpr std::uint16_t kCyclingPowerService = 0x1818;
-constexpr std::uint16_t kCyclingPowerMeasurement = 0x2A63;
+using ble::sig::kCyclingPowerService;
+using ble::sig::kCyclingPowerMeasurement;
 constexpr std::uint16_t kCyclingPowerFeature = 0x2A65;
-constexpr std::uint16_t kHeartRateService = 0x180D;
-constexpr std::uint16_t kHeartRateMeasurement = 0x2A37;
-constexpr std::uint16_t kCyclingSpeedCadenceService = 0x1816;
-constexpr std::uint16_t kCscMeasurement = 0x2A5B;
+using ble::sig::kHeartRateService;
+using ble::sig::kHeartRateMeasurement;
+using ble::sig::kCyclingSpeedCadenceService;
+using ble::sig::kCscMeasurement;
 constexpr std::uint16_t kCscFeature = 0x2A5C;
 constexpr std::uint16_t kRunningSpeedCadenceService = 0x1814;
 constexpr std::uint16_t kRscMeasurement = 0x2A53;
