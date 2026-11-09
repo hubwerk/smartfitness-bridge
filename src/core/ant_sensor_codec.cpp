@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "units.hpp"
+
 namespace smartfitness {
 namespace ant {
 namespace sensor {
@@ -49,7 +51,7 @@ void Encoder::update(const TrainerState& state, std::uint32_t nowMs) {
     const double cadence = rate(state_, Metric::Cadence, 60);
     const double speed = rate(state_, Metric::Speed, 3.6);
     crank_.advance(cadence, elapsed, clockMs_);
-    wheel_.advance(speed / kWheelCircumferenceM, elapsed, clockMs_);
+    wheel_.advance(speed / units::kWheelCircumferenceM, elapsed, clockMs_);
     beat_.advance(rate(state_, Metric::HeartRate, 60), elapsed, clockMs_);
     stride_.advance(cadence / 2, elapsed, clockMs_);
     if (state_.connected) {

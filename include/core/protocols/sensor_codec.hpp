@@ -7,15 +7,18 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "ble/sig_uuids.hpp"
+#include "units.hpp"
+
 namespace smartfitness {
 namespace sensors {
 
-constexpr std::uint16_t kCyclingPowerService = 0x1818;
-constexpr std::uint16_t kCyclingPowerMeasurement = 0x2A63;
-constexpr std::uint16_t kCscService = 0x1816;
-constexpr std::uint16_t kCscMeasurement = 0x2A5B;
-constexpr std::uint16_t kHeartRateService = 0x180D;
-constexpr std::uint16_t kHeartRateMeasurement = 0x2A37;
+using ble::sig::kCyclingPowerService;
+using ble::sig::kCyclingPowerMeasurement;
+using ble::sig::kCyclingSpeedCadenceService;
+using ble::sig::kCscMeasurement;
+using ble::sig::kHeartRateService;
+using ble::sig::kHeartRateMeasurement;
 
 struct RevolutionData {
     bool present = false;
@@ -63,10 +66,8 @@ private:
     float rpm_ = 0.0F;
 };
 
-constexpr float kDefaultWheelCircumferenceM = 2.105F;
-
 // Wheel rpm to km/h for the given circumference.
-inline float wheelSpeedKmh(float wheelRpm, float circumferenceM = kDefaultWheelCircumferenceM) {
+inline float wheelSpeedKmh(float wheelRpm, float circumferenceM = units::kWheelCircumferenceMF) {
     return wheelRpm * circumferenceM * 60.0F / 1000.0F;
 }
 

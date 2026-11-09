@@ -3,6 +3,8 @@
 #include <cmath>
 #include <initializer_list>
 
+#include "units.hpp"
+
 namespace smartfitness {
 namespace ftms {
 namespace {
@@ -280,8 +282,6 @@ std::vector<Bytes> encodeRecords(const RowerData& data, std::size_t maxLength) {
 
 namespace {
 
-constexpr float kPi = 3.14159265358979323846F;
-
 class StateReader {
 public:
     explicit StateReader(const TrainerState& state) : state_(state) {}
@@ -335,14 +335,14 @@ public:
     // Ramp angle from the reported value, else derived from the grade.
     std::optional<float> rampAngle() const {
         if (const auto angle = value(Metric::RampAngle)) return angle;
-        if (const auto grade = value(Metric::Incline)) return std::atan(*grade / 100.0F) * 180.0F / kPi;
+        if (const auto grade = value(Metric::Incline)) return std::atan(*grade / 100.0F) * 180.0F / units::kPi;
         return std::nullopt;
     }
     // Grade in % from the reported value, else derived from the ramp angle
     // (FTMS carries inclination and ramp angle only together).
     std::optional<float> incline() const {
         if (const auto grade = value(Metric::Incline)) return grade;
-        if (const auto angle = value(Metric::RampAngle)) return std::tan(*angle * kPi / 180.0F) * 100.0F;
+        if (const auto angle = value(Metric::RampAngle)) return std::tan(*angle * units::kPi / 180.0F) * 100.0F;
         return std::nullopt;
     }
     // Pace in s/500 m from the reported value, else derived from a speed.

@@ -462,7 +462,7 @@ std::size_t VendorBikeSource::buildPlan(ble::ConnectPlan& plan, Kind* kinds) con
     if (r.flags & vendor_bikes::kCps)
         add(ble::Uuid::from16(sensors::kCyclingPowerService), ble::Uuid::from16(sensors::kCyclingPowerMeasurement), Power);
     if (r.flags & vendor_bikes::kCsc)
-        add(ble::Uuid::from16(sensors::kCscService), ble::Uuid::from16(sensors::kCscMeasurement), Csc);
+        add(ble::Uuid::from16(sensors::kCyclingSpeedCadenceService), ble::Uuid::from16(sensors::kCscMeasurement), Csc);
     if (r.flags & vendor_bikes::kHr)
         add(ble::Uuid::from16(sensors::kHeartRateService), ble::Uuid::from16(sensors::kHeartRateMeasurement), HeartRate);
     if (r.flags & vendor_bikes::kNus) add(u(vendor_bikes::kNusService), u(vendor_bikes::kNusNotify), Nus);

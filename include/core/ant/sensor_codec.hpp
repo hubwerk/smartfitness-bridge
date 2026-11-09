@@ -7,8 +7,6 @@ namespace smartfitness {
 namespace ant {
 namespace sensor {
 
-constexpr double kWheelCircumferenceM = 2.105;
-
 // Synthetic event clocks retain their last event while stopped or unavailable.
 class Encoder {
 public:

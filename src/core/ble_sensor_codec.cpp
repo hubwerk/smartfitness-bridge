@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "units.hpp"
+
 namespace smartfitness {
 namespace ble {
 namespace {
@@ -76,7 +78,7 @@ std::uint16_t RevolutionCounter::eventTime(unsigned ticksPerSecond) const {
 }
 
 void SensorEncoder::update(const TrainerState& state, std::uint32_t nowMs) {
-    wheel_.update(nowMs, bounded(state.sample(Metric::Speed).value / 3.6 / kWheelCircumferenceMetres, 1000.0),
+    wheel_.update(nowMs, bounded(state.sample(Metric::Speed).value / 3.6 / units::kWheelCircumferenceM, 1000.0),
         cycling(state.profile) && usable(state, Metric::Speed) && state.sample(Metric::Speed).value >= 0);
     crank_.update(nowMs, bounded(state.sample(Metric::Cadence).value / 60.0, 1000.0),
         cycling(state.profile) && usable(state, Metric::Cadence) && state.sample(Metric::Cadence).value >= 0);

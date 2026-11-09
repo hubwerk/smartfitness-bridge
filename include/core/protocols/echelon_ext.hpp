@@ -32,9 +32,6 @@ constexpr int kRowerMinResistance = 1;
 constexpr int kRowerMaxResistance = 32;
 constexpr std::size_t kRowerFrameLength = 21;
 constexpr float kStrideMaxIncline = 15.0F;
-// Upstream multiplies the reported Stride speed by 1.60934 with its default
-// sole_treadmill_miles = true, i.e. the console reports mph.
-constexpr float kMilesToKm = 1.60934F;
 
 // f0 <bytes...> <8-bit sum>
 Bytes withChecksum(Bytes frame);

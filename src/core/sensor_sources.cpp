@@ -51,7 +51,7 @@ void CyclingPowerSource::reset() {
 
 ble::ConnectPlan CscSource::plan() const {
     ble::ConnectPlan plan;
-    plan.subscribe(ble::Uuid::from16(sensors::kCscService), ble::Uuid::from16(sensors::kCscMeasurement));
+    plan.subscribe(ble::Uuid::from16(sensors::kCyclingSpeedCadenceService), ble::Uuid::from16(sensors::kCscMeasurement));
     return plan;
 }
 
