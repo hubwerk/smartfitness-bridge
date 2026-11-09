@@ -87,8 +87,6 @@ public:
     Page next(std::uint32_t serialNumber);
 
     void recordCommand(std::uint8_t pageNumber, CommandStatus status, const Page& command);
-    std::uint8_t lastCommandPage() const { return commandPage_; }
-    CommandStatus lastCommandStatus() const { return commandStatus_; }
     FeState state() const;
 
 private:

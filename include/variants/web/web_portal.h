@@ -51,8 +51,6 @@ public:
     // Main loop: run queued API jobs, publish snapshots, Wi-Fi policy, DNS.
     void loop();
 
-    const std::string& apSsid() const { return apSsid_; }
-
 private:
     struct Impl;
     void applyMode(WifiMode mode);

@@ -564,8 +564,8 @@ void testApiExchange() {
 
     // Bounded queue: overflow returns 503 and is counted; the loop drains at most maxJobs per call.
     for (std::size_t index = 0; index < ApiExchange::kQueueCapacity; ++index)
-        assert(api.submit("save", "").status == 202);
-    const auto busy = api.submit("save", "");
+        assert(api.submit("disconnect", "").status == 202);
+    const auto busy = api.submit("disconnect", "");
     assert(busy.status == 503 && api.droppedRequests() == 1);
     assert(api.process(rig.ui, 2).size() == 2);
     assert(api.process(rig.ui, 100).size() == ApiExchange::kQueueCapacity - 2);
@@ -573,7 +573,7 @@ void testApiExchange() {
     // Result ring keeps the latest kResultCapacity entries.
     assert(api.result(id).status == 200);
     for (std::size_t index = 0; index < ApiExchange::kResultCapacity; ++index) {
-        assert(api.submit("save", "").status == 202);
+        assert(api.submit("disconnect", "").status == 202);
         api.process(rig.ui);
     }
     assert(api.result(id).status == 404);

@@ -119,7 +119,6 @@ bool parseApiRequest(const std::string& endpoint, const std::string& body, std::
     static const NoBody kNoBody[] = {
         {"unpair", CommandType::Unpair},   {"connect", CommandType::Connect},
         {"disconnect", CommandType::Disconnect}, {"simulate", CommandType::Simulate},
-        {"save", CommandType::Save},       {"load", CommandType::Load},
         {"factory-reset", CommandType::FactoryReset}, {"restart", CommandType::Restart},
     };
     for (const auto& entry : kNoBody) {

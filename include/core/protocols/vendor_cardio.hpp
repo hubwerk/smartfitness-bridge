@@ -132,7 +132,6 @@ public:
     TrainerCapabilities capabilities() const override;
     void reset() override;
     vendor_cardio::Kind kind() const { return kind_; }
-    std::size_t backlog() const { return backlog_.size(); }
 
 private:
     struct Pending {
@@ -152,7 +151,6 @@ private:
     void proformPoll();
     void smartRowNotify(const std::uint8_t* data, std::size_t length, std::uint32_t nowMs);
     bool ypooFtmsGroup() const;
-    bool ypooProprietary() const;
 
     vendor_cardio::Kind kind_;
     std::vector<Pending> backlog_;

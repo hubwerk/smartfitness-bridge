@@ -527,6 +527,5 @@ void AntOutput::sendNextPage(std::uint8_t channel) {
     }
     const std::uint8_t response = acknowledged ? msg::kAcknowledgedData : msg::kBroadcastData;
     if (!send(encodeMessage(response, channel, page))) return;
-    lastPage_ = page;
     ++pagesSent_;
 }

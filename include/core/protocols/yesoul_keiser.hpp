@@ -19,7 +19,6 @@ namespace yesoul {
 constexpr std::uint16_t kService = 0xFFF0;
 constexpr std::uint16_t kWrite = 0xFFF1;
 constexpr std::uint16_t kNotify = 0xFFF4;
-constexpr std::uint16_t kManufacturerId = 637;
 
 ble::Bytes initFrame();
 
