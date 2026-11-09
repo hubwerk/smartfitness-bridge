@@ -31,12 +31,6 @@ constexpr std::uint16_t kStepClimberDataUuid = 0x2ACF;
 constexpr std::uint16_t kStairClimberDataUuid = 0x2AD0;
 constexpr std::uint16_t kRowerDataUuid = 0x2AD1;
 
-// Indoor Bike Data flags (bit 0 "More Data" is inverted: 0 means speed is present).
-constexpr std::uint16_t kBikeFlagMoreData = 1U << 0;
-constexpr std::uint16_t kBikeFlagCadence = 1U << 2;
-constexpr std::uint16_t kBikeFlagPower = 1U << 6;
-constexpr std::uint16_t kBikeFlagHeartRate = 1U << 9;
-
 // Fitness Machine Features field.
 constexpr std::uint32_t kFeatureAverageSpeed = 1U << 0;
 constexpr std::uint32_t kFeatureCadence = 1U << 1;

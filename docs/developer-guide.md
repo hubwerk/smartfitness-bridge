@@ -783,8 +783,8 @@ service masks, which must be integers when supplied.
 `{}` or only `{"save":false}` is rejected
 as “no settings given”. See the schema table for string limits; the command layer
 requires a nonempty FTMS name (1–20), although the persisted schema permits empty.
-`/api/save` and `/api/load` are **not HTTP routes**, even though the shared parser
-recognizes those command names; use `{"save":true}` at `/api/config` or Serial.
+There are no `/api/save` or `/api/load` routes; use `{"save":true}` at
+`/api/config` or the Serial `save`/`load` commands.
 
 ### Output service selection
 

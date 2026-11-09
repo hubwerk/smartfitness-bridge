@@ -71,7 +71,6 @@ public:
     const smartfitness::ftms::Bytes& lastControlResponse() const;
     const smartfitness::ftms::Bytes& lastMachineStatus() const;
     const smartfitness::ftms::Bytes& feature() const;
-    smartfitness::ftms::Bytes speedRange() const;
 
     using Clock = std::function<std::uint32_t()>;
     void setClock(Clock clock);

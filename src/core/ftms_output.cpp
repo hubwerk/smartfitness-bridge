@@ -305,7 +305,6 @@ const ftms::Bytes& FtmsOutput::lastMachineData(MachineProfile profile) const {
 const ftms::Bytes& FtmsOutput::lastControlResponse() const { return response_; }
 const ftms::Bytes& FtmsOutput::lastMachineStatus() const { return status_; }
 const ftms::Bytes& FtmsOutput::feature() const { return feature_; }
-ftms::Bytes FtmsOutput::speedRange() const { return ftms::encodeSupportedSpeedRange(); }
 void FtmsOutput::setClock(Clock clock) { clock_ = std::move(clock); }
 
 std::uint32_t FtmsOutput::now() const {

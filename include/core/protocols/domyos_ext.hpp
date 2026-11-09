@@ -116,7 +116,6 @@ public:
     domyos_ext::Kind kind() const { return kind_; }
     bool initialized() const { return ready(); }
     bool waiting() const { return waiting_; }
-    std::size_t queuedSteps() const { return pending_.size(); }
 
 private:
     static constexpr std::size_t kMaxPending = 24;

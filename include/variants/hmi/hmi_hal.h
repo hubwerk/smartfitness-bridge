@@ -25,7 +25,6 @@ public:
     // Turns the backlight off after `timeoutS` seconds without input (0 =
     // never). The first input after that only wakes the screen.
     void updateScreenTimeout(std::uint16_t timeoutS);
-    bool asleep() const { return asleep_; }
     void wake();
 
     // LED ring (SF_HMI_LED_RING): status colour or off.

@@ -21,7 +21,6 @@ public:
     static constexpr std::uint32_t kResponseTimeoutMs = 500;
     static constexpr std::uint32_t kRetryMs = 2000;
     static constexpr std::uint32_t kDisplaySeenMs = 5000;
-    static constexpr std::uint8_t kChannel = 0;
     static constexpr std::uint8_t kNetwork = 0;
 
     // The radio; without one ANT+ output is unavailable.
@@ -55,7 +54,6 @@ public:
     bool controlActive() const;
     const char* hardware() const;
     std::uint32_t pagesSent() const { return pagesSent_; }
-    const smartfitness::ant::Page& lastPage() const { return lastPage_; }
 
     using Clock = std::function<std::uint32_t()>;
     void setClock(Clock clock);
@@ -126,6 +124,5 @@ private:
     std::array<PendingRequest, kMaxPendingRequests> pending_{};
     std::size_t pendingCount_ = 0;
     std::uint32_t pagesSent_ = 0;
-    smartfitness::ant::Page lastPage_{};
     Clock clock_;
 };

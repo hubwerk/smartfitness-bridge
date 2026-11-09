@@ -726,9 +726,6 @@ MachineProfile VendorCardioSource::profile() const {
 }
 
 bool VendorCardioSource::ypooFtmsGroup() const { return vc::isYpooFtmsGroup(kind_); }
-bool VendorCardioSource::ypooProprietary() const {
-    return kind_ == Kind::YpooU3 || kind_ == Kind::YpooIconsole || kind_ == Kind::YpooGymstick;
-}
 
 ble::ConnectPlan VendorCardioSource::plan() const {
     ble::ConnectPlan p;
