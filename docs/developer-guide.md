@@ -268,6 +268,22 @@ pio device monitor -b 115200
 
 Serial is **115200 baud** (web variant: UART port; HMI variant: USB CDC); it prints
 boot/configuration and Wi-Fi information.
+
+### Release builds
+
+Pushing a tag `v*` (e.g. `git tag v0.1.0 && git push origin v0.1.0`) runs
+`.github/workflows/release.yml`: it builds all CI variants and creates a GitHub
+release with one ZIP per variant (tags containing `-`, e.g. `v0.2.0-rc1`, become
+pre-releases). Each ZIP contains `factory.bin` for blank boards plus the separate
+images:
+
+```sh
+esptool.py --chip esp32s3 write_flash 0x0 factory.bin
+# or: 0x0 bootloader.bin 0x8000 partitions.bin 0xe000 boot_app0.bin 0x10000 firmware.bin
+```
+
+Flashing `factory.bin` at `0x0` does not erase NVS or the filesystem; use
+`esptool.py erase_flash` first for a clean start.
 An external ANT radio is **optional** on the web variant: BLE FTMS works without
 it. The web variant defaults to a USB ANT+ stick (with USB-OTG adapter), or can
 use a UART ANT module when its build flags are configured. See
@@ -1415,7 +1431,7 @@ green CI as hardware validation.
 - Further ANT+ hardware validation: UART ANT module, sensor channels and other
   displays/apps such as Zwift (USB stick → Garmin fenix 6 Pro FE-C is verified).
 - More qdomyos-zwift device ports with attribution and byte-sample tests.
-- OTA updates and CI release builds with downloadable firmware.
+- OTA updates.
 
 ## License and attribution
 
