@@ -95,8 +95,8 @@ release notes before relying on this.)
 Real equipment requires a BLE central while the FTMS output is a peripheral.
 The web portal also needs Wi-Fi on the same ESP32-S3 radio. NimBLE-Arduino 1.4.3
 uses the Arduino-ESP32 core 2.0.17 API baseline; NimBLE 2.x needs core 3.x.
-`platformio.ini` pins NimBLE 1.4.3 but leaves the `espressif32` platform unpinned,
-so it does not independently lock the core to 2.0.17.
+`platformio.ini` pins NimBLE 1.4.3 and the `espressif32@7.1.3` platform, which
+ships Arduino core 2.0.17 (8.x moved to core 3.x).
 
 ### Decision
 - Share one NimBLE stack between `NimbleCentral` and `FtmsOutput`, with
