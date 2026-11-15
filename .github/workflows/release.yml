@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - env: esp32s3dev
+            debug_web: false
+          - env: crowpanel128
+            debug_web: false
+          - env: esp32s3dev
+            debug_web: true
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.2.0 esptool==4.8.1
+      - name: Build firmware
+        env:
+          DEBUG_WEB: ${{ matrix.debug_web }}
+        run: |
+          if [ "$DEBUG_WEB" = true ]; then
+            sed -i 's/; -DDEBUG_WEB/-DDEBUG_WEB/' platformio.ini
+          fi
+          pio run -e ${{ matrix.env }}
+      - name: Package firmware
+        env:
+          NAME: smartfitness-bridge-${{ github.ref_name }}-${{ matrix.env }}${{ matrix.debug_web && '-debug' || '' }}
+          BUILD: .pio/build/${{ matrix.env }}
+        run: |
+          boot_app0=~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin
+          test -f "$boot_app0"
+          mkdir -p "dist/$NAME"
+          cp "$BUILD"/bootloader.bin "$BUILD"/partitions.bin "$BUILD"/firmware.bin "$boot_app0" "dist/$NAME/"
+          # Single image for blank boards: flash at offset 0x0.
+          esptool.py --chip esp32s3 merge_bin -o "dist/$NAME/factory.bin" \
+            --flash_mode keep --flash_freq keep --flash_size keep \
+            0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" \
+            0xe000 "$boot_app0" 0x10000 "$BUILD/firmware.bin"
+          (cd dist && zip -r "$NAME.zip" "$NAME")
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: release-${{ matrix.env }}${{ matrix.debug_web && '-debug' || '' }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=()
+          if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$TAG" dist/*.zip -R "$GITHUB_REPOSITORY" \
+            --title "$TAG" --generate-notes --verify-tag "${prerelease[@]}"

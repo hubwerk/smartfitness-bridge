@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/codeql.yml/badge.svg)](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/hubwerk/smartfitness-bridge?include_prereleases)](https://github.com/hubwerk/smartfitness-bridge/releases)
 
 The bridge reads supported fitness equipment over Bluetooth Low Energy (BLE) and
 forwards its measurements to a training app or display using Bluetooth FTMS.
