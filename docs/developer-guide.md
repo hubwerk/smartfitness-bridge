@@ -272,7 +272,9 @@ boot/configuration and Wi-Fi information.
 ### Release builds
 
 Pushing a tag `v*` (e.g. `git tag v0.1.0 && git push origin v0.1.0`) runs
-`.github/workflows/release.yml`: it builds all CI variants and creates a GitHub
+`.github/workflows/release.yml`. Without Git (e.g. from GitHub Mobile), open
+**Actions → Release → Run workflow**, select `main` and enter the new tag; the tag
+is created on that branch. The workflow builds all CI variants and creates a GitHub
 release with one ZIP per variant (tags containing `-`, e.g. `v0.2.0-rc1`, become
 pre-releases). Each ZIP contains `factory.bin` for blank boards plus the separate
 images:
