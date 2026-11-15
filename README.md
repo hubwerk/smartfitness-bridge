@@ -1,6 +1,7 @@
 # ESP32 Smart Fitness Bridge
 
 [![CI](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/codeql.yml/badge.svg)](https://github.com/hubwerk/smartfitness-bridge/actions/workflows/codeql.yml)
 
 The bridge reads supported fitness equipment over Bluetooth Low Energy (BLE) and
 forwards its measurements to a training app or display using Bluetooth FTMS.
