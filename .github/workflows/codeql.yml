@@ -1,0 +1,74 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            build-mode: manual
+          - language: python
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    env:
+      # Keep PlatformIO build output and fetched libraries outside the checkout
+      # so CodeQL only reports findings in this repository's own sources.
+      PLATFORMIO_WORKSPACE_DIR: ${{ github.workspace }}/../pio-workspace
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - if: matrix.build-mode == 'manual'
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+
+      - if: matrix.build-mode == 'manual'
+        uses: actions/cache@v4.2.4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-codeql-platformio-6.2.0-python-3.12-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-codeql-platformio-6.2.0-python-3.12-
+
+      - if: matrix.build-mode == 'manual'
+        name: Install PlatformIO and toolchains
+        run: |
+          python -m pip install platformio==6.2.0
+          pio pkg install -e esp32s3dev -e crowpanel128
+
+      - uses: github/codeql-action/init@v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+
+      - if: matrix.build-mode == 'manual'
+        name: Build firmware (web + HMI variants)
+        run: pio run -e esp32s3dev -e crowpanel128
+
+      - uses: github/codeql-action/analyze@v4.39.3
+        with:
+          category: /language:${{ matrix.language }}

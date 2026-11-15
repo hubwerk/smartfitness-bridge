@@ -276,12 +276,11 @@ use a UART ANT module when its build flags are configured. See
 **Optional host tests:** `make host-tests` (requires `make` and `g++` with C++17; on
 Windows, use WSL).
 
-**Troubleshooting:** `platform = espressif32` is unpinned, while NimBLE-Arduino
-1.4.3 requires Arduino core 2.0.x. If the build fails with NimBLE/`esp_` errors,
-pin a 6.x `espressif32` platform version that ships Arduino core 2.0.17 (check the
-[Dependency compatibility](#dependency-compatibility) section and platform release
-notes for the exact version), then run `pio run -t clean` and rebuild with
-`pio run -e esp32s3dev`.
+**Troubleshooting:** `platform = espressif32@7.1.3` is pinned because it ships
+Arduino core 2.0.17; `espressif32` 8.x ships core 3.x and breaks NimBLE 1.4.3, NVS
+and LovyanGFX builds. If the build fails with NimBLE/`esp_` errors, check that the
+pin is intact (see [Dependency compatibility](#dependency-compatibility)), then run
+`pio run -t clean` and rebuild with `pio run -e esp32s3dev`.
 
 ## HMI variant (CrowPanel 1.28")
 
@@ -1383,7 +1382,8 @@ and `.pio/` are gitignored; edit the HTML, not the generated header.
 
 | Dependency | Version / rationale |
 |---|---|
-| Arduino-ESP32 core | **2.0.17** compatibility baseline; supplied by the resolved `espressif32` platform, not directly pinned |
+| `espressif32` platform | **7.1.3**, pinned; last release line shipping Arduino-ESP32 core 2.0.17 (8.x ships core 3.x) |
+| Arduino-ESP32 core | **2.0.17** compatibility baseline; supplied by the pinned `espressif32` platform |
 | NimBLE-Arduino | **1.4.3**, pinned; 1.x APIs match core 2.0.17, NimBLE 2.x needs core 3.x |
 | ESP-IDF `esp_https_server` / mbedTLS | Part of core 2.0.17 (ESP-IDF 4.4, mbedTLS 2.28); HTTPS/WSS server and certificate generation |
 | ArduinoJson | **7.4.3**, pinned; web variant API JSON validation and rendering |
@@ -1391,8 +1391,8 @@ and `.pio/` are gitignored; edit the HTML, not the generated header.
 | LovyanGFX | **1.2.7**, pinned; HMI variant GC9A01 display driver, builds on core 2.0.17 |
 | Adafruit NeoPixel | **1.12.3**, pinned; HMI variant optional LED ring |
 
-`platform = espressif32` is **unpinned**; the library pins do not freeze the core
-or entire toolchain. Host tests use the vendored ArduinoJson header in
+`platform = espressif32@7.1.3` and the library pins freeze the core 2.0.17
+baseline. Host tests use the vendored ArduinoJson header in
 `tests/host/third_party`. CI installs PlatformIO **6.2.0** on Python 3.12 and runs
 host tests, the `esp32s3dev` and `crowpanel128` builds (firmware artifacts) and the
 HMI simulator screenshots for pushes/PRs to `main`. Do not interpret
