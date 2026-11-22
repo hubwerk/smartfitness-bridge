@@ -37,8 +37,18 @@ the board's 16 MB flash layout; do not select a different partition scheme.
 
 ### Web variant
 
-A short how-to video (English captions, simulated data, synthesised music) walks through these
-steps: [docs/web-howto.mp4](docs/web-howto.mp4).
+A three-minute [Full-HD how-to video](docs/web-howto.mp4) covers firmware installation,
+secure Wi-Fi setup, device pairing, app connection, training controls and optional
+ANT+ output. All captions are English. The real web interface is shown with offline
+demo fixtures, not a hardware recording. The original 128 BPM electronic soundtrack
+is synthesised without third-party music or samples and dedicated under
+[CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+To regenerate the video, install `scripts/requirements-video.txt` in a Python virtual
+environment, run `python -m playwright install chromium`, then
+`python scripts/web_howto.py`. The render includes chapter markers; use
+`--previews <directory>` to also export stills for review. Typography uses the
+repository's Antonio font ([SIL Open Font License](assets/fonts/OFL.txt)).
 
 1. After flashing, connect to the Wi-Fi access point named `SmartFitness-XXXX`.
    Its initial password is `smartfitness`; change it before normal use.
