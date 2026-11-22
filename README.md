@@ -37,6 +37,9 @@ the board's 16 MB flash layout; do not select a different partition scheme.
 
 ### Web variant
 
+A short how-to video (German captions, simulated data) walks through these
+steps: [docs/web-howto.mp4](docs/web-howto.mp4).
+
 1. After flashing, connect to the Wi-Fi access point named `SmartFitness-XXXX`.
    Its initial password is `smartfitness`; change it before normal use.
 2. Open `https://192.168.4.1/` and accept the browser warning for the
