@@ -37,7 +37,7 @@ the board's 16 MB flash layout; do not select a different partition scheme.
 
 ### Web variant
 
-A short how-to video (German captions, simulated data) walks through these
+A short how-to video (English captions, simulated data, synthesised music) walks through these
 steps: [docs/web-howto.mp4](docs/web-howto.mp4).
 
 1. After flashing, connect to the Wi-Fi access point named `SmartFitness-XXXX`.
